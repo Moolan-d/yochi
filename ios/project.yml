@@ -16,6 +16,11 @@ targets:
     type: application
     platform: iOS
     sources: [Companion]
+    # Signing.xcconfig optionally includes the git-ignored Local.xcconfig
+    # (DEVELOPMENT_TEAM, BUNDLE_ID_SUFFIX); see README.
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     dependencies:
       - package: GhosttyTerminal
     info:
@@ -28,8 +33,26 @@ targets:
             CFBundleURLSchemes: [companion]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.companion.app
+        PRODUCT_BUNDLE_IDENTIFIER: dev.companion.app$(BUNDLE_ID_SUFFIX)
+        CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    scheme:
+      testTargets: [CompanionUITests]
+  CompanionUITests:
+    # Run through scripts/ui-test.sh, which starts a throwaway Gateway.
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [CompanionUITests]
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    dependencies:
+      - target: Companion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.companion.uitests$(BUNDLE_ID_SUFFIX)
+        GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"

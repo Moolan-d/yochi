@@ -221,7 +221,7 @@ struct GatewaySettingsView: View {
                     dismiss()
                     onForget()
                 }
-            } message: {
+                } message: {
                 Text("之后需要在主 Mac 上重新运行 companion-gateway pair 才能再次连接。")
             }
         }

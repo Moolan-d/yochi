@@ -1,0 +1,4 @@
+// Personal signing settings live in Local.xcconfig (git-ignored), e.g.
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   BUNDLE_ID_SUFFIX = .yourname   // a free Personal Team needs a bundle ID nobody else has
+#include? "Local.xcconfig"

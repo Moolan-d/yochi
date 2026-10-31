@@ -16,3 +16,10 @@ cd gateway && cargo run
 # iOS
 cd ios && scripts/fetch-libghostty.sh && xcodegen generate && open Companion.xcodeproj
 ```
+
+真机运行前，在 `ios/Local.xcconfig`（不进 git）里填签名团队；免费 Personal Team 还需要加一个 bundle ID 后缀：
+
+```
+DEVELOPMENT_TEAM = ABCDE12345
+BUNDLE_ID_SUFFIX = .yourname
+```
