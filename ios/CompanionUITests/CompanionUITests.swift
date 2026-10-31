@@ -37,9 +37,8 @@ final class CompanionUITests: XCTestCase {
         app.buttons["取消配对"].tap()
         XCTAssert(app.sheets["取消与此 Gateway 的配对？"].waitForExistence(timeout: 5))
         snapshot("5 unpair prompt")
-        // Backing out leaves the pairing alone; the popover has no Cancel button.
-        dismissPopover(app)
-        XCTAssert(app.buttons["取消配对"].exists, "backing out of the dialog dropped the pairing")
+        app.buttons["保留配对"].tap()
+        XCTAssert(app.staticTexts["设备 ID"].exists, "keeping the pairing dropped it")
         app.buttons["取消配对"].tap()
         confirm(app, "取消配对")
         XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 10), "pairing form did not return")
@@ -59,8 +58,9 @@ final class CompanionUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let open = springboard.buttons.matching(NSPredicate(format: "label IN {'打开', 'Open'}")).firstMatch
         waitForReplacePrompt(app, open: open)
-        dismissPopover(app)
-        XCTAssert(app.buttons["设置"].exists, "backing out of the dialog dropped the pairing")
+        app.buttons["保留当前配对"].tap()
+        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 5), "keeping the pairing dropped it")
+        XCTAssert(app.cells.buttons.firstMatch.exists, "sessions gone after keeping the pairing")
         XCUIDevice.shared.system.open(URL(string: "companion://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
         waitForReplacePrompt(app, open: open)
         snapshot("1 replace prompt")
@@ -88,14 +88,6 @@ final class CompanionUITests: XCTestCase {
         if let host { replace(app.textFields["地址"], with: host) }
         replace(app.textFields["配对码"], with: code)
         app.buttons["配对"].tap()
-    }
-
-    /// Taps outside the popover that stands in for a confirmation dialog.
-    @MainActor
-    private func dismissPopover(_ app: XCUIApplication) {
-        let region = app.otherElements["PopoverDismissRegion"]
-        XCTAssert(region.waitForExistence(timeout: 5), "no popover to dismiss")
-        region.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).tap()
     }
 
     @MainActor

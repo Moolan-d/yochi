@@ -56,6 +56,8 @@ struct ContentView: View {
                 forget()
                 invite = opened
             }
+            // iOS drops `.cancel` buttons from this popover, so keeping is a plain button.
+            Button("保留当前配对") {}
         } message: { _ in
             Text("此 iPhone 与 \(config?.host ?? "当前 Gateway") 的配对将被删除。")
         }
@@ -221,7 +223,8 @@ struct GatewaySettingsView: View {
                     dismiss()
                     onForget()
                 }
-                } message: {
+                Button("保留配对") {}
+            } message: {
                 Text("之后需要在主 Mac 上重新运行 companion-gateway pair 才能再次连接。")
             }
         }
