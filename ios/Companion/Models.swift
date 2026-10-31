@@ -12,6 +12,22 @@ struct Session: Decodable, Identifiable, Hashable {
     let status: Status?
     /// The last completed Agent turn, or zero when none has been reported.
     let turn: UInt64
+
+    private enum CodingKeys: String, CodingKey {
+        case id, machine, title, program, cwd, status, turn
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        machine = try c.decodeIfPresent(String.self, forKey: .machine)
+        title = try c.decode(String.self, forKey: .title)
+        program = try c.decodeIfPresent(String.self, forKey: .program)
+        cwd = try c.decode(String.self, forKey: .cwd)
+        status = try c.decodeIfPresent(Status.self, forKey: .status)
+        // A Gateway older than the Agent Message feature sends no turn.
+        turn = try c.decodeIfPresent(UInt64.self, forKey: .turn) ?? 0
+    }
 }
 
 struct Status: Decodable, Hashable {
