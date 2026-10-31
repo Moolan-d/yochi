@@ -61,7 +61,7 @@ final class TerminalObserver {
             if case .closed = phase { return }
             let status = (socket.response as? HTTPURLResponse)?.statusCode
             let reason = switch status {
-            case 401: "Token 不正确"
+            case 401: "配对已失效"
             case 404: "会话已不存在"
             default: error.localizedDescription
             }

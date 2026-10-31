@@ -2,14 +2,29 @@
 
 Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
-## v0（临时）
+## v0
 
-仅用于打通第一条链路，Device Pairing 落地后由 v1 取代，届时以 ADR 0003 记录传输与认证决定。
+传输与认证的取舍见 ADR 0003。
 
-- **连接**：`ws://<主 Mac 的 tailnet IPv4>:7420/v0/ws`。Gateway 只监听 tailnet 地址，不监听 LAN 或 localhost。
-- **认证**：HTTP 头 `Authorization: Bearer <token>`，token 来自 Gateway 启动参数 `COMPANION_TOKEN`（未设置时随机生成并打印）。不匹配时返回 `401`。所有设备共用一个 token，无法单独撤销，这是 v0 的已知缺口。
+- **连接**：所有接口都是 WebSocket，地址为 `ws://<主 Mac 的 tailnet IPv4>:7420/v0/…`。Gateway 只监听 tailnet 地址，不监听 LAN 或 localhost。
+- **认证**：除配对外，都需带 HTTP 头 `Authorization: Bearer <设备 token>`。token 无效或设备已被撤销时返回 `401`。设备被撤销后，它已建立的连接会在几秒内被关闭。
 - **加密**：明文 WebSocket，依赖 Tailscale（WireGuard）加密链路。
-- **消息**：Gateway → App 的 JSON 文本帧，App 暂不发送任何消息。
+
+### 配对（Device Pairing）
+
+`ws://<host>:7420/v0/pair`，不需要认证。配对码由主 Mac 上的 `companion-gateway pair` 生成：8 位，5 分钟内有效，单次使用，输错 5 次即作废。生成时同时显示二维码 `companion://pair?host=<host:port>&code=<code>`。比对配对码时不区分大小写，忽略 `-` 和空格，并把 O 视为 0、I 和 L 视为 1。
+
+```jsonc
+// App → Gateway，连接后 10 秒内发送
+{"type": "pair", "code": "ABCD-EFGH", "name": "iPhone"}
+// Gateway → App，随后关闭连接
+{"type": "paired", "device": "8653add4", "token": "<64 位十六进制>"}
+{"type": "rejected"}  // 配对码错误、过期或已作废
+```
+
+### 会话列表
+
+`ws://<host>:7420/v0/ws`。Gateway 向 App 推送 JSON 文本帧：
 
 ```jsonc
 // 连接建立后第一条
@@ -28,6 +43,8 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
 - 只包含 live 会话，finished 的不返回。
 - `cols` / `rows`：终端当前网格尺寸（上例省略）。
+
+App 可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后删除这台设备并关闭连接。
 
 ### 只读查看终端（Observer）
 

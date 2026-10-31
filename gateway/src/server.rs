@@ -1,8 +1,14 @@
-//! Companion API v0, authorized by a bearer token:
+//! Companion API v0, all WebSocket (iOS blocks plain HTTP to tailnet IPs, not
+//! `ws://`). `/v0/pair` trades a pairing code for a device token; the others
+//! need `Authorization: Bearer <device token>`:
 //! - `/v0/ws` pushes `hello`, then the whole session list whenever it changes.
+//!   The app may send `unpair` to remove itself.
 //! - `/v0/observe?session=<id>` streams one terminal read-only: control as text,
 //!   terminal bytes as binary messages.
+//!
+//! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
+use crate::devices::{Device, Store};
 use crate::herdr::CoreView;
 use crate::observe::{Observer, Output};
 use crate::session::Session;
@@ -17,15 +23,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tokio::sync::watch;
 
 pub const API_VERSION: u32 = 0;
 
 #[derive(Clone)]
 struct AppState {
-    token: Arc<str>,
     hc: Arc<str>,
     view: watch::Receiver<CoreView>,
+    store: Arc<Store>,
+    /// Paired devices, reloaded when the CLI changes the state file.
+    devices: Arc<watch::Sender<Vec<Device>>>,
 }
 
 #[derive(Serialize)]
@@ -39,11 +48,35 @@ enum ServerMessage<'a> {
     Size { cols: u16, rows: u16 },
     /// The stream ended; `reason` as the core gave it, or why attaching failed.
     Closed { reason: &'a Value },
+    /// Pairing succeeded; the token is this device's from now on.
+    Paired { device: &'a str, token: &'a str },
+    /// Wrong or expired pairing code.
+    Rejected,
 }
 
-pub async fn serve(listen: SocketAddr, token: String, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
-    let state = AppState { token: token.into(), hc: hc.into(), view };
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AppMessage {
+    Pair {
+        code: String,
+        #[serde(default)]
+        name: String,
+    },
+    /// Forget this device (the app's own "unpair").
+    Unpair,
+}
+
+pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
+    let devices = store.devices()?;
+    if devices.is_empty() {
+        eprintln!("No paired devices yet; pair a phone with `companion-gateway pair`.");
+    }
+    let store = Arc::new(store);
+    let devices = Arc::new(watch::Sender::new(devices));
+    tokio::spawn(reload_devices(store.clone(), devices.clone()));
+    let state = AppState { hc: hc.into(), view, store, devices };
     let app = Router::new()
+        .route("/v0/pair", get(pair))
         .route("/v0/ws", get(upgrade))
         .route("/v0/observe", get(observe))
         .with_state(state);
@@ -59,11 +92,78 @@ pub async fn serve(listen: SocketAddr, token: String, hc: String, view: watch::R
     Ok(())
 }
 
-async fn upgrade(State(state): State<AppState>, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
-    if !authorized(&headers, &state.token) {
-        return StatusCode::UNAUTHORIZED.into_response();
+/// Picks up `companion-gateway revoke` (and anything else that rewrites the state file).
+async fn reload_devices(store: Arc<Store>, devices: Arc<watch::Sender<Vec<Device>>>) {
+    let modified = || std::fs::metadata(store.path()).and_then(|meta| meta.modified()).ok();
+    let mut seen: Option<SystemTime> = modified();
+    loop {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let now = modified();
+        if now == seen {
+            continue;
+        }
+        seen = now;
+        match store.devices() {
+            Ok(current) => {
+                devices.send_if_modified(|devices| {
+                    let changed = *devices != current;
+                    *devices = current;
+                    changed
+                });
+            }
+            Err(err) => eprintln!("reloading paired devices: {err:#}"),
+        }
     }
-    ws.on_upgrade(move |socket| push(socket, state.view))
+}
+
+async fn pair(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| pairing(socket, state))
+}
+
+/// One attempt: the app sends `pair`, gets `paired` or `rejected`, and the socket closes.
+async fn pairing(mut socket: WebSocket, state: AppState) {
+    let Ok(Some(Ok(Message::Text(text)))) = tokio::time::timeout(Duration::from_secs(10), socket.recv()).await else {
+        return;
+    };
+    let Ok(AppMessage::Pair { code, name }) = serde_json::from_str(&text) else { return };
+    let name: String = name.chars().filter(|c| !c.is_control()).take(64).collect();
+    let name = match name.trim() {
+        "" => "iPhone".to_owned(),
+        name => name.to_owned(),
+    };
+    let store = state.store.clone();
+    let paired = tokio::task::spawn_blocking(move || store.pair(&code, &name)).await;
+    match paired.map_err(anyhow::Error::from).and_then(|paired| paired) {
+        Ok(Some((device, token))) => {
+            eprintln!("Paired {} ({})", device.name, device.id);
+            let id = device.id.clone();
+            state.devices.send_modify(|devices| devices.push(device));
+            let _ = send(&mut socket, &ServerMessage::Paired { device: &id, token: &token }).await;
+        }
+        Ok(None) => {
+            let _ = send(&mut socket, &ServerMessage::Rejected).await;
+        }
+        Err(err) => eprintln!("pairing: {err:#}"),
+    }
+    let _ = socket.send(Message::Close(None)).await;
+}
+
+async fn unpair(state: &AppState, id: &str) {
+    let store = state.store.clone();
+    let revoke = id.to_owned();
+    match tokio::task::spawn_blocking(move || store.revoke(&revoke)).await.map_err(anyhow::Error::from) {
+        Ok(Ok(Some(device))) => eprintln!("{} ({}) unpaired itself", device.name, device.id),
+        Ok(Ok(None)) => {}
+        Ok(Err(err)) | Err(err) => eprintln!("unpairing: {err:#}"),
+    }
+    state.devices.send_modify(|devices| devices.retain(|device| device.id != id));
+}
+
+async fn upgrade(State(state): State<AppState>, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
+    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    ws.on_upgrade(move |socket| push(socket, state, device))
 }
 
 #[derive(Deserialize)]
@@ -77,20 +177,20 @@ async fn observe(
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !authorized(&headers, &state.token) {
+    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
-    }
+    };
     let Some(size) = session_size(&state.view.borrow(), &query.session) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    ws.on_upgrade(move |socket| relay(socket, state, query.session, size))
+    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size))
 }
 
 fn session_size(view: &CoreView, id: &str) -> Option<(u16, u16)> {
     view.sessions.iter().find(|s| s.id == id).map(|s| (s.cols, s.rows))
 }
 
-async fn relay(mut socket: WebSocket, state: AppState, id: String, (cols, rows): (u16, u16)) {
+async fn relay(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
     let mut observer = match Observer::attach(&state.hc, &id, cols, rows).await {
         Ok(observer) => observer,
         Err(err) => {
@@ -109,6 +209,7 @@ async fn relay(mut socket: WebSocket, state: AppState, id: String, (cols, rows):
 
     let mut view = state.view.clone();
     view.mark_unchanged();
+    let mut devices = state.devices.subscribe();
     loop {
         tokio::select! {
             output = observer.next() => match output {
@@ -137,25 +238,31 @@ async fn relay(mut socket: WebSocket, state: AppState, id: String, (cols, rows):
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
+            () = unpaired(&mut devices, &device) => break,
         }
     }
     observer.detach().await;
 }
 
-fn authorized(headers: &HeaderMap, token: &str) -> bool {
-    let given = headers
+/// The paired device whose token the request carries.
+fn authorize(headers: &HeaderMap, devices: &[Device]) -> Option<String> {
+    let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .unwrap_or_default();
-    constant_time_eq(given.as_bytes(), token.as_bytes())
+        .and_then(|value| value.strip_prefix("Bearer "))?;
+    devices.iter().find(|device| device.holds(token)).map(|device| device.id.clone())
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0, |acc, (x, y)| acc | (x ^ y)) == 0
+/// Resolves once `device` is no longer paired.
+async fn unpaired(devices: &mut watch::Receiver<Vec<Device>>, device: &str) {
+    if devices.wait_for(|devices| !devices.iter().any(|d| d.id == device)).await.is_err() {
+        std::future::pending::<()>().await;
+    }
 }
 
-async fn push(mut socket: WebSocket, mut view: watch::Receiver<CoreView>) {
+async fn push(mut socket: WebSocket, state: AppState, device: String) {
+    let mut view = state.view.clone();
+    let mut devices = state.devices.subscribe();
     let hello = ServerMessage::Hello { api: API_VERSION, gateway: env!("CARGO_PKG_VERSION") };
     if send(&mut socket, &hello).await.is_err() {
         return;
@@ -175,11 +282,17 @@ async fn push(mut socket: WebSocket, mut view: watch::Receiver<CoreView>) {
         }
         tokio::select! {
             changed = view.changed() => if changed.is_err() { return },
-            // The app sends nothing yet; a close or error ends the connection.
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(AppMessage::Unpair) = serde_json::from_str(&text) {
+                        unpair(&state, &device).await;
+                        return;
+                    }
+                }
                 Some(Ok(_)) => {}
             },
+            () = unpaired(&mut devices, &device) => return,
         }
     }
 }
@@ -195,12 +308,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bearer_token_must_match() {
+    fn bearer_token_names_the_device() {
+        let dir = std::env::temp_dir().join(format!("companion-server-{}", std::process::id()));
+        let store = Store::open(dir.clone()).unwrap();
+        let code = store.offer().unwrap();
+        let (device, token) = store.pair(&code, "iPhone").unwrap().unwrap();
+        let devices = store.devices().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+
         let mut headers = HeaderMap::new();
-        assert!(!authorized(&headers, "secret"));
-        headers.insert(header::AUTHORIZATION, "Bearer secret".parse().unwrap());
-        assert!(authorized(&headers, "secret"));
-        headers.insert(header::AUTHORIZATION, "Bearer secreT".parse().unwrap());
-        assert!(!authorized(&headers, "secret"));
+        assert_eq!(authorize(&headers, &devices), None);
+        headers.insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
+        assert_eq!(authorize(&headers, &devices), Some(device.id));
+        headers.insert(header::AUTHORIZATION, "Bearer wrong".parse().unwrap());
+        assert_eq!(authorize(&headers, &devices), None);
     }
 }

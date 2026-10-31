@@ -50,11 +50,11 @@ struct SessionListView: View {
             }
         case .unauthorized:
             ContentUnavailableView {
-                Label("Token 不正确", systemImage: "key.slash")
+                Label("配对已失效", systemImage: "key.slash")
             } description: {
-                Text("Gateway 拒绝了此 Token。请填写 Gateway 启动时显示的 Token。")
+                Text("Gateway 不再接受此 iPhone，可能已在主 Mac 上移除了它的配对。")
             } actions: {
-                Button("重新填写", action: reenter)
+                Button("重新配对", action: reenter)
                     .buttonStyle(.borderedProminent)
             }
         case .connected where !client.coreConnected:
@@ -78,7 +78,7 @@ extension GatewayClient {
         case .connecting: "正在连接…"
         case .connected: coreConnected ? "已连接" : "herdr-core 不可用"
         case .failed(let reason): "连接失败：\(reason)"
-        case .unauthorized: "Token 不正确"
+        case .unauthorized: "配对已失效"
         }
     }
 }

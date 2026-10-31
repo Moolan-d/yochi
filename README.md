@@ -10,7 +10,7 @@
 ## 开发
 
 ```sh
-# Gateway
+# Gateway（另开一个终端运行 `cargo run -- pair` 配对手机）
 cd gateway && cargo run
 
 # iOS

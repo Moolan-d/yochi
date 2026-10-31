@@ -9,7 +9,7 @@ final class GatewayClient {
         case connecting
         case connected
         case failed(String)
-        /// The Gateway refused the token; retrying with it is pointless.
+        /// The Gateway no longer accepts this device (it was unpaired); retrying is pointless.
         case unauthorized
     }
 
@@ -35,6 +35,15 @@ final class GatewayClient {
         phase = .disconnected
     }
 
+    /// Asks the Gateway to forget this device, then disconnects. Only possible
+    /// while connected; otherwise `companion-gateway revoke` cleans up.
+    func unpair() async {
+        if phase == .connected, let socket {
+            try? await socket.send(.string(#"{"type":"unpair"}"#))
+        }
+        disconnect()
+    }
+
     private func run(_ config: GatewayConfig) async {
         guard let url = config.url else {
             phase = .failed("地址无效：\(config.host)")
@@ -48,6 +57,9 @@ final class GatewayClient {
             } catch {
                 if Task.isCancelled { return }
                 if (socket?.response as? HTTPURLResponse)?.statusCode == 401 {
+                    // Unpaired: what this device saw before is no longer its to show.
+                    sessions = []
+                    coreName = nil
                     phase = .unauthorized
                     return
                 }

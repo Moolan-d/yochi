@@ -1,20 +1,30 @@
 import Foundation
 import Security
 
-/// Where the Gateway is and the token it expects. The host lives in
-/// UserDefaults, the token in the Keychain.
+/// The paired Gateway: where it is, and this device's token for it. The host
+/// and device ID live in UserDefaults, the token in the Keychain.
 struct GatewayConfig: Equatable {
     static let defaultPort = 7420
 
     var host: String
     var token: String
+    /// The Gateway's ID for this device, as `companion-gateway devices` lists it.
+    var device: String?
 
     var url: URL? {
-        let address = host.contains(":") ? host : "\(host):\(Self.defaultPort)"
-        return URL(string: "ws://\(address)/v0/ws")
+        Self.endpoint(host: host, path: "/v0/ws")
+    }
+
+    static func endpoint(host: String, path: String) -> URL? {
+        URL(string: "ws://\(address(host))\(path)")
+    }
+
+    private static func address(_ host: String) -> String {
+        host.contains(":") ? host : "\(host):\(defaultPort)"
     }
 
     private static let hostKey = "gateway.host"
+    private static let deviceKey = "gateway.device"
     private static let tokenAccount = "gateway.token"
 
     static func load() -> GatewayConfig? {
@@ -27,16 +37,18 @@ struct GatewayConfig: Equatable {
         #endif
         guard let host = UserDefaults.standard.string(forKey: hostKey),
               let token = Keychain.read(tokenAccount) else { return nil }
-        return GatewayConfig(host: host, token: token)
+        return GatewayConfig(host: host, token: token, device: UserDefaults.standard.string(forKey: deviceKey))
     }
 
     func save() {
         UserDefaults.standard.set(host, forKey: Self.hostKey)
+        UserDefaults.standard.set(device, forKey: Self.deviceKey)
         Keychain.write(token, account: Self.tokenAccount)
     }
 
     static func clear() {
         UserDefaults.standard.removeObject(forKey: hostKey)
+        UserDefaults.standard.removeObject(forKey: deviceKey)
         Keychain.delete(tokenAccount)
     }
 }
