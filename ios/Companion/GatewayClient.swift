@@ -25,11 +25,29 @@ final class GatewayClient {
     private(set) var coreName: String?
     private(set) var coreConnected = false
     private(set) var sessions: [Session] = []
+    /// Latest Delivery per host + session; memory only, so leaving and returning
+    /// to a terminal keeps its status without restoring stale drafts.
+    private(set) var deliveries: [String: AgentDelivery] = [:]
 
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
-    private var pending: [String: CheckedContinuation<AgentMessageResult, Never>] = [:]
+    /// Pending requests stay bound to the socket they were written to, so a
+    /// superseded connection's teardown cannot fail a newer connection's request.
+    private var pending: [String: Pending] = [:]
     private var responseTimeouts: [String: Task<Void, Never>] = [:]
+
+    private struct Pending {
+        let socket: URLSessionWebSocketTask
+        let continuation: CheckedContinuation<AgentMessageResult, Never>
+    }
+
+    func delivery(host: String, session: String) -> AgentDelivery? {
+        deliveries[AgentMessageStore.key(host: host, session: session)]
+    }
+
+    func remember(_ delivery: AgentDelivery, host: String, session: String) {
+        deliveries[AgentMessageStore.key(host: host, session: session)] = delivery
+    }
 
     func connect(_ config: GatewayConfig) {
         disconnect()
@@ -63,7 +81,7 @@ final class GatewayClient {
             return .failed(kind: "invalid_params", message: "消息编码失败")
         }
         return await withCheckedContinuation { continuation in
-            pending[id] = continuation
+            pending[id] = Pending(socket: socket, continuation: continuation)
             responseTimeouts[id] = Task {
                 try? await Task.sleep(for: .seconds(45))
                 guard !Task.isCancelled else { return }
@@ -125,7 +143,7 @@ final class GatewayClient {
         socket.resume()
         let pings = Task { await Self.keepAlive(socket) }
         defer {
-            failPending()
+            failPending(for: socket)
             pings.cancel()
             socket.cancel(with: .goingAway, reason: nil)
         }
@@ -151,16 +169,16 @@ final class GatewayClient {
 
     private func complete(id: String, with result: AgentMessageResult) {
         responseTimeouts.removeValue(forKey: id)?.cancel()
-        pending.removeValue(forKey: id)?.resume(returning: result)
+        pending.removeValue(forKey: id)?.continuation.resume(returning: result)
     }
 
-    private func failPending() {
-        let requests = pending
-        pending = [:]
-        let timeouts = responseTimeouts
-        responseTimeouts = [:]
-        for (_, timeout) in timeouts { timeout.cancel() }
-        for (_, continuation) in requests { continuation.resume(returning: .unknown) }
+    private func failPending(for socket: URLSessionWebSocketTask? = nil) {
+        let failed = pending.filter { socket == nil || $0.value.socket === socket }
+        for (id, request) in failed {
+            pending.removeValue(forKey: id)
+            responseTimeouts.removeValue(forKey: id)?.cancel()
+            request.continuation.resume(returning: .unknown)
+        }
     }
 
     /// A dead link (the Mac slept, the phone changed networks) shows as a failed ping.

@@ -12,7 +12,6 @@ struct ObserveView: View {
     @State private var grid: TerminalGrid?
     @State private var attempt = 0
     @State private var draft: String
-    @State private var delivery: Delivery?
     @State private var confirmingBlocked = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -20,11 +19,17 @@ struct ObserveView: View {
         self.session = session
         self.config = config
         self.client = client
-        _draft = State(initialValue: DraftStore.load(host: config.host, session: session.id))
+        _draft = State(initialValue: AgentMessageStore.draft(host: config.host, session: session.id))
     }
 
     private var currentSession: Session {
         client.sessions.first { $0.id == session.id } ?? session
+    }
+
+    /// Lives in the client so a result that arrives after this view leaves is
+    /// still there on return, and never resurrects the sent draft.
+    private var delivery: AgentDelivery? {
+        client.delivery(host: config.host, session: session.id)
     }
 
     private var isSending: Bool {
@@ -81,9 +86,14 @@ struct ObserveView: View {
             Text("Agent 正在等待确认，消息可能被当作对话框的回答")
         }
         .onChange(of: draft) { _, draft in
-            DraftStore.save(draft, host: config.host, session: session.id)
+            AgentMessageStore.saveDraft(draft, host: config.host, session: session.id)
         }
-        .onChange(of: currentSession.turn) { _, _ in updateResponse() }
+        .onChange(of: currentSession.turn, initial: true) { _, _ in updateResponse() }
+        // Returning while a send was in flight restores the draft from before the
+        // send; once it is accepted, this view clears it too.
+        .onChange(of: delivery) { _, delivery in
+            if case .sent(let text, _, _, _) = delivery, draft == text { draft = "" }
+        }
         .onChange(of: observer.phase) { _, phase in
             if case .observing(let cols, let rows) = phase {
                 grid = TerminalGrid(cols: cols, rows: rows)
@@ -107,8 +117,6 @@ struct ObserveView: View {
                 TextField("给 Agent 发消息", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                     .disabled(isSending)
                     .accessibilityIdentifier("agentMessageField")
                 Button { send() } label: {
@@ -120,6 +128,9 @@ struct ObserveView: View {
                         }
                     }
                     .frame(width: 32, height: 32)
+                    // Keep the icon small but the HIG-minimum tap target.
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .disabled(!canSend)
                 .accessibilityLabel("发送消息")
@@ -169,21 +180,26 @@ struct ObserveView: View {
     private func send(force: Bool = false) {
         guard canSend else { return }
         let text = draft
-        delivery = .sending(text: text)
+        client.remember(.sending(text: text), host: config.host, session: session.id)
         Task {
             let result = await client.sendMessage(session: session.id, text: text, force: force)
             switch result {
             case .accepted(let turn, let status, let started):
-                delivery = .sent(text: text, turn: turn, status: status, started: started)
+                client.remember(.sent(text: text, turn: turn, status: status, started: started),
+                                host: config.host, session: session.id)
+                // Clear the persisted draft before any view teardown: leaving
+                // while sending must not make the sent text reappear as a draft.
+                AgentMessageStore.clearDraft(host: config.host, session: session.id)
                 draft = ""
                 updateResponse()
             case .failed(let kind, _) where kind == "timeout" || kind == "unknown":
-                delivery = .unknown(text: text)
+                client.remember(.unknown(text: text), host: config.host, session: session.id)
             case .failed(let kind, let message):
-                delivery = .failed(text: text, kind: kind, message: message)
+                client.remember(.failed(text: text, kind: kind, message: message),
+                                host: config.host, session: session.id)
                 confirmingBlocked = kind == "blocked"
             case .unknown:
-                delivery = .unknown(text: text)
+                client.remember(.unknown(text: text), host: config.host, session: session.id)
             }
         }
     }
@@ -191,70 +207,12 @@ struct ObserveView: View {
     private func updateResponse() {
         guard let delivery, case .sent(let text, let sentTurn, let status, _) = delivery,
               currentSession.turn > sentTurn else { return }
-        self.delivery = .turnCompleted(text: text, status: status)
-    }
-}
-
-private enum Delivery {
-    case sending(text: String)
-    case sent(text: String, turn: UInt64, status: String?, started: Bool?)
-    case turnCompleted(text: String, status: String?)
-    case failed(text: String, kind: String, message: String)
-    case unknown(text: String)
-
-    var text: String {
-        switch self {
-        case .sending(let text), .sent(let text, _, _, _), .turnCompleted(let text, _),
-             .failed(let text, _, _), .unknown(let text):
-            text
-        }
-    }
-
-    var state: String {
-        switch self {
-        case .sending: "发送中…"
-        case .sent(_, _, let status, let started): AgentMessagePresentation.accepted(status: status, started: started)
-        case .turnCompleted(_, let status): AgentMessagePresentation.afterTurn(status: status)
-        case .failed(_, let kind, let message): Self.failure(kind: kind, message: message)
-        case .unknown: "结果未知，可能已发送"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .sending: "ellipsis.circle"
-        case .sent: "checkmark.circle"
-        case .turnCompleted: "checkmark.circle.fill"
-        case .failed: "exclamationmark.triangle.fill"
-        case .unknown: "questionmark.circle.fill"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .turnCompleted: .green
-        case .failed: .red
-        case .unknown: .orange
-        default: .secondary
-        }
-    }
-
-    private static func failure(kind: String, message: String) -> String {
-        switch kind {
-        case "blocked": "Agent 正在等待确认，尚未发送"
-        case "not_found", "finished": "会话已结束"
-        case "machine_unknown", "unavailable": "未连接或 herdr-core 不可用"
-        case "status_mismatch": "Agent 状态已变化，请重试"
-        case "too_long": "消息过长（最多 16 KiB）"
-        case "invalid_params": "消息为空或参数无效"
-        case "config": "herdr-core 配置不可用"
-        default: message.isEmpty ? "发送失败" : "发送失败（\(message)）"
-        }
+        client.remember(.turnCompleted(text: text, status: status), host: config.host, session: session.id)
     }
 }
 
 private struct DeliveryBanner: View {
-    let delivery: Delivery
+    let delivery: AgentDelivery
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -269,20 +227,6 @@ private struct DeliveryBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-    }
-}
-
-private enum DraftStore {
-    static func load(host: String, session: String) -> String {
-        UserDefaults.standard.string(forKey: key(host: host, session: session)) ?? ""
-    }
-
-    static func save(_ draft: String, host: String, session: String) {
-        UserDefaults.standard.set(draft, forKey: key(host: host, session: session))
-    }
-
-    private static func key(host: String, session: String) -> String {
-        "agent-message.draft.\(host).\(session)"
     }
 }
 
