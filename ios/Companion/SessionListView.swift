@@ -5,11 +5,8 @@ struct SessionListView: View {
     var retry: () -> Void
     var reenter: () -> Void
 
-    /// This Mac first, then each remote machine by name.
-    private var groups: [(machine: String?, sessions: [Session])] {
-        Dictionary(grouping: client.sessions, by: \.machine)
-            .map { ($0.key, $0.value) }
-            .sorted { ($0.machine ?? "") < ($1.machine ?? "") }
+    private var sections: [SessionSection] {
+        sessionSections(sessions: client.sessions, spaces: client.spaces)
     }
 
     var body: some View {
@@ -21,11 +18,20 @@ struct SessionListView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            ForEach(groups, id: \.machine) { group in
-                Section(group.machine ?? "本机") {
-                    ForEach(group.sessions) { session in
-                        NavigationLink(value: session) { SessionRow(session: session) }
+            ForEach(sections) { section in
+                Section {
+                    ForEach(section.tabs) { tab in
+                        if let title = tab.title {
+                            TabHeader(title: title, status: tab.status)
+                        }
+                        ForEach(tab.entries) { entry in
+                            NavigationLink(value: entry.session) {
+                                SessionRow(session: entry.session, place: entry.place)
+                            }
+                        }
                     }
+                } header: {
+                    SectionHeader(section: section)
                 }
             }
         }
@@ -83,8 +89,54 @@ extension GatewayClient {
     }
 }
 
+private struct SectionHeader: View {
+    let section: SessionSection
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if section.kind == .needsMe {
+                Label(section.title, systemImage: "hand.raised.fill")
+                    .foregroundStyle(.orange)
+            } else {
+                Text(section.title)
+            }
+            if let machine = section.machine {
+                Text(machine)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            // The needs-me section is all blocked; its badge would only repeat the title.
+            if section.kind != .needsMe, let status = section.status {
+                StatusBadge(state: status)
+            }
+        }
+        .textCase(nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A tab's name above its sessions, for spaces with more than one tab.
+private struct TabHeader: View {
+    let title: String
+    let status: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Label(title, systemImage: "rectangle.split.2x1")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let status { StatusBadge(state: status) }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 private struct SessionRow: View {
     let session: Session
+    let place: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -93,7 +145,13 @@ private struct SessionRow: View {
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
-                if let status = session.status { StatusBadge(status: status) }
+                if let status = session.status { StatusBadge(state: status.state) }
+            }
+            if let place {
+                Text(place)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Text([session.program, session.cwd].compactMap { $0 }.joined(separator: " · "))
                 .font(.subheadline)
@@ -112,7 +170,7 @@ private struct SessionRow: View {
 
 /// The program's own status word, localized, with a symbol so it never relies on color alone.
 private struct StatusBadge: View {
-    let status: Status
+    let state: String
 
     var body: some View {
         Label(title, systemImage: symbol)
@@ -122,18 +180,18 @@ private struct StatusBadge: View {
     }
 
     private var title: String {
-        switch status.state {
+        switch state {
         case "working": "工作中"
         case "blocked": "等待处理"
         case "error": "出错"
         case "done": "已完成"
         case "idle": "空闲"
-        default: status.state
+        default: state
         }
     }
 
     private var symbol: String {
-        switch status.state {
+        switch state {
         case "working": "arrow.triangle.2.circlepath"
         case "blocked": "hand.raised.fill"
         case "error": "exclamationmark.triangle.fill"
@@ -144,7 +202,7 @@ private struct StatusBadge: View {
     }
 
     private var color: Color {
-        switch status.state {
+        switch state {
         case "working": .blue
         case "blocked": .orange
         case "error": .red

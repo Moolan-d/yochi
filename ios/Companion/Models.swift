@@ -39,15 +39,31 @@ struct Status: Decodable, Hashable {
     let kind: String?
 }
 
+/// A Herdr space holding live sessions, in Herdr's order.
+struct Space: Decodable, Hashable, Identifiable {
+    let id: String
+    /// The machine it lives on; nil for the Gateway's own Mac.
+    let machine: String?
+    let name: String
+    let tabs: [SpaceTab]
+}
+
+struct SpaceTab: Decodable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    /// Session ids in pane order.
+    let sessions: [String]
+}
+
 enum ServerMessage: Decodable {
     case hello(api: Int)
-    case sessions(core: String?, connected: Bool, sessions: [Session])
+    case sessions(core: String?, connected: Bool, sessions: [Session], spaces: [Space])
     case sent(id: String, turn: UInt64, status: String?, started: Bool?)
     case sendFailed(id: String, kind: String, message: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, api, core, connected, sessions, id, turn, status, started, kind, message
+        case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message
     }
 
     init(from decoder: Decoder) throws {
@@ -59,7 +75,9 @@ enum ServerMessage: Decodable {
             self = .sessions(
                 core: try c.decodeIfPresent(String.self, forKey: .core),
                 connected: try c.decode(Bool.self, forKey: .connected),
-                sessions: try c.decode([Session].self, forKey: .sessions))
+                sessions: try c.decode([Session].self, forKey: .sessions),
+                // A Gateway older than space grouping sends none.
+                spaces: try c.decodeIfPresent([Space].self, forKey: .spaces) ?? [])
         case "sent":
             self = .sent(
                 id: try c.decode(String.self, forKey: .id),

@@ -25,6 +25,7 @@ final class GatewayClient {
     private(set) var coreName: String?
     private(set) var coreConnected = false
     private(set) var sessions: [Session] = []
+    private(set) var spaces: [Space] = []
     /// Latest Delivery per host + session; memory only, so leaving and returning
     /// to a terminal keeps its status without restoring stale drafts.
     private(set) var deliveries: [String: AgentDelivery] = [:]
@@ -123,6 +124,7 @@ final class GatewayClient {
                 if (socket?.response as? HTTPURLResponse)?.statusCode == 401 {
                     // Unpaired: what this device saw before is no longer its to show.
                     sessions = []
+                    spaces = []
                     coreName = nil
                     phase = .unauthorized
                     return
@@ -153,10 +155,11 @@ final class GatewayClient {
             switch try JSONDecoder().decode(ServerMessage.self, from: Data(text.utf8)) {
             case .hello:
                 phase = .connected
-            case .sessions(let core, let connected, let sessions):
+            case .sessions(let core, let connected, let sessions, let spaces):
                 coreName = core
                 coreConnected = connected
                 self.sessions = sessions
+                self.spaces = spaces
             case .sent(let id, let turn, let status, let started):
                 complete(id: id, with: .accepted(turn: turn, status: status, started: started))
             case .sendFailed(let id, let kind, let message):
