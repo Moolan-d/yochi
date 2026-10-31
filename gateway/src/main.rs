@@ -1,3 +1,4 @@
+mod agent;
 mod devices;
 mod herdr;
 mod observe;

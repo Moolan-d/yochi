@@ -14,6 +14,8 @@ pub struct Session {
     pub program: Option<String>,
     pub cwd: String,
     pub status: Option<Status>,
+    /// The last completed Agent turn, or zero when none has been reported.
+    pub turn: u64,
     /// The terminal's grid; the size an observer must render to.
     pub cols: u16,
     pub rows: u16,
@@ -53,7 +55,17 @@ impl Session {
             kind: status.get("kind").and_then(text),
         });
         let size = |key: &str, default| record[key].as_u64().and_then(|n| u16::try_from(n).ok()).unwrap_or(default);
-        Some(Session { id, machine, title, program, cwd, status, cols: size("cols", 80), rows: size("rows", 24) })
+        Some(Session {
+            id,
+            machine,
+            title,
+            program,
+            cwd,
+            status,
+            turn: record["turn"].as_u64().unwrap_or(0),
+            cols: size("cols", 80),
+            rows: size("rows", 24),
+        })
     }
 }
 
@@ -71,7 +83,7 @@ mod tests {
     fn remote_live_terminal() {
         let record = json!({
             "address": "vps-us/t1", "state": "live", "name": null, "title": "",
-            "cwd": "/root", "cols": 200, "rows": 50,
+            "cwd": "/root", "cols": 200, "rows": 50, "turn": 4,
             "foreground": {"name": "claude", "cwd": "/root/app"},
             "status": {"state": "blocked", "app": "claude", "kind": "permission", "msg": "Run ls?"},
         });
@@ -80,6 +92,7 @@ mod tests {
         assert_eq!(session.title, "claude");
         assert_eq!(session.cwd, "/root/app");
         assert_eq!((session.cols, session.rows), (200, 50));
+        assert_eq!(session.turn, 4);
         let status = session.status.unwrap();
         assert_eq!(status.state, "blocked");
         assert_eq!(status.kind.as_deref(), Some("permission"));

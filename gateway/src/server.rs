@@ -2,12 +2,13 @@
 //! `ws://`). `/v0/pair` trades a pairing code for a device token; the others
 //! need `Authorization: Bearer <device token>`:
 //! - `/v0/ws` pushes `hello`, then the whole session list whenever it changes.
-//!   The app may send `unpair` to remove itself.
+//!   The app may send Agent Messages or `unpair` to remove itself.
 //! - `/v0/observe?session=<id>` streams one terminal read-only: control as text,
 //!   terminal bytes as binary messages.
 //!
 //! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
+use crate::agent;
 use crate::devices::{Device, Store};
 use crate::herdr::CoreView;
 use crate::observe::{Observer, Output};
@@ -61,6 +62,13 @@ enum AppMessage {
         code: String,
         #[serde(default)]
         name: String,
+    },
+    Send {
+        id: String,
+        session: String,
+        text: String,
+        #[serde(default)]
+        force: bool,
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
@@ -263,6 +271,7 @@ async fn unpaired(devices: &mut watch::Receiver<Vec<Device>>, device: &str) {
 async fn push(mut socket: WebSocket, state: AppState, device: String) {
     let mut view = state.view.clone();
     let mut devices = state.devices.subscribe();
+    let (outgoing, mut responses) = tokio::sync::mpsc::unbounded_channel::<String>();
     let hello = ServerMessage::Hello { api: API_VERSION, gateway: env!("CARGO_PKG_VERSION") };
     if send(&mut socket, &hello).await.is_err() {
         return;
@@ -282,14 +291,30 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
         }
         tokio::select! {
             changed = view.changed() => if changed.is_err() { return },
+            response = responses.recv() => {
+                let Some(response) = response else { return };
+                if socket.send(Message::Text(response.into())).await.is_err() { return }
+            },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
-                Some(Ok(Message::Text(text))) => {
-                    if let Ok(AppMessage::Unpair) = serde_json::from_str(&text) {
+                Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
+                    Ok(AppMessage::Unpair) => {
                         unpair(&state, &device).await;
                         return;
                     }
-                }
+                    Ok(AppMessage::Send { id, session, text, force }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = agent::Request { id, session, text, force };
+                            let response = agent::send(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
+                    _ => {}
+                },
                 Some(Ok(_)) => {}
             },
             () = unpaired(&mut devices, &device) => return,
@@ -306,6 +331,25 @@ async fn send(socket: &mut WebSocket, message: &ServerMessage<'_>) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_agent_message_and_unpair() {
+        let message: AppMessage = serde_json::from_str(
+            r#"{"type":"send","id":"r1","session":"t1","text":"hello"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            AppMessage::Send { id, session, text, force: false }
+                if id == "r1" && session == "t1" && text == "hello"
+        ));
+        let message: AppMessage = serde_json::from_str(
+            r#"{"type":"send","id":"r2","session":"t1","text":"yes","force":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(message, AppMessage::Send { force: true, .. }));
+        assert!(matches!(serde_json::from_str(r#"{"type":"unpair"}"#), Ok(AppMessage::Unpair)));
+    }
 
     #[test]
     fn bearer_token_names_the_device() {
