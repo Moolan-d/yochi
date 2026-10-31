@@ -23,17 +23,18 @@ export COMPANION_LISTEN="$(tailscale ip -4 | head -1):7421"
 "$GATEWAY" > "$state/gateway.log" 2>&1 &
 gateway=$!
 pairing=
-test_terminal=
-trap 'kill $gateway $pairing 2>/dev/null; if [ -n "$test_terminal" ]; then hc kill "$test_terminal" >/dev/null 2>&1 || true; fi; rm -rf "$state"' EXIT
-
-# Only this dedicated echo terminal receives UI-test Agent Messages. It does
-# not report Agent turns, so cleanup by name is safe even if JSON parsing fails.
-run_output=$(hc run --bg --rm --no-parent --no-notify --name companion-uitest --json -- /bin/cat)
+# Cleanup by the unique name, not by parsed ids: a bad parse must not leak the
+# terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
-test_terminal=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
+test_session=
+trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; rm -rf "$state"' EXIT
+
+run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
+test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
 
 rm -rf "$RESULTS" "$SHOTS"
 mkdir -p "$RESULTS" "$SHOTS"
+xcrun simctl bootstatus "$sim_id" -b > /dev/null
 xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINATION" \
     -derivedDataPath build -quiet build-for-testing
 
@@ -51,13 +52,20 @@ for test in testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMess
 
     echo "== $test"
     TEST_RUNNER_COMPANION_HOST="$COMPANION_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
-        TEST_RUNNER_COMPANION_SESSION="$test_terminal" \
+        TEST_RUNNER_COMPANION_SESSION="$test_session" \
         xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINATION" \
         -derivedDataPath build -quiet test-without-building \
         -only-testing:"CompanionUITests/CompanionUITests/$test" \
         -resultBundlePath "$RESULTS/$test.xcresult" || failed=1
     xcrun xcresulttool export attachments --path "$RESULTS/$test.xcresult" \
         --output-path "$SHOTS/$test" > /dev/null || true
+    # The UI test only saw "已发送"; confirm the message really reached the terminal.
+    if [ "$test" = testAgentMessageIsAccepted ]; then
+        if [ -z "$test_session" ] || ! hc read "$test_session" | grep -q "Companion UI test"; then
+            echo "test terminal did not receive the Agent Message" >&2
+            failed=1
+        fi
+    fi
     kill "$pairing" 2>/dev/null || true
 done
 

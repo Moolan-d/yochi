@@ -84,9 +84,20 @@ final class CompanionUITests: XCTestCase {
         field.typeText("Companion UI test")
         app.buttons["发送消息"].tap()
         XCTAssert(text(app, containing: "已发送").waitForExistence(timeout: 20))
+        XCTAssertTrue(waitUntilCleared(field), "composer kept the sent message")
+        snapshot("1 accepted")
+
+        // The result and the cleared draft survive leaving the terminal.
+        app.navigationBars.buttons.firstMatch.tap()
+        let session = testSession(app)
+        XCTAssert(session.waitForExistence(timeout: 10))
+        session.tap()
+        XCTAssert(text(app, containing: "已发送").waitForExistence(timeout: 10))
+        let composerAfterReturn = composer(app)
+        XCTAssertTrue(waitUntilCleared(composerAfterReturn), "sent message returned as a draft")
+        snapshot("2 sent message did not return as a draft")
         // /bin/cat echoes input but reports no Agent turns. The following
         // transition to "Agent 已回应" needs a real Claude Code session.
-        snapshot("1 accepted")
         leaveAndUnpair(app)
     }
 
@@ -154,6 +165,17 @@ final class CompanionUITests: XCTestCase {
         let field = app.descendants(matching: .any).matching(identifier: "agentMessageField").firstMatch
         XCTAssert(field.waitForExistence(timeout: 15))
         return field
+    }
+
+    @MainActor
+    private func waitUntilCleared(_ field: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date.now.addingTimeInterval(timeout)
+        while Date.now < deadline {
+            guard let value = field.value as? String else { return true }
+            if value.isEmpty || value == field.placeholderValue { return true }
+            RunLoop.current.run(until: .now.addingTimeInterval(0.1))
+        }
+        return false
     }
 
     @MainActor
