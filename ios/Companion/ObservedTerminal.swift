@@ -42,11 +42,11 @@ struct ObservedTerminal: UIViewRepresentable {
     }
 }
 
-/// A Ghostty surface sized to the remote grid inside a scroll view, so a
-/// 200-column desktop terminal shows whole and the user pinches or
-/// double-taps to read it.
+/// A Ghostty surface sized to the remote grid inside a scroll view. It opens
+/// at a readable font size; a double tap alternates that with the whole grid.
 final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate {
     private static let fontSize: Float = 9
+    private static let readableZoomScale: CGFloat = 12 / 9
 
     var grid: TerminalGrid {
         didSet { if grid != oldValue { sizeTerminal() } }
@@ -61,8 +61,9 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     }
     /// One cell in points, once Ghostty has measured it.
     private var cell: CGSize?
-    /// Whether the user chose a zoom; until then the terminal fits the width.
+    /// Whether the user chose a zoom; until then the terminal uses its default.
     private var userZoomed = false
+    private var initialViewportPending = true
 
     init(feed: TerminalFeed, grid: TerminalGrid) {
         self.feed = feed
@@ -87,7 +88,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
 
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
-        accessibilityHint = "只读。双击放大或缩小。"
+        accessibilityHint = "终端只读，不能逐键输入；可在下方发送 Agent 消息。双击在全貌与可读字号之间切换，双指缩放，拖动平移。"
     }
 
     @available(*, unavailable)
@@ -118,6 +119,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         if !feed.isOpen {
             feed.open()
             UIView.animate(withDuration: 0.2) { self.terminal.alpha = 1 }
+            revealInitialViewport()
         }
     }
 
@@ -130,10 +132,12 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
 
     private func resizeTerminal(to natural: CGSize) {
         guard natural != terminal.bounds.size else { return }
+        let previousZoom = zoomScale
         zoomScale = 1
         terminal.frame = CGRect(origin: .zero, size: natural)
         contentSize = natural
         fitZoom()
+        if userZoomed { zoomScale = max(previousZoom, minimumZoomScale) }
     }
 
     // MARK: Zoom
@@ -143,11 +147,34 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         fitZoom()
     }
 
+    private var defaultZoomScale: CGFloat {
+        max(minimumZoomScale, Self.readableZoomScale)
+    }
+
     private func fitZoom() {
         guard terminal.bounds.width > 0, bounds.width > 0 else { return }
-        let fit = min(bounds.width / terminal.bounds.width, 1)
+        let fit = bounds.width / terminal.bounds.width
         if minimumZoomScale != fit { minimumZoomScale = fit }
-        if (!userZoomed && zoomScale != fit) || zoomScale < fit { zoomScale = fit }
+        maximumZoomScale = max(3, fit)
+        if !userZoomed && zoomScale != defaultZoomScale {
+            zoomScale = defaultZoomScale
+        } else if zoomScale < fit {
+            zoomScale = fit
+        }
+        revealInitialViewport()
+    }
+
+    private func revealInitialViewport() {
+        guard initialViewportPending, feed.isOpen, bounds.height > 0 else { return }
+        initialViewportPending = false
+        // The pinned Ghostty Swift API has no cursor query, so use the specified
+        // fallback: the bottom of the grid, aligned to its leading edge.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let bottom = max(-adjustedContentInset.top,
+                             contentSize.height - bounds.height + adjustedContentInset.bottom)
+            setContentOffset(CGPoint(x: -adjustedContentInset.left, y: bottom), animated: false)
+        }
     }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
@@ -163,9 +190,10 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
             userZoomed = false
             setZoomScale(minimumZoomScale, animated: true)
         } else {
-            // Zoom to the font's natural size around the tap.
+            // Zoom to a readable font around the tap.
             let point = gesture.location(in: terminal)
-            let size = CGSize(width: bounds.width, height: bounds.height)
+            let size = CGSize(width: bounds.width / defaultZoomScale,
+                              height: bounds.height / defaultZoomScale)
             userZoomed = true
             zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
                             width: size.width, height: size.height), animated: true)
