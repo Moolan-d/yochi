@@ -61,8 +61,14 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     }
     /// One cell in points, once Ghostty has measured it.
     private var cell: CGSize?
-    /// Whether the user chose a zoom; until then the terminal uses its default.
-    private var userZoomed = false
+    private enum ZoomMode {
+        case `default`
+        case overview
+        case custom
+    }
+
+    /// Only `.default` may be overridden by layout or a new remote grid.
+    private var zoomMode: ZoomMode = .default
     private var initialViewportPending = true
 
     init(feed: TerminalFeed, grid: TerminalGrid) {
@@ -137,7 +143,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         terminal.frame = CGRect(origin: .zero, size: natural)
         contentSize = natural
         fitZoom()
-        if userZoomed { zoomScale = max(previousZoom, minimumZoomScale) }
+        if zoomMode == .custom { zoomScale = max(previousZoom, minimumZoomScale) }
     }
 
     // MARK: Zoom
@@ -156,10 +162,13 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         let fit = bounds.width / terminal.bounds.width
         if minimumZoomScale != fit { minimumZoomScale = fit }
         maximumZoomScale = max(3, fit)
-        if !userZoomed && zoomScale != defaultZoomScale {
-            zoomScale = defaultZoomScale
-        } else if zoomScale < fit {
-            zoomScale = fit
+        switch zoomMode {
+        case .default:
+            if zoomScale != defaultZoomScale { zoomScale = defaultZoomScale }
+        case .overview:
+            if zoomScale != fit { zoomScale = fit }
+        case .custom:
+            if zoomScale < fit { zoomScale = fit }
         }
         revealInitialViewport()
     }
@@ -182,19 +191,19 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        userZoomed = scale > minimumZoomScale + 0.001
+        zoomMode = abs(scale - minimumZoomScale) < 0.001 ? .overview : .custom
     }
 
     @objc private func toggleZoom(_ gesture: UITapGestureRecognizer) {
         if zoomScale > minimumZoomScale + 0.001 {
-            userZoomed = false
+            zoomMode = .overview
             setZoomScale(minimumZoomScale, animated: true)
         } else {
             // Zoom to a readable font around the tap.
             let point = gesture.location(in: terminal)
             let size = CGSize(width: bounds.width / defaultZoomScale,
                               height: bounds.height / defaultZoomScale)
-            userZoomed = true
+            zoomMode = .custom
             zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
                             width: size.width, height: size.height), animated: true)
         }
