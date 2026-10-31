@@ -40,7 +40,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
 - `id`：core 的地址，对 App 不透明。`machine`：远端机器名，主 Mac 本机为 `null`。
 - `status`：Agent 自报状态，`state` 为 idle / working / done / blocked / error；未上报时为 `null`。
-- `turn`：core 记录的最后已完成 Agent 轮次；没有该字段时 Gateway 返回 `0`。发送成功后，此值超过 `sent.turn` 表示 Agent 已回应。
+- `turn`：core 记录的最后已完成 Agent 轮次；没有该字段时 Gateway 返回 `0`。它会在状态离开 `working` 时增加。
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
 - 只包含 live 会话，finished 的不返回。
 - `cols` / `rows`：终端当前网格尺寸（上例省略）。
@@ -57,16 +57,20 @@ App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后�
  "text": "请继续实现这个任务", "force": false}
 
 // Gateway → App
-{"type": "sent", "id": "<客户端生成>", "turn": 7, "status": "working"}
+{"type": "sent", "id": "<客户端生成>", "turn": 7, "status": "working", "started": true}
 {"type": "send_failed", "id": "<客户端生成>", "kind": "blocked",
  "message": "waiting for permission"}
 ```
 
 Gateway 校验会话仍存在且 live、文本非空且 UTF-8 不超过 16 KiB。每次发送使用独立的 plain 模式 `hc connect`，经 `hello` 后调用 herdr-core 的 `terminal.send`，不阻塞会话列表推送。core 会等待终端约 3 秒无人输入后再粘贴并回车；Gateway 等待回复最多 30 秒。
 
-`send_failed.kind` 包括 core 返回的 `not_found`、`machine_unknown`、`finished`、`unavailable`、`blocked`、`status_mismatch`、`invalid_params`、`config`，以及 Gateway 的 `too_long`、`timeout`。`blocked` 表示 Agent 正在等待权限或回答；App 必须让用户确认后才以 `force: true` 重发。
+`send_failed.kind` 包括 core 返回的 `not_found`、`machine_unknown`、`finished`、`unavailable`、`blocked`、`status_mismatch`、`invalid_params`、`config`，以及 Gateway 的 `too_long`、`unknown`、`timeout`。`blocked` 表示 Agent 正在等待权限或回答；App 必须让用户确认后才以 `force: true` 重发。
 
-`sent` 只表示 backend 已接受，不表示 Agent 已阅读。此后会话的 `turn` 超过 `sent.turn` 才显示「Agent 已回应」。连接中断或超时使结果不明时，App 显示「结果未知，可能已发送」，保留 Draft，不自动重试。
+`sent.status` 是消息送入时的状态，`sent.started` 表示送入后几秒内是否进入 `working`；程序不上报状态时它们可以为 `null`。`started == false` 时 App 显示「Agent 尚未开始处理」，但仍属于已发送，不是失败。
+
+`sent` 只表示 backend 已接受，不表示 Agent 已阅读。若送入时 `status != "working"`，此后会话 `turn > sent.turn` 可显示「Agent 已回应」。若送入时是 `working`，当前这一轮结束也会使 `turn` 增加，但消息可能排在下一轮，因此先显示「已发送 · Agent 正忙」，`turn > sent.turn` 时只显示「Agent 已结束一轮」，不能断言 Agent 已回应，也不要求再等一轮。
+
+发送请求写出后的连接中断、无效回复或超时都使结果不明；App 显示「结果未知，可能已发送」，保留 Draft，不自动重试。
 
 ### 只读查看终端（Observer）
 

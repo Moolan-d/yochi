@@ -2,7 +2,7 @@
 //! close. This never occupies the connection that pushes the session list.
 
 use crate::herdr::CoreView;
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::process::Stdio;
@@ -28,6 +28,7 @@ pub enum Response {
         id: String,
         turn: u64,
         status: Option<String>,
+        started: Option<bool>,
     },
     SendFailed {
         id: String,
@@ -48,7 +49,7 @@ pub async fn send(hc: &str, view: &watch::Receiver<CoreView>, request: Request) 
     }
     match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, &request)).await {
         Ok(Ok(reply)) => map_reply(request, reply),
-        Ok(Err(err)) => Response::failed(request.id, "unavailable", format!("{err:#}")),
+        Ok(Err(err)) => err.into_response(request.id),
         Err(_) => Response::failed(request.id, "timeout", "发送超时，结果未知"),
     }
 }
@@ -66,41 +67,76 @@ fn validate(view: &CoreView, request: &Request) -> Result<(), Response> {
     Ok(())
 }
 
-async fn request_core(hc: &str, request: &Request) -> Result<Value> {
+/// Once any part of terminal.send may have been written, a transport failure
+/// cannot prove that core did not accept it.
+enum RequestError {
+    BeforeSend(anyhow::Error),
+    AfterSend(anyhow::Error),
+}
+
+impl RequestError {
+    fn before(error: impl Into<anyhow::Error>) -> Self {
+        Self::BeforeSend(error.into())
+    }
+
+    fn after(error: impl Into<anyhow::Error>) -> Self {
+        Self::AfterSend(error.into())
+    }
+
+    fn into_response(self, id: String) -> Response {
+        let (kind, error) = match self {
+            Self::BeforeSend(error) => ("unavailable", error),
+            Self::AfterSend(error) => ("unknown", error),
+        };
+        Response::failed(id, kind, format!("{error:#}"))
+    }
+}
+
+async fn request_core(hc: &str, request: &Request) -> std::result::Result<Value, RequestError> {
     let mut child = Command::new(hc)
         .arg("connect")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .with_context(|| format!("starting `{hc} connect`"))?;
-    let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
-    let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?).lines();
+        .with_context(|| format!("starting `{hc} connect`"))
+        .map_err(RequestError::before)?;
+    let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin")).map_err(RequestError::before)?;
+    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout")).map_err(RequestError::before)?;
+    let mut lines = BufReader::new(stdout).lines();
 
     let hello = json!({"jsonrpc": "2.0", "id": 0, "method": "hello", "params": {}});
-    stdin.write_all(format!("{hello}\n").as_bytes()).await?;
-    stdin.flush().await?;
-    let line = lines.next_line().await?.ok_or_else(|| anyhow!("core closed before hello"))?;
-    let reply: Value = serde_json::from_str(&line).context("bad hello reply from core")?;
+    stdin.write_all(format!("{hello}\n").as_bytes()).await.map_err(RequestError::before)?;
+    stdin.flush().await.map_err(RequestError::before)?;
+    let line = lines
+        .next_line()
+        .await
+        .map_err(RequestError::before)?
+        .ok_or_else(|| anyhow!("core closed before hello"))
+        .map_err(RequestError::before)?;
+    let reply: Value = serde_json::from_str(&line).context("bad hello reply from core").map_err(RequestError::before)?;
     if let Some(error) = reply.get("error") {
-        bail!("core refused hello: {error}");
+        return Err(RequestError::before(anyhow!("core refused hello: {error}")));
     }
     if reply["result"]["generation"] != 1 {
-        bail!("unsupported herdr-core protocol generation {}", reply["result"]["generation"]);
+        return Err(RequestError::before(anyhow!(
+            "unsupported herdr-core protocol generation {}",
+            reply["result"]["generation"]
+        )));
     }
 
     let send = json!({"jsonrpc": "2.0", "id": 1, "method": "terminal.send", "params": {
         "terminal": request.session, "text": request.text, "force": request.force,
     }});
-    stdin.write_all(format!("{send}\n").as_bytes()).await?;
-    stdin.flush().await?;
-    while let Some(line) = lines.next_line().await? {
-        let reply: Value = serde_json::from_str(&line).context("bad terminal.send reply from core")?;
+    stdin.write_all(format!("{send}\n").as_bytes()).await.map_err(RequestError::after)?;
+    stdin.flush().await.map_err(RequestError::after)?;
+    while let Some(line) = lines.next_line().await.map_err(RequestError::after)? {
+        let reply: Value = serde_json::from_str(&line).context("bad terminal.send reply from core").map_err(RequestError::after)?;
         if reply["id"] == 1 {
             return Ok(reply);
         }
     }
-    bail!("core closed before terminal.send replied")
+    Err(RequestError::after(anyhow!("core closed before terminal.send replied")))
 }
 
 fn map_reply(request: Request, reply: Value) -> Response {
@@ -110,10 +146,11 @@ fn map_reply(request: Request, reply: Value) -> Response {
         return Response::failed(request.id, kind, message);
     }
     let Some(turn) = reply["result"]["turn"].as_u64() else {
-        return Response::failed(request.id, "unavailable", "herdr-core 返回了无效的发送结果");
+        return Response::failed(request.id, "unknown", "herdr-core 返回了无效的发送结果");
     };
     let status = reply["result"]["status"].as_str().map(str::to_owned);
-    Response::Sent { id: request.id, turn, status }
+    let started = reply["result"]["started"].as_bool();
+    Response::Sent { id: request.id, turn, status, started }
 }
 
 #[cfg(test)]
@@ -180,7 +217,22 @@ mod tests {
         }));
         assert!(matches!(
             response,
-            Response::Sent { id, turn: 7, status: Some(status) } if id == "request-1" && status == "working"
+            Response::Sent { id, turn: 7, status: Some(status), started: Some(true) }
+                if id == "request-1" && status == "working"
+        ));
+    }
+
+    #[test]
+    fn transport_failure_knows_whether_send_may_have_started() {
+        let before = RequestError::before(anyhow!("no hc")).into_response("request-1".into());
+        assert!(matches!(
+            before,
+            Response::SendFailed { kind, .. } if kind == "unavailable"
+        ));
+        let after = RequestError::after(anyhow!("connection closed")).into_response("request-1".into());
+        assert!(matches!(
+            after,
+            Response::SendFailed { kind, .. } if kind == "unknown"
         ));
     }
 
