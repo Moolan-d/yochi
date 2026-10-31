@@ -4,13 +4,20 @@ struct ContentView: View {
     @State private var config = GatewayConfig.load()
     @State private var client = GatewayClient()
     @State private var showingSettings = false
+    @State private var path: [Session] = []
+    #if DEBUG
+    @State private var openedFromLaunch = false
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if let config {
                     SessionListView(client: client, retry: { client.connect(config) }, reenter: forget)
+                        .navigationDestination(for: Session.self) { session in
+                            ObserveView(session: session, config: config)
+                        }
                         .toolbar {
                             Button("设置", systemImage: "gearshape") { showingSettings = true }
                         }
@@ -29,6 +36,15 @@ struct ContentView: View {
         .onChange(of: config, initial: true) { _, config in
             if let config { client.connect(config) }
         }
+        #if DEBUG
+        // `simctl launch` can open a session directly: SIMCTL_CHILD_COMPANION_OBSERVE=<id>.
+        .onChange(of: client.sessions) { _, sessions in
+            guard !openedFromLaunch, let id = ProcessInfo.processInfo.environment["COMPANION_OBSERVE"],
+                  let session = sessions.first(where: { $0.id == id }) else { return }
+            openedFromLaunch = true
+            path = [session]
+        }
+        #endif
         .onChange(of: scenePhase) { _, phase in
             guard let config else { return }
             switch phase {

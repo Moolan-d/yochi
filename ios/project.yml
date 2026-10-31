@@ -6,11 +6,18 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+packages:
+  # libghostty prebuilt for Apple platforms, at the revision Heeler pins.
+  # Fetched by scripts/fetch-libghostty.sh (Xcode's own download can hang).
+  GhosttyTerminal:
+    path: Vendor/libghostty-spm
 targets:
   Companion:
     type: application
     platform: iOS
     sources: [Companion]
+    dependencies:
+      - package: GhosttyTerminal
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.companion.app

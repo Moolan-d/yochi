@@ -14,5 +14,5 @@
 cd gateway && cargo run
 
 # iOS
-cd ios && xcodegen generate && open Companion.xcodeproj
+cd ios && scripts/fetch-libghostty.sh && xcodegen generate && open Companion.xcodeproj
 ```

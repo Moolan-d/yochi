@@ -23,7 +23,9 @@ struct SessionListView: View {
             }
             ForEach(groups, id: \.machine) { group in
                 Section(group.machine ?? "本机") {
-                    ForEach(group.sessions) { SessionRow(session: $0) }
+                    ForEach(group.sessions) { session in
+                        NavigationLink(value: session) { SessionRow(session: session) }
+                    }
                 }
             }
         }

@@ -1,4 +1,5 @@
 mod herdr;
+mod observe;
 mod server;
 mod session;
 
@@ -40,8 +41,8 @@ async fn main() -> Result<()> {
         }
     };
 
-    let view = herdr::spawn(args.hc);
-    server::serve(listen, token, view).await
+    let view = herdr::spawn(args.hc.clone());
+    server::serve(listen, token, args.hc, view).await
 }
 
 /// This Mac's tailnet IPv4, so the Gateway is not reachable from the plain LAN.

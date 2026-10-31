@@ -27,3 +27,18 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 - `status`：Agent 自报状态，`state` 为 idle / working / done / blocked / error；未上报时为 `null`。
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
 - 只包含 live 会话，finished 的不返回。
+- `cols` / `rows`：终端当前网格尺寸（上例省略）。
+
+### 只读查看终端（Observer）
+
+`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并以 `observe` 模式 attach，因此手机不会向终端输入，也不会改变终端尺寸。
+
+- **文本帧**（控制）：
+  ```jsonc
+  {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸渲染网格
+  {"type": "size", "cols": 160, "rows": 48}       // 其他客户端改变了终端尺寸
+  {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
+  {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
+  ```
+- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。App 必须先把网格调整为 `cols × rows` 再写入这些字节。
+- **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。
