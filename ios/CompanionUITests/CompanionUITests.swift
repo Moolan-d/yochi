@@ -1,8 +1,8 @@
 import XCTest
 
 /// Drives the app against a throwaway Gateway. Run through scripts/ui-test.sh,
-/// which gives each test the Gateway's address and a fresh pairing code
-/// (COMPANION_HOST, COMPANION_CODE).
+/// which gives each test the Gateway's address, a fresh pairing code and the
+/// dedicated echo terminal (COMPANION_HOST, COMPANION_CODE, COMPANION_SESSION).
 final class CompanionUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -25,7 +25,7 @@ final class CompanionUITests: XCTestCase {
         snapshot("2 sessions")
 
         session.tap()
-        XCTAssert(text(app, containing: "仅查看").waitForExistence(timeout: 10))
+        XCTAssert(text(app, containing: "查看").waitForExistence(timeout: 10))
         // The subtitle gains the grid size once the terminal is attached.
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         snapshot("3 observe")
@@ -73,12 +73,50 @@ final class CompanionUITests: XCTestCase {
         snapshot("2 prefilled form")
     }
 
+    @MainActor
+    func testAgentMessageIsAccepted() throws {
+        let app = launchUnpaired(observing: env("COMPANION_SESSION"))
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+
+        let field = composer(app)
+        field.tap()
+        field.typeText("Companion UI test")
+        app.buttons["发送消息"].tap()
+        XCTAssert(text(app, containing: "已发送").waitForExistence(timeout: 20))
+        // /bin/cat echoes input but reports no Agent turns. The following
+        // transition to "Agent 已回应" needs a real Claude Code session.
+        snapshot("1 accepted")
+        leaveAndUnpair(app)
+    }
+
+    @MainActor
+    func testAgentMessageDraftSurvivesNavigation() throws {
+        let app = launchUnpaired(observing: env("COMPANION_SESSION"))
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+
+        let draft = "尚未发送的草稿"
+        let field = composer(app)
+        field.tap()
+        field.typeText(draft)
+        app.navigationBars.buttons.firstMatch.tap()
+        let session = testSession(app)
+        XCTAssert(session.waitForExistence(timeout: 10))
+        session.tap()
+        XCTAssert(composer(app).waitForExistence(timeout: 10))
+        XCTAssertEqual(composer(app).value as? String, draft)
+        snapshot("1 restored draft")
+        leaveAndUnpair(app)
+    }
+
     // MARK: - Helpers
 
     @MainActor
-    private func launchUnpaired() -> XCUIApplication {
+    private func launchUnpaired(observing id: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["COMPANION_RESET"] = "1"
+        if let id { app.launchEnvironment["COMPANION_OBSERVE"] = id }
         app.launch()
         return app
     }
@@ -103,8 +141,34 @@ final class CompanionUITests: XCTestCase {
 
     /// The pairing form has cells too; only the session list has the settings button.
     @MainActor
-    private func waitUntilPaired(_ app: XCUIApplication) {
-        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 15), "pairing did not finish")
+    private func waitUntilPaired(_ app: XCUIApplication, observing: Bool = false) {
+        if observing {
+            XCTAssert(composer(app).waitForExistence(timeout: 15), "pairing did not finish")
+        } else {
+            XCTAssert(app.buttons["设置"].waitForExistence(timeout: 15), "pairing did not finish")
+        }
+    }
+
+    @MainActor
+    private func composer(_ app: XCUIApplication) -> XCUIElement {
+        let field = app.descendants(matching: .any).matching(identifier: "agentMessageField").firstMatch
+        XCTAssert(field.waitForExistence(timeout: 15))
+        return field
+    }
+
+    @MainActor
+    private func testSession(_ app: XCUIApplication) -> XCUIElement {
+        app.cells.buttons.containing(.staticText, identifier: "companion-uitest").firstMatch
+    }
+
+    @MainActor
+    private func leaveAndUnpair(_ app: XCUIApplication) {
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["设置"].tap()
+        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5))
+        app.buttons["取消配对"].tap()
+        confirm(app, "取消配对")
+        XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 10))
     }
 
     @MainActor

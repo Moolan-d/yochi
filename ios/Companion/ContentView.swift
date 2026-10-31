@@ -20,7 +20,7 @@ struct ContentView: View {
                 if let config {
                     SessionListView(client: client, retry: { client.connect(config) }, reenter: forget)
                         .navigationDestination(for: Session.self) { session in
-                            ObserveView(session: session, config: config)
+                            ObserveView(session: session, config: config, client: client)
                         }
                         .toolbar {
                             Button("设置", systemImage: "gearshape") { showingSettings = true }

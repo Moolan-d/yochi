@@ -23,7 +23,14 @@ export COMPANION_LISTEN="$(tailscale ip -4 | head -1):7421"
 "$GATEWAY" > "$state/gateway.log" 2>&1 &
 gateway=$!
 pairing=
-trap 'kill $gateway $pairing 2>/dev/null; rm -rf "$state"' EXIT
+test_terminal=
+trap 'kill $gateway $pairing 2>/dev/null; if [ -n "$test_terminal" ]; then hc kill "$test_terminal" >/dev/null 2>&1 || true; fi; rm -rf "$state"' EXIT
+
+# Only this dedicated echo terminal receives UI-test Agent Messages. It does
+# not report Agent turns, so cleanup by name is safe even if JSON parsing fails.
+run_output=$(hc run --bg --rm --no-parent --no-notify --name companion-uitest --json -- /bin/cat)
+test_terminal=companion-uitest
+test_terminal=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
 
 rm -rf "$RESULTS" "$SHOTS"
 mkdir -p "$RESULTS" "$SHOTS"
@@ -31,7 +38,12 @@ xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINA
     -derivedDataPath build -quiet build-for-testing
 
 failed=0
-for test in testPairObserveAndUnpair testInviteLinkReplacesPairing; do
+xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINATION" \
+    -derivedDataPath build -quiet test-without-building \
+    -only-testing:CompanionTests \
+    -resultBundlePath "$RESULTS/unit-tests.xcresult" || failed=1
+
+for test in testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testAgentMessageDraftSurvivesNavigation; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
@@ -39,6 +51,7 @@ for test in testPairObserveAndUnpair testInviteLinkReplacesPairing; do
 
     echo "== $test"
     TEST_RUNNER_COMPANION_HOST="$COMPANION_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
+        TEST_RUNNER_COMPANION_SESSION="$test_terminal" \
         xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINATION" \
         -derivedDataPath build -quiet test-without-building \
         -only-testing:"CompanionUITests/CompanionUITests/$test" \

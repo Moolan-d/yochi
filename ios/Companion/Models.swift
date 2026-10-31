@@ -10,6 +10,8 @@ struct Session: Decodable, Identifiable, Hashable {
     let program: String?
     let cwd: String
     let status: Status?
+    /// The last completed Agent turn, or zero when none has been reported.
+    let turn: UInt64
 }
 
 struct Status: Decodable, Hashable {
@@ -24,9 +26,13 @@ struct Status: Decodable, Hashable {
 enum ServerMessage: Decodable {
     case hello(api: Int)
     case sessions(core: String?, connected: Bool, sessions: [Session])
+    case sent(id: String, turn: UInt64, status: String?, started: Bool?)
+    case sendFailed(id: String, kind: String, message: String)
     case unknown
 
-    private enum CodingKeys: String, CodingKey { case type, api, core, connected, sessions }
+    private enum CodingKeys: String, CodingKey {
+        case type, api, core, connected, sessions, id, turn, status, started, kind, message
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -38,6 +44,17 @@ enum ServerMessage: Decodable {
                 core: try c.decodeIfPresent(String.self, forKey: .core),
                 connected: try c.decode(Bool.self, forKey: .connected),
                 sessions: try c.decode([Session].self, forKey: .sessions))
+        case "sent":
+            self = .sent(
+                id: try c.decode(String.self, forKey: .id),
+                turn: try c.decode(UInt64.self, forKey: .turn),
+                status: try c.decodeIfPresent(String.self, forKey: .status),
+                started: try c.decodeIfPresent(Bool.self, forKey: .started))
+        case "send_failed":
+            self = .sendFailed(
+                id: try c.decode(String.self, forKey: .id),
+                kind: try c.decode(String.self, forKey: .kind),
+                message: try c.decode(String.self, forKey: .message))
         default:
             self = .unknown
         }
