@@ -16,8 +16,11 @@ final class TerminalFeed {
     let session = InMemoryTerminalSession(write: { _ in }, resize: { _ in })
     private var held: [Data] = []
     private(set) var isOpen = false
+    /// Whether any remote output has arrived; until then the caret means nothing.
+    private(set) var hasOutput = false
 
     func receive(_ data: Data) {
+        hasOutput = true
         if isOpen { session.receive(data) } else { held.append(data) }
     }
 
@@ -70,6 +73,9 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     /// Only `.default` may be overridden by layout or a new remote grid.
     private var zoomMode: ZoomMode = .default
     private var initialViewportPending = true
+    private var initialViewportScheduled = false
+    private var initialPaintReady = false
+    private var initialViewportAttempts = 0
 
     init(feed: TerminalFeed, grid: TerminalGrid) {
         self.feed = feed
@@ -174,16 +180,72 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     }
 
     private func revealInitialViewport() {
-        guard initialViewportPending, feed.isOpen, bounds.height > 0 else { return }
-        initialViewportPending = false
-        // The pinned Ghostty Swift API has no cursor query, so use the specified
-        // fallback: the bottom of the grid, aligned to its leading edge.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let bottom = max(-adjustedContentInset.top,
-                             contentSize.height - bounds.height + adjustedContentInset.bottom)
-            setContentOffset(CGPoint(x: -adjustedContentInset.left, y: bottom), animated: false)
+        guard initialViewportPending, feed.isOpen, bounds.width > 0, bounds.height > 0 else { return }
+        guard initialPaintReady else {
+            scheduleInitialViewport()
+            return
         }
+        // Wait out parser latency: the caret only moves after the first paint.
+        let caret = terminal.caretRect(for: terminal.endOfDocument)
+        guard caret.origin.x.isFinite, caret.origin.y.isFinite,
+              caret.width.isFinite, caret.height.isFinite,
+              caret.width > 0, caret.height > 0 else {
+            initialViewportAttempts += 1
+            if initialViewportAttempts < 10 {
+                scheduleInitialViewport()
+            } else {
+                initialViewportPending = false
+                // No caret: use the required bottom, leading-aligned fallback.
+                setContentOffset(CGPoint(x: 0, y: max(0, contentSize.height - bounds.height)),
+                                 animated: false)
+            }
+            return
+        }
+        initialViewportPending = false
+        // caretRect is in the terminal's unscaled points; contentOffset and
+        // contentSize are in the scroll view's zoomed coordinates.
+        let scaledCaret = caret.applying(CGAffineTransform(scaleX: zoomScale, y: zoomScale))
+        let offset = Self.initialOffset(caret: scaledCaret, content: contentSize, visible: bounds.size)
+        setContentOffset(offset, animated: false)
+    }
+
+    private func scheduleInitialViewport() {
+        guard !initialViewportScheduled else { return }
+        initialViewportScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self else { return }
+            initialViewportScheduled = false
+            guard initialViewportPending else { return }
+            guard feed.hasOutput || initialViewportAttempts >= 10 else {
+                initialViewportAttempts += 1
+                scheduleInitialViewport()
+                return
+            }
+            // Safe on the main thread: it parses the queued first paint first.
+            feed.session.waitForPendingOutput()
+            initialPaintReady = true
+            revealInitialViewport()
+        }
+    }
+
+    /// Puts the caret low in the viewport, and scrolls left when it is near the
+    /// leading edge. Pure so the placement can be tested without UIKit layout.
+    static func initialOffset(caret: CGRect, content: CGSize, visible: CGSize) -> CGPoint {
+        let maxX = max(0, content.width - visible.width)
+        let maxY = max(0, content.height - visible.height)
+        let x = caret.minX < visible.width / 3
+            ? 0
+            : min(max(0, caret.midX - visible.width / 2), maxX)
+        let y = min(max(0, caret.midY - visible.height * 0.75), maxY)
+        return CGPoint(x: x, y: y)
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        initialViewportPending = false
+    }
+
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        initialViewportPending = false
     }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
@@ -191,10 +253,12 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        initialViewportPending = false
         zoomMode = abs(scale - minimumZoomScale) < 0.001 ? .overview : .custom
     }
 
     @objc private func toggleZoom(_ gesture: UITapGestureRecognizer) {
+        initialViewportPending = false
         if zoomScale > minimumZoomScale + 0.001 {
             zoomMode = .overview
             setZoomScale(minimumZoomScale, animated: true)
