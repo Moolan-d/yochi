@@ -1,6 +1,7 @@
 mod agent;
 mod devices;
 mod herdr;
+mod layout;
 mod observe;
 mod server;
 mod session;

@@ -19,6 +19,12 @@ pub struct Session {
     /// The terminal's grid; the size an observer must render to.
     pub cols: u16,
     pub rows: u16,
+    /// The terminal that started this one (a sub-agent's Agent), if any.
+    #[serde(skip)]
+    pub parent: Option<String>,
+    /// Herdr's `where` label, `<space> / <tab>`, used to name spaces.
+    #[serde(skip)]
+    pub place: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -65,6 +71,8 @@ impl Session {
             turn: record["turn"].as_u64().unwrap_or(0),
             cols: size("cols", 80),
             rows: size("rows", 24),
+            parent: text(&record["parent"]),
+            place: text(&record["labels"]["where"]),
         })
     }
 }

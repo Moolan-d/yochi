@@ -44,6 +44,20 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
 - 只包含 live 会话，finished 的不返回。
 - `cols` / `rows`：终端当前网格尺寸（上例省略）。
+- `spaces`：Herdr 的 Space 与 Tab（见 GLOSSARY），按 Herdr 中的顺序，本机在前；上例省略。旧版 Gateway 不发送此字段，App 按缺省为空处理。
+
+```jsonc
+"spaces": [
+  {"id": "vps-us/sp1", "machine": "vps-us", "name": "infra", "tabs": [
+    {"id": "vps-us/tb1", "name": "1", "sessions": ["vps-us/t1"]}
+  ]}
+]
+```
+
+- `id` 对 App 不透明。`name` 已是要显示的名字：没人命名的 Space 用 Herdr 自动起的名字，没人命名的 Tab 用位置序号。
+- `sessions`：该 Tab 里的 live 会话 id，按分屏顺序；由 Agent 启动的子 Agent 排在后面，跟随启动它的终端。
+- 只列出含 live 会话的 Space 和 Tab。不在任何 Space 中的会话不出现在这里，App 按机器单独列出。
+- 数据来自各机器 herdr-core 中 Herdr 桌面端的布局文档，Gateway 只读不写。某台机器读不到布局（离线、没用过 Herdr 桌面端、core 不支持 `doc.get`）时，它的会话都不在 `spaces` 中。
 
 App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后删除这台设备并关闭连接。
 

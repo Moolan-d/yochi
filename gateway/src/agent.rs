@@ -175,7 +175,10 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 turn: 0,
+                parent: None,
+                place: None,
             }],
+            spaces: Vec::new(),
         }
     }
 

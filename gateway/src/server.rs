@@ -11,6 +11,7 @@
 use crate::agent;
 use crate::devices::{Device, Store};
 use crate::herdr::CoreView;
+use crate::layout::Space;
 use crate::observe::{Observer, Output};
 use crate::session::Session;
 use anyhow::{Context as _, Result};
@@ -42,7 +43,7 @@ struct AppState {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage<'a> {
     Hello { api: u32, gateway: &'static str },
-    Sessions { core: Option<&'a str>, connected: bool, sessions: &'a [Session] },
+    Sessions { core: Option<&'a str>, connected: bool, sessions: &'a [Session], spaces: &'a [Space] },
     /// Observing began; render a grid of this size.
     Attached { cols: u16, rows: u16 },
     /// The terminal's grid changed (another client resized it).
@@ -283,6 +284,7 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                 core: current.core.as_deref(),
                 connected: current.connected(),
                 sessions: &current.sessions,
+                spaces: &current.spaces,
             })
         };
         let Ok(message) = message else { return };
