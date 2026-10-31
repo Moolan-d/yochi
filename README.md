@@ -23,3 +23,16 @@ cd ios && scripts/fetch-libghostty.sh && xcodegen generate && open Companion.xco
 DEVELOPMENT_TEAM = ABCDE12345
 BUNDLE_ID_SUFFIX = .yourname
 ```
+
+## 常驻运行
+
+日常使用时让 Gateway 随登录启动，崩溃或 Tailscale 尚未就绪时由 launchd 每 10 秒重试：
+
+```sh
+cargo install --path gateway        # 装到 ~/.cargo/bin，不随 cargo build 变化
+companion-gateway service install   # 写入 ~/Library/LaunchAgents/dev.companion.gateway.plist 并启动
+companion-gateway service status    # 是否在运行、监听地址、日志位置
+companion-gateway service uninstall
+```
+
+安装时会记下当前 `hc` 和 `tailscale` 的绝对路径（launchd 不继承 shell 的 PATH），以及显式传入的 `--listen`、`--state-dir`。日志在 `~/Library/Logs/Companion Gateway/gateway.log`。已有 Gateway 占着端口时安装会拒绝，先停掉它。
