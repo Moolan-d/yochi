@@ -18,6 +18,8 @@ struct ObserveView: View {
     @State private var draft: String
     @State private var confirmingBlocked = false
     @State private var keys = KeyPresser()
+    @State private var terminalZoom = ""
+    @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -67,7 +69,8 @@ struct ObserveView: View {
                     conversation.start(config, session: session.id)
                 }
             case .terminal:
-                TerminalPane(session: session.id, config: config, grid: $grid)
+                TerminalPane(session: session.id, config: config, grid: $grid,
+                             zoomNote: $terminalZoom)
             }
         }
         // Tapping the conversation or the terminal puts the keyboard away, as
@@ -96,6 +99,9 @@ struct ObserveView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityHint("可查看对话或终端、批准或回答 Agent 的请求、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
+            }
+            if mode == .terminal {
+                ToolbarItem(placement: .topBarTrailing) { textSizeMenu }
             }
         }
         .confirmationDialog("仍然发送消息？", isPresented: $confirmingBlocked, titleVisibility: .visible) {
@@ -218,14 +224,40 @@ struct ObserveView: View {
         }
     }
 
+    /// The terminal's text size is a per-install preference, not a takeover:
+    /// only this phone's rendering changes, and core's grid is untouched.
+    private var textSizeMenu: some View {
+        Menu {
+            Section("字号 \(Int(terminalFontSize))") {
+                Button("增大字号", systemImage: "textformat.size.larger") {
+                    terminalFontSize = TerminalTextSize.clamped(terminalFontSize + 1)
+                }
+                .disabled(terminalFontSize >= TerminalTextSize.range.upperBound)
+                Button("减小字号", systemImage: "textformat.size.smaller") {
+                    terminalFontSize = TerminalTextSize.clamped(terminalFontSize - 1)
+                }
+                .disabled(terminalFontSize <= TerminalTextSize.range.lowerBound)
+                if terminalFontSize != TerminalTextSize.standard {
+                    Button("恢复默认字号") { terminalFontSize = TerminalTextSize.standard }
+                }
+            }
+        } label: {
+            Image(systemName: "textformat.size")
+        }
+        .accessibilityLabel("终端字号")
+        .accessibilityIdentifier("terminalTextSize")
+    }
+
     private var subtitle: String {
         let place = currentSession.machine ?? "本机"
         switch mode {
         case .conversation:
             return "对话 · \(place)"
         case .terminal:
-            if let grid { return "查看 · \(place) · \(grid.cols)×\(grid.rows)" }
-            return "查看 · \(place)"
+            var parts = ["查看", place]
+            if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
+            if !terminalZoom.isEmpty { parts.append(terminalZoom) }
+            return parts.joined(separator: " · ")
         }
     }
 

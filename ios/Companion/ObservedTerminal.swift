@@ -8,6 +8,19 @@ struct TerminalGrid: Equatable {
     var rows: Int
 }
 
+/// The font size the phone draws a terminal at, remembered between visits.
+/// Changing it rebuilds the surface, so the page re-attaches for core's exact
+/// screen rather than reflowing bytes the old surface already drew.
+enum TerminalTextSize {
+    static let key = "terminalFontSize"
+    static let standard: Double = 9
+    static let range: ClosedRange<Double> = 7...16
+
+    static func clamped(_ size: Double) -> Double {
+        min(max(size, range.lowerBound), range.upperBound)
+    }
+}
+
 /// An in-memory Ghostty session that holds the terminal's bytes until the
 /// surface's grid matches the size they were drawn for.
 @MainActor
@@ -35,20 +48,26 @@ final class TerminalFeed {
 struct ObservedTerminal: UIViewRepresentable {
     let feed: TerminalFeed
     let grid: TerminalGrid
+    let fontSize: Float
+    /// The page's title says which zoom the terminal is at; a double tap or a
+    /// pinch is otherwise invisible.
+    @Binding var zoomNote: String
 
     func makeUIView(context: Context) -> ObservedTerminalScrollView {
-        ObservedTerminalScrollView(feed: feed, grid: grid)
+        let view = ObservedTerminalScrollView(feed: feed, grid: grid, fontSize: fontSize)
+        view.onZoomChange = { zoomNote = $0 }
+        return view
     }
 
     func updateUIView(_ view: ObservedTerminalScrollView, context: Context) {
         view.grid = grid
+        view.onZoomChange = { zoomNote = $0 }
     }
 }
 
 /// A Ghostty surface sized to the remote grid inside a scroll view. It opens
 /// at a readable font size; a double tap alternates that with the whole grid.
 final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate {
-    private static let fontSize: Float = 9
     /// Readability is judged by a cell's width on screen, in points: Ghostty's
     /// cell at font size 9 is about 7.3 pt wide, not what 9 pt suggests.
     /// A grid whose cells are at least this wide when it fits the screen opens
@@ -68,13 +87,13 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         didSet { if grid != oldValue { sizeTerminal() } }
     }
 
+    /// Reports the zoom as the page's title should read it; only changes are sent.
+    var onZoomChange: ((String) -> Void)?
+
     private let feed: TerminalFeed
     private let terminal = UITerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 320))
-    private let controller = TerminalController {
-        $0.withFontSize(ObservedTerminalScrollView.fontSize)
-        $0.withWindowPaddingX(0)
-        $0.withWindowPaddingY(0)
-    }
+    private let controller: TerminalController
+    private var lastZoomNote: String?
     /// One cell in points, once Ghostty has measured it.
     private var cell: CGSize?
     private enum ZoomMode {
@@ -90,9 +109,14 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     private var initialPaintReady = false
     private var initialViewportAttempts = 0
 
-    init(feed: TerminalFeed, grid: TerminalGrid) {
+    init(feed: TerminalFeed, grid: TerminalGrid, fontSize: Float) {
         self.feed = feed
         self.grid = grid
+        self.controller = TerminalController {
+            $0.withFontSize(fontSize)
+            $0.withWindowPaddingX(0)
+            $0.withWindowPaddingY(0)
+        }
         super.init(frame: .zero)
         delegate = self
         backgroundColor = Self.terminalBackground
@@ -224,6 +248,25 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         return max(fit, readableCellWidth / cellWidth)
     }
 
+    /// The title's word for the current zoom: the whole grid, the readable
+    /// default, or the percentage of the fitted width a pinch reached.
+    nonisolated static func zoomLabel(scale: CGFloat, fit: CGFloat, defaultScale: CGFloat) -> String {
+        guard fit > 0 else { return "" }
+        if scale <= fit * 1.02 { return "全貌" }
+        if defaultScale > fit * 1.02, abs(scale - defaultScale) < 0.02 { return "可读" }
+        return "\(Int((scale / fit * 100).rounded()))%"
+    }
+
+    private func notifyZoom() {
+        let note = Self.zoomLabel(scale: zoomScale, fit: minimumZoomScale, defaultScale: defaultZoomScale)
+        guard note != lastZoomNote else { return }
+        lastZoomNote = note
+        // `fitZoom` also runs from `updateUIView`; writing the SwiftUI state
+        // there would be a change during a view update.
+        let report = onZoomChange
+        DispatchQueue.main.async { report?(note) }
+    }
+
     /// The height not covered by the navigation bar or the composer.
     private var visibleHeight: CGFloat {
         bounds.height - (adjustedContentInset.top - contentInset.top) - adjustedContentInset.bottom
@@ -253,6 +296,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         case .custom:
             if zoomScale < fit { zoomScale = fit }
         }
+        notifyZoom()
         revealInitialViewport()
     }
 
@@ -339,11 +383,13 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         alignToBottom()
+        notifyZoom()
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
         initialViewportPending = false
         zoomMode = abs(scale - minimumZoomScale) < 0.001 ? .overview : .custom
+        notifyZoom()
     }
 
     @objc private func toggleZoom(_ gesture: UITapGestureRecognizer) {
@@ -360,5 +406,10 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
             zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
                             width: size.width, height: size.height), animated: true)
         }
+        // A double tap has no visible control; confirm it landed, and say
+        // where it landed for VoiceOver.
+        UISelectionFeedbackGenerator().selectionChanged()
+        notifyZoom()
+        UIAccessibility.post(notification: .announcement, argument: lastZoomNote)
     }
 }

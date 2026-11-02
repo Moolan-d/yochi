@@ -29,6 +29,16 @@ final class CompanionUITests: XCTestCase {
         // The subtitle gains the grid size once the terminal is attached.
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         snapshot("3 observe")
+
+        // The terminal's text size is a phone-side preference; changing it
+        // rebuilds the surface and attaches again for core's exact screen.
+        app.buttons["终端字号"].tap()
+        app.buttons["增大字号"].tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15),
+                  "terminal did not re-attach after the font size change")
+        app.buttons["终端字号"].tap()
+        app.buttons["恢复默认字号"].tap()
+
         app.navigationBars.buttons.firstMatch.tap()
 
         app.buttons["设置"].tap()

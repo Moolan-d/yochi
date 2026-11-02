@@ -7,17 +7,22 @@ struct TerminalPane: View {
     let config: GatewayConfig
     /// The grid on screen, for the title; nil until attached.
     @Binding var grid: TerminalGrid?
+    /// How the terminal is zoomed, for the title; a double tap or a pinch is
+    /// otherwise invisible.
+    @Binding var zoomNote: String
 
     @State private var observer = TerminalObserver()
     @State private var feed = TerminalFeed()
     @State private var attempt = 0
     @State private var resizeRestart: Task<Void, Never>?
+    @AppStorage(TerminalTextSize.key) private var fontSize = TerminalTextSize.standard
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
             if let grid {
-                ObservedTerminal(feed: feed, grid: grid)
+                ObservedTerminal(feed: feed, grid: grid, fontSize: Float(fontSize),
+                                 zoomNote: $zoomNote)
                     .id(attempt)
             }
             switch observer.phase {
@@ -51,6 +56,9 @@ struct TerminalPane: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, case .failed = observer.phase { start() }
         }
+        // The surface's font is fixed when it is built, and bytes already
+        // drawn would reflow; attach again for core's exact screen.
+        .onChange(of: fontSize) { _, _ in start() }
         .task { start() }
         .onDisappear {
             resizeRestart?.cancel()
@@ -84,6 +92,7 @@ struct TerminalPane: View {
         let feed = TerminalFeed()
         self.feed = feed
         grid = nil
+        zoomNote = ""
         attempt += 1
         observer.onBytes = { feed.receive($0) }
         observer.start(config, session: session)
