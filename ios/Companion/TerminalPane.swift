@@ -5,14 +5,13 @@ import SwiftUI
 struct TerminalPane: View {
     let session: String
     let config: GatewayConfig
-    /// The grid on screen, for the title; nil until attached.
+    /// The phone-sized grid on screen, for the title; nil until reflowed.
     @Binding var grid: TerminalGrid?
-    /// How the terminal is zoomed, for the title; a double tap or a pinch is
-    /// otherwise invisible.
-    @Binding var zoomNote: String
 
     @State private var observer = TerminalObserver()
     @State private var feed = TerminalFeed()
+    /// Core's desktop grid, which the first paint is taken at.
+    @State private var desktop: TerminalGrid?
     @State private var attempt = 0
     @State private var resizeRestart: Task<Void, Never>?
     @State private var selection: TerminalTextSelection?
@@ -22,15 +21,15 @@ struct TerminalPane: View {
 
     var body: some View {
         ZStack {
-            if let grid {
-                ObservedTerminal(feed: feed, grid: grid, fontSize: Float(fontSize),
-                                 zoomNote: $zoomNote, selection: $selection)
+            if let desktop {
+                ObservedTerminal(feed: feed, fontSize: Float(fontSize), desktopGrid: desktop,
+                                 grid: $grid, selection: $selection)
                     .id(attempt)
             }
             switch observer.phase {
-            case .connecting where grid == nil:
+            case .connecting where desktop == nil:
                 ProgressView("正在连接…")
-            case .failed(let reason) where grid == nil:
+            case .failed(let reason) where desktop == nil:
                 ContentUnavailableView {
                     Label("无法查看终端", systemImage: "exclamationmark.triangle")
                 } description: {
@@ -39,7 +38,7 @@ struct TerminalPane: View {
                     Button("重试", action: start)
                         .buttonStyle(.borderedProminent)
                 }
-            case .closed(let reason) where grid == nil:
+            case .closed(let reason) where desktop == nil:
                 ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
             default:
                 EmptyView()
@@ -65,9 +64,11 @@ struct TerminalPane: View {
         .onChange(of: observer.phase) { _, phase in
             guard case .observing(let cols, let rows) = phase else { return }
             let size = TerminalGrid(cols: cols, rows: rows)
-            if grid == nil {
-                grid = size
-            } else if grid != size {
+            if desktop == nil {
+                desktop = size
+            } else if desktop != size {
+                // The program now draws for a new desktop width; take a fresh
+                // paint rather than mix grids.
                 restartAfterResize()
             }
         }
@@ -87,7 +88,7 @@ struct TerminalPane: View {
     /// When a terminal is already on screen, problems show below it instead of replacing it.
     @ViewBuilder
     private var banner: some View {
-        if grid != nil {
+        if desktop != nil {
             Group {
                 switch observer.phase {
                 case .closed(let reason):
@@ -120,16 +121,17 @@ struct TerminalPane: View {
     private func start() {
         let feed = TerminalFeed()
         self.feed = feed
+        desktop = nil
         grid = nil
-        zoomNote = ""
+        selection = nil
         attempt += 1
         observer.onBytes = { feed.receive($0) }
         observer.start(config, session: session)
     }
 
-    /// Bytes drawn for the new size would land in a grid of the old one, and
-    /// the local terminal would rewrap what it already holds; neither matches
-    /// the desktop any more. A fresh attach starts from core's exact screen.
+    /// Core now draws for another desktop width; the screen held here was laid
+    /// out for the old one. A fresh attach starts from core's exact screen and
+    /// reflows it to the phone again.
     private func restartAfterResize() {
         resizeRestart?.cancel()
         resizeRestart = Task {

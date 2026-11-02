@@ -185,10 +185,10 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 - **文本帧**（控制）：
   ```jsonc
-  {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸渲染网格
+  {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸收下首屏后再重排
   {"type": "size", "cols": 160, "rows": 48}       // 其他客户端改变了终端尺寸
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
   {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
   ```
-- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。App 必须先把网格调整为 `cols × rows` 再写入这些字节。
+- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后仍可能错位。
 - **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。

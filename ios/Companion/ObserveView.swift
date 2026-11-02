@@ -18,7 +18,6 @@ struct ObserveView: View {
     @State private var draft: String
     @State private var confirmingBlocked = false
     @State private var keys = KeyPresser()
-    @State private var terminalZoom = ""
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -69,8 +68,7 @@ struct ObserveView: View {
                     conversation.start(config, session: session.id)
                 }
             case .terminal:
-                TerminalPane(session: session.id, config: config, grid: $grid,
-                             zoomNote: $terminalZoom)
+                TerminalPane(session: session.id, config: config, grid: $grid)
             }
         }
         // Tapping the conversation or the terminal puts the keyboard away, as
@@ -256,7 +254,6 @@ struct ObserveView: View {
         case .terminal:
             var parts = ["查看", place]
             if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
-            if !terminalZoom.isEmpty { parts.append(terminalZoom) }
             return parts.joined(separator: " · ")
         }
     }

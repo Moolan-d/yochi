@@ -26,8 +26,18 @@ final class CompanionUITests: XCTestCase {
 
         session.tap()
         XCTAssert(text(app, containing: "查看").waitForExistence(timeout: 10))
-        // The subtitle gains the grid size once the terminal is attached.
-        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        // The subtitle gains the phone-sized grid once the terminal is attached.
+        let gridTitle = text(app, containing: "×")
+        XCTAssert(gridTitle.waitForExistence(timeout: 15), "terminal never attached")
+        if let range = gridTitle.label.range(of: #"\d+×\d+"#, options: .regularExpression) {
+            let columns = gridTitle.label[range].split(separator: "×").first.flatMap { Int($0) }
+            // The echo terminal is 200 columns; a phone at this font fits
+            // about 55, so this is what shows the screen was reflowed.
+            XCTAssertNotNil(columns)
+            XCTAssertLessThan(columns ?? 999, 100, "terminal did not reflow: \(gridTitle.label)")
+        } else {
+            XCTFail("no grid in the title: \(gridTitle.label)")
+        }
         snapshot("3 observe")
 
         // The terminal's text size is a phone-side preference; changing it
