@@ -244,6 +244,11 @@ struct ObserveView: View {
                 AgentMessageStore.clearDraft(host: config.host, session: session.id)
                 draft = ""
                 updateResponse()
+                // A selector command exists only in the terminal; go there so
+                // the key bar can finish it instead of the flow dead-ending.
+                if mode == .conversation, QuickCommand.opensSelector(text) {
+                    withAnimation(.snappy) { mode = .terminal }
+                }
             case .failed(let kind, _) where kind == "timeout" || kind == "unknown":
                 client.remember(.unknown(text: text), host: config.host, session: session.id)
             case .failed(let kind, let message):

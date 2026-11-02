@@ -141,6 +141,18 @@ enum QuickCommand {
     static let phrases = ["继续", "好的，按你的建议做", "先停下，说明你接下来的计划"]
     static let claudeCode = ["/compact", "/clear", "/model", "/context", "/resume"]
 
+    /// Commands that open a selector in the Agent's terminal. Core reports the
+    /// Agent as done while it waits there (no structured "blocked"), and the
+    /// transcript doesn't record the selector, so only the terminal can finish
+    /// them; the app switches to it after sending one of these.
+    static let selectors = ["/model", "/resume", "/config", "/permissions", "/mcp", "/agents"]
+
+    /// A bare selector command; with an argument (`/model sonnet`) Claude Code
+    /// answers directly and there is nothing to choose.
+    static func opensSelector(_ text: String) -> Bool {
+        selectors.contains(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     static func commands(for program: String?) -> [String] {
         program?.localizedCaseInsensitiveContains("claude") == true ? claudeCode : []
     }
