@@ -1,20 +1,23 @@
 import SwiftUI
 
-/// One session's terminal in Observer mode. Agent Messages use terminal.send,
-/// so offering them never makes the phone the active viewer or resizes the grid.
+/// One session: its Agent's conversation, or its terminal in Observer mode.
+/// Agent Messages, key presses and answers never attach, so the phone never
+/// becomes the active viewer or resizes the desktop's grid.
 struct ObserveView: View {
+    enum Mode: Hashable {
+        case conversation, terminal
+    }
+
     let session: Session
     let config: GatewayConfig
     let client: GatewayClient
 
-    @State private var observer = TerminalObserver()
-    @State private var feed = TerminalFeed()
+    @State private var conversation = ConversationFeed()
+    @State private var mode: Mode
     @State private var grid: TerminalGrid?
-    @State private var attempt = 0
     @State private var draft: String
     @State private var confirmingBlocked = false
     @State private var keys = KeyPresser()
-    @State private var resizeRestart: Task<Void, Never>?
     @Environment(\.scenePhase) private var scenePhase
 
     init(session: Session, config: GatewayConfig, client: GatewayClient) {
@@ -22,6 +25,7 @@ struct ObserveView: View {
         self.config = config
         self.client = client
         _draft = State(initialValue: AgentMessageStore.draft(host: config.host, session: session.id))
+        _mode = State(initialValue: QuickCommand.isClaudeCode(session) ? .conversation : .terminal)
     }
 
     private var currentSession: Session {
@@ -44,31 +48,40 @@ struct ObserveView: View {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Only Agents whose transcript the Gateway reads have a conversation.
+    private var hasConversation: Bool {
+        switch conversation.phase {
+        case .unsupported: false
+        case .connecting: mode == .conversation
+        default: true
+        }
+    }
+
     var body: some View {
-        ZStack {
-            if let grid {
-                ObservedTerminal(feed: feed, grid: grid)
-                    .id(attempt)
-            }
-            switch observer.phase {
-            case .connecting where grid == nil:
-                ProgressView("正在连接…")
-            case .failed(let reason) where grid == nil:
-                ContentUnavailableView {
-                    Label("无法查看终端", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(reason)
-                } actions: {
-                    Button("重试", action: start)
-                        .buttonStyle(.borderedProminent)
+        Group {
+            switch mode {
+            case .conversation:
+                ConversationPane(feed: conversation, status: currentSession.status) {
+                    conversation.start(config, session: session.id)
                 }
-            case .closed(let reason) where grid == nil:
-                ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
-            default:
-                EmptyView()
+            case .terminal:
+                TerminalPane(session: session.id, config: config, grid: $grid)
             }
         }
-        .safeAreaInset(edge: .bottom) { bottomPanel }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if hasConversation {
+                Picker("显示", selection: $mode) {
+                    Text("对话").tag(Mode.conversation)
+                    Text("终端").tag(Mode.terminal)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.bar)
+                .accessibilityIdentifier("sessionMode")
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomPanel }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -77,7 +90,7 @@ struct ObserveView: View {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityHint("可查看终端、按方向键等常用按键、发送整段 Agent 消息，都不会接管终端或改变桌面上的终端尺寸。")
+                .accessibilityHint("可查看对话或终端、批准或回答 Agent 的请求、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
             }
         }
         .confirmationDialog("仍然发送消息？", isPresented: $confirmingBlocked, titleVisibility: .visible) {
@@ -96,38 +109,39 @@ struct ObserveView: View {
         .onChange(of: delivery) { _, delivery in
             if case .sent(let text, _, _, _) = delivery, draft == text { draft = "" }
         }
-        .onChange(of: observer.phase) { _, phase in
-            guard case .observing(let cols, let rows) = phase else { return }
-            let size = TerminalGrid(cols: cols, rows: rows)
-            if grid == nil {
-                grid = size
-            } else if grid != size {
-                restartAfterResize()
-            }
+        .onChange(of: conversation.phase) { _, phase in
+            if phase == .unsupported { mode = .terminal }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, case .failed = observer.phase { start() }
+            if phase == .active, case .failed = conversation.phase {
+                conversation.start(config, session: session.id)
+            }
         }
-        .task { start() }
-        .onDisappear {
-            resizeRestart?.cancel()
-            observer.stop()
-        }
+        .task { conversation.start(config, session: session.id) }
+        .onDisappear { conversation.stop() }
     }
 
-    /// Terminal and message status stay above the composer; safeAreaInset also
-    /// gives the software keyboard room instead of covering the terminal.
+    /// Status stays above the composer; safeAreaInset also gives the software
+    /// keyboard room instead of covering the content.
     @ViewBuilder
     private var bottomPanel: some View {
         VStack(spacing: 8) {
-            banner
-            if let failure = keys.failure {
+            if mode == .conversation, let pending = conversation.pending {
+                PendingCard(pending: pending, tool: conversation.pendingTool,
+                            answer: { choice in
+                                await client.answer(session: session.id, choice: choice, expect: pending.message)
+                            },
+                            openTerminal: { mode = .terminal })
+            }
+            if mode == .terminal, let failure = keys.failure {
                 BannerLabel(text: failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
             if let delivery { DeliveryBanner(delivery: delivery) }
-            TerminalKeyBar { key in
-                keys.press(key.id, session: session.id, client: client)
+            if mode == .terminal {
+                TerminalKeyBar { key in
+                    keys.press(key.id, session: session.id, client: client)
+                }
             }
             composer
         }
@@ -144,7 +158,7 @@ struct ObserveView: View {
                         Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
                     }
                 }
-                let commands = QuickCommand.commands(for: currentSession.program)
+                let commands = QuickCommand.commands(for: currentSession)
                 if !commands.isEmpty {
                     Section("Claude Code 命令") {
                         ForEach(commands, id: \.self) { command in
@@ -197,49 +211,14 @@ struct ObserveView: View {
         }
     }
 
-    /// When a terminal is already on screen, problems show below it instead of replacing it.
-    @ViewBuilder
-    private var banner: some View {
-        if grid != nil {
-            switch observer.phase {
-            case .closed(let reason):
-                BannerLabel(text: reason, systemImage: "stop.circle")
-            case .failed(let reason):
-                HStack {
-                    BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
-                    Button("重试", action: start).buttonStyle(.bordered)
-                }
-            default:
-                EmptyView()
-            }
-        }
-    }
-
     private var subtitle: String {
         let place = currentSession.machine ?? "本机"
-        if let grid { return "查看 · \(place) · \(grid.cols)×\(grid.rows)" }
-        return "查看 · \(place)"
-    }
-
-    private func start() {
-        let feed = TerminalFeed()
-        self.feed = feed
-        grid = nil
-        attempt += 1
-        observer.onBytes = { feed.receive($0) }
-        observer.start(config, session: session.id)
-    }
-
-    /// Bytes drawn for the new size would land in a grid of the old one, and
-    /// the local terminal would rewrap what it already holds; neither matches
-    /// the desktop any more. A fresh attach starts from core's exact screen.
-    private func restartAfterResize() {
-        resizeRestart?.cancel()
-        resizeRestart = Task {
-            // Dragging a desktop split resizes many times; attach once it settles.
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            start()
+        switch mode {
+        case .conversation:
+            return "对话 · \(place)"
+        case .terminal:
+            if let grid { return "查看 · \(place) · \(grid.cols)×\(grid.rows)" }
+            return "查看 · \(place)"
         }
     }
 
@@ -293,17 +272,5 @@ private struct DeliveryBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
-    }
-}
-
-private struct BannerLabel: View {
-    let text: String
-    let systemImage: String
-
-    var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(.footnote)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
     }
 }

@@ -126,6 +126,15 @@ enum QuickCommand {
         program?.localizedCaseInsensitiveContains("claude") == true ? claudeCode : []
     }
 
+    static func commands(for session: Session) -> [String] {
+        isClaudeCode(session) ? claudeCode : []
+    }
+
+    /// By its own status report, or by the command it was started with.
+    static func isClaudeCode(_ session: Session) -> Bool {
+        session.status?.app == "claude-code" || !commands(for: session.program).isEmpty
+    }
+
     static func insert(_ command: String, into draft: String) -> String {
         if draft.isEmpty { return command }
         return draft.hasSuffix(" ") || draft.hasSuffix("\n") ? draft + command : draft + " " + command

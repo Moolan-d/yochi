@@ -42,4 +42,23 @@ final class ObservedTerminalTests: XCTestCase {
         )
         XCTAssertEqual(offset, .zero)
     }
+
+    /// Ghostty's cell at font size 9 measured 7.33 pt wide on an iPhone 18 Pro (402 pt).
+    private let cell: CGFloat = 22.0 / 3
+
+    func testNarrowGridOpensFitted() {
+        let fit = 402 / (60 * cell)
+        XCTAssertEqual(ObservedTerminalScrollView.defaultZoom(fit: fit, cellWidth: cell), fit)
+    }
+
+    func testWideGridOpensAtAReadableSize() {
+        let fit = 402 / (200 * cell)
+        let zoom = ObservedTerminalScrollView.defaultZoom(fit: fit, cellWidth: cell)
+        XCTAssertEqual(zoom * cell, ObservedTerminalScrollView.readableCellWidth, accuracy: 0.001)
+    }
+
+    func testGridSmallerThanTheScreenIsNeverShrunk() {
+        let fit = 402 / (40 * cell)
+        XCTAssertEqual(ObservedTerminalScrollView.defaultZoom(fit: fit, cellWidth: cell), fit)
+    }
 }

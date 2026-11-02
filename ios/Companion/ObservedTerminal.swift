@@ -49,9 +49,13 @@ struct ObservedTerminal: UIViewRepresentable {
 /// at a readable font size; a double tap alternates that with the whole grid.
 final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate {
     private static let fontSize: Float = 9
-    private static let readableZoomScale: CGFloat = 12 / 9
-    /// A grid that fits the width at this size or larger opens fitted, with no sideways panning.
-    private static let fittedFontSize: CGFloat = 8.5
+    /// Readability is judged by a cell's width on screen, in points: Ghostty's
+    /// cell at font size 9 is about 7.3 pt wide, not what 9 pt suggests.
+    /// A grid whose cells are at least this wide when it fits the screen opens
+    /// fitted, with no sideways panning (about 72 columns on an iPhone Pro).
+    static let fittedCellWidth: CGFloat = 5.5
+    /// Otherwise it opens zoomed to this cell width, about 60 columns across.
+    static let readableCellWidth: CGFloat = 6.6
     /// Ghostty's default theme backgrounds (Alabaster, Afterglow), so the area
     /// around a grid shorter than the screen reads as part of the terminal.
     private static let terminalBackground = UIColor { traits in
@@ -138,10 +142,42 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
             return
         }
         if !feed.isOpen {
-            feed.open()
-            UIView.animate(withDuration: 0.2) { self.terminal.alpha = 1 }
-            revealInitialViewport()
+            afterFrames(2) { [weak self] in self?.openOnce() }
         }
+    }
+
+    private var framesLeft = 0
+    private var afterFramesBody: (() -> Void)?
+    private var displayLink: CADisplayLink?
+
+    /// Runs `body` once the surface has drawn `n` more frames. Ghostty applies
+    /// a surface resize on its next draws, and bytes fed before that are laid
+    /// out in the old grid: the snapshot's cursor lands mid-screen and the
+    /// rows below it are lost.
+    private func afterFrames(_ n: Int, _ body: @escaping () -> Void) {
+        afterFramesBody = body
+        framesLeft = n
+        guard displayLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(frameTick))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func frameTick() {
+        framesLeft -= 1
+        guard framesLeft <= 0 else { return }
+        displayLink?.invalidate()
+        displayLink = nil
+        let body = afterFramesBody
+        afterFramesBody = nil
+        body?()
+    }
+
+    private func openOnce() {
+        guard !feed.isOpen else { return }
+        feed.open()
+        UIView.animate(withDuration: 0.2) { self.terminal.alpha = 1 }
+        revealInitialViewport()
     }
 
     private func sizeTerminal() {
@@ -171,8 +207,19 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     }
 
     private var defaultZoomScale: CGFloat {
-        if minimumZoomScale * CGFloat(Self.fontSize) >= Self.fittedFontSize { return minimumZoomScale }
-        return max(minimumZoomScale, Self.readableZoomScale)
+        guard let cell else { return minimumZoomScale }
+        return Self.defaultZoom(fit: minimumZoomScale, cellWidth: cell.width)
+    }
+
+    private var readableZoomScale: CGFloat {
+        guard let cell else { return 1 }
+        return Self.readableCellWidth / cell.width
+    }
+
+    /// The whole width when that stays readable, else a readable cell width.
+    static func defaultZoom(fit: CGFloat, cellWidth: CGFloat) -> CGFloat {
+        if fit * cellWidth >= fittedCellWidth { return fit }
+        return max(fit, readableCellWidth / cellWidth)
     }
 
     /// The height not covered by the navigation bar or the composer.
@@ -305,7 +352,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         } else {
             // Zoom to a readable font around the tap.
             let point = gesture.location(in: terminal)
-            let scale = max(minimumZoomScale * 1.5, Self.readableZoomScale)
+            let scale = max(minimumZoomScale * 1.5, readableZoomScale)
             let size = CGSize(width: bounds.width / scale, height: bounds.height / scale)
             zoomMode = .custom
             zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,

@@ -114,6 +114,24 @@ final class GatewayClient {
         }
     }
 
+    /// Answers what the Agent waits for: `allow`, `deny`, or an option's
+    /// number. The Gateway refuses (`changed`) unless core still shows `expect`.
+    func answer(session: String, choice: String, expect: String?) async -> KeysResult {
+        struct Request: Encodable {
+            let type = "answer"
+            let id: String
+            let session: String
+            let choice: String
+            let expect: String?
+        }
+        let reply = await request { Request(id: $0, session: session, choice: choice, expect: expect) }
+        switch reply {
+        case .keysSent: return .pressed
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .sent, .unknown: return .unknown
+        }
+    }
+
     private func request(_ make: (String) -> some Encodable) async -> Reply {
         guard phase == .connected, let socket else {
             return .failed(kind: "unavailable", message: "未连接")

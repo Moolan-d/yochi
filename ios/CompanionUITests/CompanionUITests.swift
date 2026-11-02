@@ -19,8 +19,8 @@ final class CompanionUITests: XCTestCase {
 
         pair(app, host: nil, code: env("COMPANION_CODE"))
         waitUntilPaired(app)
-        // Section headers are cells too; session rows are the buttons in them.
-        let session = app.cells.buttons.firstMatch
+        // The echo terminal: an Agent's session would open its conversation instead.
+        let session = testSession(app)
         XCTAssert(session.waitForExistence(timeout: 15), "no sessions after pairing")
         snapshot("2 sessions")
 
@@ -145,7 +145,62 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// Needs a real Claude Code in manual permission mode, named
+    /// companion-uitest (COMPANION_AGENT_SESSION); skipped otherwise.
+    @MainActor
+    func testConversationAnswersAgent() throws {
+        guard let agent = ProcessInfo.processInfo.environment["COMPANION_AGENT_SESSION"], !agent.isEmpty else {
+            throw XCTSkip("COMPANION_AGENT_SESSION is not set")
+        }
+        let app = launchUnpaired(observing: agent)
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+        XCTAssert(app.descendants(matching: .any)["sessionMode"].waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(text(app, containing: "对话").waitForExistence(timeout: 5))
+        snapshot("1 conversation")
+
+        send(app, "Use the AskUserQuestion tool to ask me: Tea or Coffee? Then reply with my choice in one short sentence.")
+        let coffee = app.buttons["option-2"]
+        XCTAssert(coffee.waitForExistence(timeout: 90), "no question card")
+        snapshot("2 question")
+        coffee.tap()
+        XCTAssert(text(app, containing: "已选：Coffee").waitForExistence(timeout: 30), "answer not in the conversation")
+        XCTAssert(app.buttons["option-2"].waitForNonExistence(timeout: 10), "question card stayed")
+        snapshot("3 answered")
+
+        send(app, "Run the shell command: date > stamp.txt")
+        let allow = app.buttons["allowPending"]
+        XCTAssert(allow.waitForExistence(timeout: 90), "no permission card")
+        snapshot("4 permission")
+        allow.tap()
+        XCTAssert(allow.waitForNonExistence(timeout: 20), "permission card stayed")
+        snapshot("5 approved")
+
+        send(app, "Run the shell command: rm stamp.txt")
+        let deny = app.buttons["denyPending"]
+        XCTAssert(deny.waitForExistence(timeout: 90), "no second permission card")
+        deny.tap()
+        confirm(app, "拒绝")
+        XCTAssert(deny.waitForNonExistence(timeout: 20), "permission card stayed after denying")
+        XCTAssert(text(app, containing: "已中断").waitForExistence(timeout: 20))
+        snapshot("6 denied")
+
+        app.buttons["终端"].tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        snapshot("7 terminal")
+        leaveAndUnpair(app)
+    }
+
     // MARK: - Helpers
+
+    @MainActor
+    private func send(_ app: XCUIApplication, _ message: String) {
+        let field = composer(app)
+        field.tap()
+        field.typeText(message)
+        app.buttons["发送消息"].tap()
+        XCTAssertTrue(waitUntilCleared(field, timeout: 20), "message was not sent")
+    }
 
     @MainActor
     private func launchUnpaired(observing id: String? = nil) -> XCUIApplication {
