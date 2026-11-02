@@ -24,6 +24,18 @@ struct NewSessionView: View {
         var argv: [String] { self == .agent ? ["claude"] : [] }
     }
 
+    /// Directories of the chosen machine's live sessions, newest first as the
+    /// list orders them. Picking one beats typing a path that may not exist.
+    private var recentDirectories: [String] {
+        var seen = Set<String>()
+        return client.sessions
+            .filter { $0.machine == machine }
+            .map(\.cwd)
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .prefix(4)
+            .map { $0 }
+    }
+
     /// Machines with a live session; a machine with none can't be chosen yet.
     private var machines: [String] {
         Array(Set(client.sessions.compactMap(\.machine) + client.spaces.compactMap(\.machine))).sorted()
@@ -62,6 +74,28 @@ struct NewSessionView: View {
                         .accessibilityIdentifier("newSessionDirectory")
                 } footer: {
                     Text(directoryHint)
+                }
+                if !recentDirectories.isEmpty {
+                    Section("最近目录") {
+                        ForEach(recentDirectories, id: \.self) { path in
+                            Button {
+                                directory = path
+                            } label: {
+                                HStack {
+                                    Text(path)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 8)
+                                    if directory == path {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
+                            }
+                            .accessibilityIdentifier("recentDirectory")
+                        }
+                    }
                 }
                 if let failure {
                     Section {
@@ -109,7 +143,10 @@ struct NewSessionView: View {
                 onCreated(session)
                 dismiss()
             case .failed(_, let message):
-                failure = message
+                // Name the directory that was actually sent: a stray invisible
+                // character makes the core report a missing program instead.
+                let sent = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+                failure = sent.isEmpty ? message : "在「\(sent)」启动失败：\(message)"
             case .unknown:
                 failure = "结果未知，请返回列表查看是否已创建"
             }
