@@ -119,6 +119,8 @@ struct ObservedTerminal: UIViewRepresentable {
     @Binding var grid: TerminalGrid?
     /// Set by a long press; the page presents the selection sheet.
     @Binding var selection: TerminalTextSelection?
+    /// A drag toward earlier output on a full-screen program.
+    var onScrollBack: () -> Void = {}
     /// False while the terminal itself is sized to the phone (a takeover
     /// viewer): core already draws for the phone grid, so nothing is reflowed.
     var reflow = true
@@ -128,12 +130,14 @@ struct ObservedTerminal: UIViewRepresentable {
                                         reflow: reflow)
         view.onGridChange = { grid = $0 }
         view.onTextSelection = { selection = $0 }
+        view.onScrollBack = onScrollBack
         return view
     }
 
     func updateUIView(_ view: ObservedTerminalView, context: Context) {
         view.onGridChange = { grid = $0 }
         view.onTextSelection = { selection = $0 }
+        view.onScrollBack = onScrollBack
     }
 }
 
@@ -144,9 +148,10 @@ struct ObservedTerminal: UIViewRepresentable {
 /// full-screen TUI drawn for the desktop may land on the wrong columns. In a
 /// takeover the terminal itself is phone-sized and the bytes are used as-is.
 final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
-    TerminalSurfaceTextSelectionRequestDelegate {
+    TerminalSurfaceTextSelectionRequestDelegate, UIGestureRecognizerDelegate {
     var onGridChange: ((TerminalGrid) -> Void)?
     var onTextSelection: ((TerminalTextSelection) -> Void)?
+    var onScrollBack: (() -> Void)?
 
     private let feed: TerminalFeed
     private let desktop: TerminalGrid
@@ -157,6 +162,8 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
     /// One cell in points, once Ghostty has measured it.
     private var cell: CGSize?
     private var lastGrid: TerminalGrid?
+    /// Whether this drag already asked for the history.
+    private var scrollBackSent = false
 
     /// True until the first paint is taken and reflowed to the phone's grid.
     private var preparing = true
@@ -188,6 +195,13 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
         for gesture in terminal.gestureRecognizers ?? [] where gesture is UIPinchGestureRecognizer {
             gesture.isEnabled = false
         }
+        // A full-screen program's history never reaches this terminal, and
+        // Ghostty here lacks its mouse modes to pass the wheel on; a drag
+        // down asks the page to read the history instead.
+        let scrollBack = UIPanGestureRecognizer(target: self, action: #selector(dragged(_:)))
+        scrollBack.delegate = self
+        scrollBack.cancelsTouchesInView = false
+        addGestureRecognizer(scrollBack)
         // A takeover surface has nothing to reflow, so it can show at once.
         preparing = reflow
         terminal.alpha = reflow ? 0 : 1
@@ -196,7 +210,7 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
         accessibilityIdentifier = "terminalGrid"
-        accessibilityHint = "终端画面只读，按手机宽度排版；长按可选取文字复制，拖动查看历史，可用下方按键栏按键，或发送 Agent 消息。"
+        accessibilityHint = "终端画面只读，按手机宽度排版；长按可选取文字复制，拖动查看历史（全屏程序打开历史文本），可用下方按键栏按键，或发送 Agent 消息。"
     }
 
     @available(*, unavailable)
@@ -333,6 +347,31 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
         let body = frameBody
         frameBody = nil
         body?()
+    }
+
+    // MARK: History
+
+    @objc private func dragged(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            scrollBackSent = false
+        case .changed where !scrollBackSent && gesture.translation(in: self).y > 40:
+            scrollBackSent = true
+            onScrollBack?()
+        default:
+            break
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard gesture.view === self else { return super.gestureRecognizerShouldBegin(gesture) }
+        return feed.isFullScreen
+    }
+
+    /// Ghostty's own pan still runs, so a drag that is not a scroll back loses nothing.
+    func gestureRecognizer(_ gesture: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 
     // MARK: Text selection

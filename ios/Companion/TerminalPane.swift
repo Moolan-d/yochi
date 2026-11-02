@@ -7,6 +7,7 @@ import SwiftUI
 struct TerminalPane: View {
     let session: String
     let config: GatewayConfig
+    let client: GatewayClient
     /// The phone-sized grid on screen, for the title; nil until reflowed.
     @Binding var grid: TerminalGrid?
 
@@ -25,6 +26,9 @@ struct TerminalPane: View {
     @State private var resizeRestart: Task<Void, Never>?
     @State private var selection: TerminalTextSelection?
     @State private var copiedNotice = false
+    @State private var showingHistory = false
+    /// A drag still under way when the history closes must not reopen it.
+    @State private var historyClosedAt = Date.distantPast
     @AppStorage(TerminalTextSize.key) private var fontSize = TerminalTextSize.standard
     @Environment(\.scenePhase) private var scenePhase
 
@@ -32,11 +36,12 @@ struct TerminalPane: View {
         ZStack {
             if let takeover {
                 ObservedTerminal(feed: feed, fontSize: Float(fontSize), desktopGrid: takeover,
-                                 grid: $grid, selection: $selection, reflow: false)
+                                 grid: $grid, selection: $selection, onScrollBack: showHistoryAfterDrag,
+                                 reflow: false)
                     .id(attempt)
             } else if let desktop {
                 ObservedTerminal(feed: feed, fontSize: Float(fontSize), desktopGrid: desktop,
-                                 grid: $grid, selection: $selection)
+                                 grid: $grid, selection: $selection, onScrollBack: showHistoryAfterDrag)
                     .id(attempt)
             }
             switch observer.phase {
@@ -60,6 +65,9 @@ struct TerminalPane: View {
         .safeAreaInset(edge: .bottom) { banner }
         .sheet(item: $selection) { selection in
             TerminalTextSheet(selection: selection, onCopied: showCopied)
+        }
+        .sheet(isPresented: $showingHistory, onDismiss: { historyClosedAt = .now }) {
+            TerminalHistorySheet(session: session, client: client)
         }
         .overlay(alignment: .top) {
             if copiedNotice {
@@ -158,6 +166,7 @@ struct TerminalPane: View {
                         HStack(spacing: 10) {
                             BannerLabel(text: "全屏界面 · 按手机宽度显示会错位",
                                         systemImage: "exclamationmark.triangle")
+                            historyButton
                             Button("适配手机") { confirmingTakeover = true }
                                 .buttonStyle(.bordered)
                                 .accessibilityIdentifier("takeoverButton")
@@ -168,6 +177,21 @@ struct TerminalPane: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }
+    }
+
+    /// A full-screen program's history never reaches this terminal; dragging
+    /// toward it, or this button, reads it from core instead.
+    private var historyButton: some View {
+        Button("历史") { showingHistory = true }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("查看历史")
+            .accessibilityIdentifier("terminalHistoryButton")
+    }
+
+    private func showHistoryAfterDrag() {
+        guard !showingHistory, selection == nil,
+              Date().timeIntervalSince(historyClosedAt) > 1 else { return }
+        showingHistory = true
     }
 
     /// The sheet closed after copying: confirm it somewhere the user is

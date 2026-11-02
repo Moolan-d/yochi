@@ -26,11 +26,19 @@ final class GatewayClient {
         case unknown
     }
 
+    enum HistoryResult {
+        /// `complete` is false when core read less than asked; `why` says
+        /// when it read only the screen (`working`).
+        case read(text: String, complete: Bool, why: String?)
+        case failed(kind: String, message: String)
+    }
+
     /// A reply to any request the app makes on this socket, matched by id.
     private enum Reply {
         case sent(turn: UInt64, status: String?, started: Bool?)
         case keysSent
         case runCreated(session: String)
+        case history(text: String, complete: Bool, why: String?)
         case failed(kind: String, message: String)
         case unknown
     }
@@ -102,7 +110,7 @@ final class GatewayClient {
         switch reply {
         case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .keysSent, .runCreated, .unknown: return .unknown
+        case .keysSent, .runCreated, .history, .unknown: return .unknown
         }
     }
 
@@ -119,7 +127,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .unknown: return .unknown
+        case .sent, .runCreated, .history, .unknown: return .unknown
         }
     }
 
@@ -137,7 +145,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .unknown: return .unknown
+        case .sent, .runCreated, .history, .unknown: return .unknown
         }
     }
 
@@ -155,7 +163,23 @@ final class GatewayClient {
         switch reply {
         case .runCreated(let session): return .created(session: session)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .unknown: return .unknown
+        case .sent, .keysSent, .history, .unknown: return .unknown
+        }
+    }
+
+    /// The screen and the history above it as text. A full-screen program
+    /// such as Claude Code keeps its history to itself; core reads it by
+    /// scrolling the program and putting it back. Nothing is attached or typed.
+    func readHistory(session: String) async -> HistoryResult {
+        struct Request: Encodable {
+            let type = "history"
+            let id: String
+            let session: String
+        }
+        switch await request({ Request(id: $0, session: session) }) {
+        case .history(let text, let complete, let why): return .read(text: text, complete: complete, why: why)
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .sent, .keysSent, .runCreated, .unknown: return .failed(kind: "unknown", message: "没有收到历史")
         }
     }
 
@@ -254,8 +278,10 @@ final class GatewayClient {
                 complete(id: id, with: .keysSent)
             case .runCreated(let id, let session):
                 complete(id: id, with: .runCreated(session: session))
-            case .runFailed(let id, let kind, let message):
+            case .runFailed(let id, let kind, let message), .historyFailed(let id, let kind, let message):
                 complete(id: id, with: .failed(kind: kind, message: message))
+            case .history(let id, let text, let complete, let why):
+                self.complete(id: id, with: .history(text: text, complete: complete, why: why))
             case .unknown:
                 break
             }

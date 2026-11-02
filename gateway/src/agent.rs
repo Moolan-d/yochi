@@ -1,6 +1,6 @@
-//! One Agent Message or key press per plain-mode `hc connect`: hello,
-//! terminal.send or terminal.keys, then close. This never occupies the
-//! connection that pushes the session list.
+//! One Agent Message, key press or history read per plain-mode `hc connect`:
+//! hello, terminal.send, terminal.keys or terminal.read, then close. This
+//! never occupies the connection that pushes the session list.
 
 use crate::core::{RequestError, request as request_core};
 use crate::herdr::CoreView;
@@ -14,6 +14,8 @@ pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 /// Enough for a chord sequence such as `down down enter`; the app sends one tap at a time.
 pub const MAX_KEYS: usize = 8;
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+/// core's own cap on history lines.
+pub const MAX_HISTORY_LINES: usize = 1000;
 
 pub struct Request {
     pub id: String,
@@ -27,6 +29,13 @@ pub struct KeysRequest {
     pub id: String,
     pub session: String,
     pub keys: Vec<String>,
+}
+
+/// The screen plus history above it, as text.
+pub struct HistoryRequest {
+    pub id: String,
+    pub session: String,
+    pub lines: usize,
 }
 
 /// An answer to what the Agent is waiting for: `allow` or `deny` a
@@ -57,6 +66,20 @@ pub enum Response {
         id: String,
     },
     KeysFailed {
+        id: String,
+        kind: String,
+        message: String,
+    },
+    History {
+        id: String,
+        text: String,
+        /// False when core read less than was asked: the screen alone, or the
+        /// history cut short.
+        complete: bool,
+        /// Why only the screen came back, when core says (`working`).
+        why: Option<String>,
+    },
+    HistoryFailed {
         id: String,
         kind: String,
         message: String,
@@ -101,6 +124,44 @@ pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequ
             error["message"].as_str().unwrap_or("按键发送失败").into(),
         ),
         None => Response::KeysSent { id: request.id },
+    }
+}
+
+/// A full-screen program (Claude Code) keeps its history to itself, so a
+/// viewer's scrollback has none; core reads it by scrolling the program and
+/// putting it back. Like a key press this never attaches.
+pub async fn history(hc: &str, view: &watch::Receiver<CoreView>, request: HistoryRequest) -> Response {
+    let failed = |kind: &str, message: String| Response::HistoryFailed { id: request.id.clone(), kind: kind.into(), message };
+    if !view.borrow().sessions.iter().any(|session| session.id == request.session) {
+        return failed("not_found", "会话不存在或已结束".into());
+    }
+    let params = json!({"terminal": request.session, "lines": request.lines.min(MAX_HISTORY_LINES)});
+    let reply = match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.read", params)).await {
+        Ok(Ok(reply)) => reply,
+        // A read changes nothing, so it fails the same either side of the send.
+        Ok(Err(RequestError::BeforeSend(error) | RequestError::AfterSend(error))) => {
+            return failed("unavailable", format!("{error:#}"));
+        }
+        Err(_) => return failed("timeout", "读取历史超时".into()),
+    };
+    map_history(request.id, reply)
+}
+
+fn map_history(id: String, reply: Value) -> Response {
+    if let Some(error) = reply.get("error") {
+        let kind = error["data"]["kind"].as_str().unwrap_or("unavailable").into();
+        let message = error["message"].as_str().unwrap_or("读取历史失败").into();
+        return Response::HistoryFailed { id, kind, message };
+    }
+    let result = &reply["result"];
+    let Some(text) = result["text"].as_str() else {
+        return Response::HistoryFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的历史".into() };
+    };
+    Response::History {
+        id,
+        text: text.into(),
+        complete: result["complete"].as_bool().unwrap_or(false),
+        why: result["why"].as_str().map(str::to_owned),
     }
 }
 
@@ -312,6 +373,24 @@ mod tests {
             after,
             Response::SendFailed { kind, .. } if kind == "unknown"
         ));
+    }
+
+    #[test]
+    fn maps_history_result() {
+        let response = map_history("h1".into(), json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"text": "1\n2\n", "complete": false, "how": "screen", "why": "working"},
+        }));
+        assert!(matches!(
+            response,
+            Response::History { id, text, complete: false, why: Some(why) }
+                if id == "h1" && text == "1\n2\n" && why == "working"
+        ));
+        let response = map_history("h2".into(), json!({
+            "jsonrpc": "2.0", "id": 1,
+            "error": {"code": -32000, "message": "no terminal", "data": {"kind": "not_found"}},
+        }));
+        assert!(matches!(response, Response::HistoryFailed { kind, .. } if kind == "not_found"));
     }
 
     #[test]

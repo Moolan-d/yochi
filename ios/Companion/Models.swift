@@ -64,10 +64,13 @@ enum ServerMessage: Decodable {
     case keysFailed(id: String, kind: String, message: String)
     case runCreated(id: String, session: String)
     case runFailed(id: String, kind: String, message: String)
+    case history(id: String, text: String, complete: Bool, why: String?)
+    case historyFailed(id: String, kind: String, message: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
         case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session
+        case text, complete, why
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +109,17 @@ enum ServerMessage: Decodable {
                 session: try c.decode(String.self, forKey: .session))
         case "run_failed":
             self = .runFailed(
+                id: try c.decode(String.self, forKey: .id),
+                kind: try c.decode(String.self, forKey: .kind),
+                message: try c.decode(String.self, forKey: .message))
+        case "history":
+            self = .history(
+                id: try c.decode(String.self, forKey: .id),
+                text: try c.decode(String.self, forKey: .text),
+                complete: try c.decode(Bool.self, forKey: .complete),
+                why: try c.decodeIfPresent(String.self, forKey: .why))
+        case "history_failed":
+            self = .historyFailed(
                 id: try c.decode(String.self, forKey: .id),
                 kind: try c.decode(String.self, forKey: .kind),
                 message: try c.decode(String.self, forKey: .message))

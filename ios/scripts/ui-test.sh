@@ -27,7 +27,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; rm -rf "$state"' EXIT
+trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-pager >/dev/null 2>&1 || true; rm -rf "$state"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -52,8 +52,21 @@ start_alt_session() {
         python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)'
 }
 
+# A terminal with more output than one screen, for the history test.
+start_history_session() {
+    hc run --bg --rm --no-parent --no-notify --name companion-uitest-history --json \
+        -- /bin/sh -c 'seq 1 400; exec /bin/cat' > /dev/null
+}
+
+# A full-screen program that scrolls its own history with the wheel, as
+# Claude Code does: the terminal holds none of the 400 lines above the end.
+start_pager_session() {
+    hc run --bg --rm --no-parent --no-notify --name companion-uitest-pager --json \
+        -- /bin/sh -c 'seq 1 400 | less --mouse +G' > /dev/null
+}
+
 # TESTS="testA testB" runs a subset.
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testTakeOverFullScreen}; do
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testTakeOverFullScreen testTerminalScrollsHistory testFullScreenHistory}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
@@ -65,6 +78,15 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         alt_session=$(start_alt_session)
         extra="TEST_RUNNER_COMPANION_ALT_SESSION_NAME=companion-uitest-alt"
     fi
+    if [ "$test" = testTerminalScrollsHistory ]; then
+        # HISTORY_SESSION_NAME points it at an existing session instead, read-only.
+        [ -n "${HISTORY_SESSION_NAME:-}" ] || start_history_session
+        extra="TEST_RUNNER_COMPANION_HISTORY_SESSION_NAME=${HISTORY_SESSION_NAME:-companion-uitest-history}"
+    fi
+    if [ "$test" = testFullScreenHistory ]; then
+        start_pager_session
+        extra="TEST_RUNNER_COMPANION_PAGER_SESSION_NAME=companion-uitest-pager"
+    fi
     env $extra \
         TEST_RUNNER_COMPANION_HOST="$COMPANION_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
         TEST_RUNNER_COMPANION_SESSION="$test_session" \
@@ -72,6 +94,8 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         -derivedDataPath build -quiet test-without-building \
         -only-testing:"CompanionUITests/CompanionUITests/$test" \
         -resultBundlePath "$RESULTS/$test.xcresult" || failed=1
+    hc kill companion-uitest-history >/dev/null 2>&1 || true
+    hc kill companion-uitest-pager >/dev/null 2>&1 || true
     if [ -n "${alt_session:-}" ]; then
         hc kill companion-uitest-alt >/dev/null 2>&1 || true
         alt_session=

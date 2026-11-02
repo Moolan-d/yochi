@@ -109,6 +109,85 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// Dragging down reveals earlier output. The history terminal printed
+    /// 1…400, so the viewport starts near 400; the long-press sheet reads it.
+    @MainActor
+    func testTerminalScrollsHistory() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_HISTORY_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no history session")
+        session.tap()
+        if app.buttons["终端"].waitForExistence(timeout: 3) { app.buttons["终端"].tap() }
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        let before = try viewportNumbers(app, terminal)
+        snapshot("1 bottom")
+
+        for _ in 0..<3 {
+            terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+                .press(forDuration: 0.05, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+        }
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+        snapshot("2 dragged")
+        let after = try viewportNumbers(app, terminal)
+        XCTAssertLessThan(after.max() ?? .max, before.min() ?? 0,
+                          "dragging did not scroll into history: \(before.min() ?? -1)… → \(after.max() ?? -1)")
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
+    /// The numbers on screen, read through the long-press selection sheet.
+    @MainActor
+    private func viewportNumbers(_ app: XCUIApplication, _ terminal: XCUIElement) throws -> [Int] {
+        terminal.press(forDuration: 1.0)
+        let view = app.textViews.firstMatch
+        XCTAssert(view.waitForExistence(timeout: 5), "no selection sheet")
+        let numbers = ((view.value as? String) ?? "").split(whereSeparator: \.isNewline)
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        app.buttons["取消"].tap()
+        XCTAssert(view.waitForNonExistence(timeout: 5), "selection sheet did not close")
+        XCTAssertFalse(numbers.isEmpty, "no numbers in the viewport")
+        return numbers
+    }
+
+    /// A full-screen program keeps its history to itself: dragging opens it
+    /// as text read through core. The pager shows 400 at the bottom; 1 is
+    /// only in its history.
+    @MainActor
+    func testFullScreenHistory() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_PAGER_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no pager session")
+        session.tap()
+        if app.buttons["终端"].waitForExistence(timeout: 3) { app.buttons["终端"].tap() }
+        XCTAssert(app.buttons["terminalHistoryButton"].waitForExistence(timeout: 15), "not seen as full screen")
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+            .press(forDuration: 0.05, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)))
+
+        let history = app.textViews["terminalHistory"]
+        XCTAssert(history.waitForExistence(timeout: 20), "dragging did not open the history")
+        snapshot("1 history")
+        let lines = ((history.value as? String) ?? "").split(whereSeparator: \.isNewline).map(String.init)
+        XCTAssertEqual(lines.first, "1", "history does not reach the top")
+        XCTAssert(lines.contains("400"), "history lost the screen")
+        app.buttons["完成"].tap()
+        XCTAssert(history.waitForNonExistence(timeout: 5), "history did not close")
+
+        app.buttons["terminalHistoryButton"].tap()
+        XCTAssert(history.waitForExistence(timeout: 20), "the button did not open the history")
+        app.buttons["完成"].tap()
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
     @MainActor
     func testInviteLinkReplacesPairing() throws {
         let app = launchUnpaired()

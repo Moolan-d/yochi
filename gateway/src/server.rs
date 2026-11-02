@@ -89,6 +89,13 @@ enum AppMessage {
         session: String,
         keys: Vec<String>,
     },
+    /// Read the screen and history above it, without attaching.
+    History {
+        id: String,
+        session: String,
+        #[serde(default = "default_history_lines")]
+        lines: usize,
+    },
     /// Answer what the Agent is waiting for, if it still is.
     Answer {
         id: String,
@@ -108,6 +115,10 @@ enum AppMessage {
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
+}
+
+fn default_history_lines() -> usize {
+    agent::MAX_HISTORY_LINES
 }
 
 pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
@@ -481,6 +492,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::History { id, session, lines }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = agent::HistoryRequest { id, session, lines };
+                            let response = agent::history(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     Ok(AppMessage::Keys { id, session, keys }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -531,6 +553,8 @@ mod tests {
         let message: AppMessage =
             serde_json::from_str(r#"{"type":"keys","id":"k1","session":"t1","keys":["down","enter"]}"#).unwrap();
         assert!(matches!(message, AppMessage::Keys { keys, .. } if keys == ["down", "enter"]));
+        let message: AppMessage = serde_json::from_str(r#"{"type":"history","id":"h1","session":"t1"}"#).unwrap();
+        assert!(matches!(message, AppMessage::History { lines, .. } if lines == agent::MAX_HISTORY_LINES));
         let message: AppMessage = serde_json::from_str(
             r#"{"type":"answer","id":"a1","session":"t1","choice":"allow","expect":"approve Bash: ls"}"#,
         )
