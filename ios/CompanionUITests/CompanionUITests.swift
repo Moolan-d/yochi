@@ -76,6 +76,39 @@ final class CompanionUITests: XCTestCase {
         snapshot("6 unpaired")
     }
 
+    /// A full-screen program draws with absolute positions, so reflowing it to
+    /// the phone scrambles the screen. Taking over resizes the terminal itself
+    /// for as long as the page is open, and leaving gives the desktop its size
+    /// back.
+    @MainActor
+    func testTakeOverFullScreen() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_ALT_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no full-screen session")
+        session.tap()
+        XCTAssert(text(app, containing: "查看").waitForExistence(timeout: 10))
+
+        let offer = app.buttons["takeoverButton"]
+        XCTAssert(offer.waitForExistence(timeout: 20), "no takeover offer for a full-screen program")
+        snapshot("1 full screen")
+        offer.tap()
+        let confirm = app.buttons["开始适配"]
+        XCTAssert(confirm.waitForExistence(timeout: 5), "no takeover confirmation")
+        confirm.tap()
+        XCTAssert(text(app, containing: "已适配手机宽度").waitForExistence(timeout: 20),
+                  "takeover did not start")
+        RunLoop.current.run(until: .now.addingTimeInterval(2))
+        XCTAssertFalse(text(app, containing: "连接中断").exists, "takeover stream broke")
+        snapshot("2 taken over")
+
+        app.buttons["恢复桌面"].tap()
+        XCTAssert(offer.waitForExistence(timeout: 25), "did not return to the watcher view")
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testInviteLinkReplacesPairing() throws {
         let app = launchUnpaired()
@@ -374,7 +407,13 @@ final class CompanionUITests: XCTestCase {
 
     @MainActor
     private func testSession(_ app: XCUIApplication) -> XCUIElement {
-        app.cells.buttons.containing(.staticText, identifier: "companion-uitest").firstMatch
+        sessionCell(app, name: "companion-uitest")
+    }
+
+    /// A session is titled with the name it was started under.
+    @MainActor
+    private func sessionCell(_ app: XCUIApplication, name: String) -> XCUIElement {
+        app.cells.buttons.containing(.staticText, identifier: name).firstMatch
     }
 
     @MainActor

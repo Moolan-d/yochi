@@ -8,6 +8,28 @@ final class TerminalViewTests: XCTestCase {
         XCTAssertEqual(TerminalTextSize.clamped(11), 11)
     }
 
+    @MainActor
+    func testFullScreenFollowsTheAlternateScreenSwitches() {
+        let feed = TerminalFeed()
+        XCTAssertFalse(feed.isFullScreen)
+        feed.receive(Data("\u{1b}[?1049h".utf8))
+        XCTAssertTrue(feed.isFullScreen)
+        // The core's first paint turns the modes off before replaying the screen:
+        // the last switch is what the program currently uses.
+        feed.receive(Data("\u{1b}[?1049l\u{1b}[?1049h".utf8))
+        XCTAssertTrue(feed.isFullScreen)
+        feed.receive(Data("\u{1b}[?1049l".utf8))
+        XCTAssertFalse(feed.isFullScreen)
+    }
+
+    @MainActor
+    func testFullScreenSwitchSplitAcrossChunksIsStillRead() {
+        let feed = TerminalFeed()
+        feed.receive(Data("\u{1b}[?10".utf8))
+        feed.receive(Data("49h".utf8))
+        XCTAssertTrue(feed.isFullScreen)
+    }
+
     func testSelectionPrefersThePressedWord() {
         let text = "cd ~/app\nswift build\n"
         let word = (text as NSString).range(of: "swift build")

@@ -214,6 +214,11 @@ async fn upgrade(State(state): State<AppState>, headers: HeaderMap, ws: WebSocke
 #[derive(Deserialize)]
 struct ObserveQuery {
     session: String,
+    /// 1 takes the terminal over: it is resized to `cols` × `rows` while this
+    /// viewer stays attached, so a full-screen program redraws for the phone.
+    takeover: Option<u8>,
+    cols: Option<u16>,
+    rows: Option<u16>,
 }
 
 async fn observe(
@@ -225,18 +230,34 @@ async fn observe(
     let Some(device) = authorize(&headers, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(size) = session_size(&state.view.borrow(), &query.session) else {
+    let Some(observed) = session_size(&state.view.borrow(), &query.session) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size))
+    let (size, takeover) = match query.takeover.unwrap_or(0) == 1 {
+        true => match (query.cols, query.rows) {
+            (Some(cols), Some(rows)) if cols > 0 && rows > 0 => ((cols, rows), true),
+            _ => return (StatusCode::BAD_REQUEST, "takeover needs cols and rows").into_response(),
+        },
+        false => (observed, false),
+    };
+    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size, takeover))
 }
 
 fn session_size(view: &CoreView, id: &str) -> Option<(u16, u16)> {
     view.sessions.iter().find(|s| s.id == id).map(|s| (s.cols, s.rows))
 }
 
-async fn relay(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
-    let mut observer = match Observer::attach(&state.hc, &id, cols, rows).await {
+/// Streams one terminal. An observer only watches; a takeover viewer also
+/// sets the terminal's size, so the program redraws for the phone.
+async fn relay(
+    mut socket: WebSocket,
+    state: AppState,
+    device: String,
+    id: String,
+    (cols, rows): (u16, u16),
+    takeover: bool,
+) {
+    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, !takeover).await {
         Ok(observer) => observer,
         Err(err) => {
             let reason = Value::String(format!("{err:#}"));

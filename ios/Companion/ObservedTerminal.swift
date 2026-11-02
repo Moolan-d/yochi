@@ -51,11 +51,55 @@ final class TerminalFeed {
     /// apart from the live output that follows.
     private(set) var lastReceiveAt: Date?
 
+    /// Whether the program is on the alternate screen, which is what a full
+    /// screen TUI uses; such a screen cannot be reflowed without misplacing it.
+    private(set) var isFullScreen = false
+    var onFullScreenChange: ((Bool) -> Void)?
+    /// The tail of the last bytes, so a mode switch split between chunks is
+    /// still read whole.
+    private var modeTail = Data()
+
     func receive(_ data: Data) {
         hasOutput = true
         lastReceiveAt = Date()
+        noteScreenMode(data)
         if isOpen { session.receive(data) } else { held.append(data) }
     }
+
+    /// Follows the alternate-screen switches programs emit. The core's first
+    /// paint turns them all off, then on again when the screen it holds is
+    /// the alternate one.
+    private func noteScreenMode(_ data: Data) {
+        var bytes = modeTail
+        bytes.append(data)
+        var mode: Bool?
+        var index = bytes.startIndex
+        while let escape = bytes[index...].firstIndex(of: 0x1b) {
+            let rest = bytes[escape...]
+            var matched = false
+            for (sequence, fullScreen) in Self.screenModes where rest.starts(with: sequence) {
+                mode = fullScreen
+                index = rest.index(rest.startIndex, offsetBy: sequence.count)
+                matched = true
+                break
+            }
+            if !matched { index = rest.index(after: rest.startIndex) }
+        }
+        modeTail = bytes.suffix(8)
+        guard let mode, mode != isFullScreen else { return }
+        isFullScreen = mode
+        let change = onFullScreenChange
+        DispatchQueue.main.async { change?(mode) }
+    }
+
+    private static let screenModes: [([UInt8], Bool)] = [
+        (Array("\u{1b}[?1049h".utf8), true),
+        (Array("\u{1b}[?1047h".utf8), true),
+        (Array("\u{1b}[?47h".utf8), true),
+        (Array("\u{1b}[?1049l".utf8), false),
+        (Array("\u{1b}[?1047l".utf8), false),
+        (Array("\u{1b}[?47l".utf8), false),
+    ]
 
     func open() {
         guard !isOpen else { return }
@@ -75,9 +119,13 @@ struct ObservedTerminal: UIViewRepresentable {
     @Binding var grid: TerminalGrid?
     /// Set by a long press; the page presents the selection sheet.
     @Binding var selection: TerminalTextSelection?
+    /// False while the terminal itself is sized to the phone (a takeover
+    /// viewer): core already draws for the phone grid, so nothing is reflowed.
+    var reflow = true
 
     func makeUIView(context: Context) -> ObservedTerminalView {
-        let view = ObservedTerminalView(feed: feed, fontSize: fontSize, desktopGrid: desktopGrid)
+        let view = ObservedTerminalView(feed: feed, fontSize: fontSize, desktopGrid: desktopGrid,
+                                        reflow: reflow)
         view.onGridChange = { grid = $0 }
         view.onTextSelection = { selection = $0 }
         return view
@@ -93,7 +141,8 @@ struct ObservedTerminal: UIViewRepresentable {
 /// grid; Ghostty takes it there, then reflows the screen into however many
 /// columns the phone fits, so nothing is scaled or panned. Live output is
 /// then read at the local grid: exact for line-oriented programs, while a
-/// full-screen TUI drawn for the desktop may land on the wrong columns.
+/// full-screen TUI drawn for the desktop may land on the wrong columns. In a
+/// takeover the terminal itself is phone-sized and the bytes are used as-is.
 final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
     TerminalSurfaceTextSelectionRequestDelegate {
     var onGridChange: ((TerminalGrid) -> Void)?
@@ -101,6 +150,8 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
 
     private let feed: TerminalFeed
     private let desktop: TerminalGrid
+    /// False when core already draws for the phone: no desktop-sized bootstrap.
+    private let reflowing: Bool
     private let terminal = SelectionOnlyTerminalView(frame: .zero)
     private let controller: TerminalController
     /// One cell in points, once Ghostty has measured it.
@@ -110,14 +161,16 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
     /// True until the first paint is taken and reflowed to the phone's grid.
     private var preparing = true
     private var paintStarted = false
+    private var openScheduled = false
     private var pendingMetrics: TerminalGridMetrics?
     private var framesLeft = 0
     private var frameBody: (() -> Void)?
     private var displayLink: CADisplayLink?
 
-    init(feed: TerminalFeed, fontSize: Float, desktopGrid: TerminalGrid) {
+    init(feed: TerminalFeed, fontSize: Float, desktopGrid: TerminalGrid, reflow: Bool = true) {
         self.feed = feed
         self.desktop = desktopGrid
+        self.reflowing = reflow
         self.controller = TerminalController {
             $0.withFontSize(fontSize)
             $0.withWindowPaddingX(6)
@@ -135,7 +188,9 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
         for gesture in terminal.gestureRecognizers ?? [] where gesture is UIPinchGestureRecognizer {
             gesture.isEnabled = false
         }
-        terminal.alpha = 0
+        // A takeover surface has nothing to reflow, so it can show at once.
+        preparing = reflow
+        terminal.alpha = reflow ? 0 : 1
         addSubview(terminal)
 
         isAccessibilityElement = true
@@ -160,6 +215,16 @@ final class ObservedTerminalView: UIView, TerminalSurfaceGridResizeDelegate,
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0, bounds.height > 0 else { return }
+        if !reflowing {
+            terminal.frame = bounds
+            // Ghostty applies a size on its next draws; bytes fed before that
+            // would be laid out at the old one.
+            if !feed.isOpen && !openScheduled {
+                openScheduled = true
+                afterFrames(2) { [weak self] in self?.feed.open() }
+            }
+            return
+        }
         if preparing {
             if !paintStarted {
                 // A first size lets Ghostty measure a cell.

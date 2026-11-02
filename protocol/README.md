@@ -181,7 +181,9 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 ### 只读查看终端（Observer）
 
-`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并以 `observe` 模式 attach，因此手机不会向终端输入，也不会改变终端尺寸。
+`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach，因此手机不会向终端输入。默认以 `observe` 模式 attach，不改变终端尺寸。
+
+**适配手机（尺寸接管）。** 加 `takeover=1&cols=<列>&rows=<行>` 时，改以非 observe 的方式 attach，core 会把终端 resize 到这个网格，让全屏 TUI 按手机宽度重画；缺少 `cols`/`rows` 时返回 `400`。此时手机仍不输入，只是成为「最近活跃」的尺寸来源：桌面上打开该终端的窗口在手机查看期间会跟着变窄；连接断开（离开页面）后 core 把尺寸交还桌面窗口或默认尺寸。桌面端随后操作该终端时尺寸也会被桌面取回，此时的 `size` 帧会让 App 知道画面已不匹配手机网格。
 
 - **文本帧**（控制）：
   ```jsonc
@@ -190,5 +192,5 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
   {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
   ```
-- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后仍可能错位。
+- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后仍会错位——App 检测到全屏界面（首屏里的 `ESC[?1049h` 等切换）时提示「适配手机」，确认后按上面的尺寸接管重新 attach。
 - **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。

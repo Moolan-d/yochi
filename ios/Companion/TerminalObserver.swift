@@ -21,9 +21,11 @@ final class TerminalObserver {
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
 
-    func start(_ config: GatewayConfig, session: String) {
+    /// `takeover` asks the core to resize the terminal to the phone's grid for
+    /// as long as this stream stays open; nil only watches.
+    func start(_ config: GatewayConfig, session: String, takeover: TerminalGrid? = nil) {
         stop()
-        guard let url = config.observeURL(session: session) else {
+        guard let url = config.observeURL(session: session, takeover: takeover) else {
             phase = .failed("地址无效：\(config.host)")
             return
         }
@@ -125,12 +127,20 @@ private struct ObserveMessage: Decodable {
 }
 
 extension GatewayConfig {
-    func observeURL(session: String) -> URL? {
+    func observeURL(session: String, takeover: TerminalGrid? = nil) -> URL? {
         guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
             return nil
         }
         components.path = "/v0/observe"
-        components.queryItems = [URLQueryItem(name: "session", value: session)]
+        var items = [URLQueryItem(name: "session", value: session)]
+        if let takeover {
+            items += [
+                URLQueryItem(name: "takeover", value: "1"),
+                URLQueryItem(name: "cols", value: String(takeover.cols)),
+                URLQueryItem(name: "rows", value: String(takeover.rows)),
+            ]
+        }
+        components.queryItems = items
         return components.url
     }
 }

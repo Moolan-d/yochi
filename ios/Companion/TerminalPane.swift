@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// The session's terminal, read-only (`/v0/observe`): never the active
-/// viewer, so the desktop's grid is untouched.
+/// The session's terminal (`/v0/observe`), read-only: normally a watcher, so
+/// the desktop's grid is untouched. A full-screen program can be taken over
+/// instead, which resizes the terminal to the phone for as long as the page
+/// stays open; it still never types.
 struct TerminalPane: View {
     let session: String
     let config: GatewayConfig
@@ -12,6 +14,13 @@ struct TerminalPane: View {
     @State private var feed = TerminalFeed()
     /// Core's desktop grid, which the first paint is taken at.
     @State private var desktop: TerminalGrid?
+    /// The grid the still-running terminal was resized to, when taken over.
+    @State private var takeover: TerminalGrid?
+    /// Whether the program is on the alternate screen (a full-screen TUI).
+    @State private var fullScreen = false
+    @State private var confirmingTakeover = false
+    /// The desktop took the size back while this page had it.
+    @State private var sizeDrift = false
     @State private var attempt = 0
     @State private var resizeRestart: Task<Void, Never>?
     @State private var selection: TerminalTextSelection?
@@ -21,24 +30,28 @@ struct TerminalPane: View {
 
     var body: some View {
         ZStack {
-            if let desktop {
+            if let takeover {
+                ObservedTerminal(feed: feed, fontSize: Float(fontSize), desktopGrid: takeover,
+                                 grid: $grid, selection: $selection, reflow: false)
+                    .id(attempt)
+            } else if let desktop {
                 ObservedTerminal(feed: feed, fontSize: Float(fontSize), desktopGrid: desktop,
                                  grid: $grid, selection: $selection)
                     .id(attempt)
             }
             switch observer.phase {
-            case .connecting where desktop == nil:
+            case .connecting where desktop == nil && takeover == nil:
                 ProgressView("正在连接…")
-            case .failed(let reason) where desktop == nil:
+            case .failed(let reason) where desktop == nil && takeover == nil:
                 ContentUnavailableView {
                     Label("无法查看终端", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(reason)
                 } actions: {
-                    Button("重试", action: start)
+                    Button("重试") { start() }
                         .buttonStyle(.borderedProminent)
                 }
-            case .closed(let reason) where desktop == nil:
+            case .closed(let reason) where desktop == nil && takeover == nil:
                 ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
             default:
                 EmptyView()
@@ -61,9 +74,23 @@ struct TerminalPane: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: copiedNotice)
+        .confirmationDialog("适配手机宽度？", isPresented: $confirmingTakeover, titleVisibility: .visible) {
+            Button("开始适配") {
+                if let grid { start(takeover: grid) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这个终端会被重排成手机宽度。Mac 上打开它的窗口在你查看期间会跟着变窄，离开这一页后恢复；不会向终端输入。")
+        }
         .onChange(of: observer.phase) { _, phase in
             guard case .observing(let cols, let rows) = phase else { return }
             let size = TerminalGrid(cols: cols, rows: rows)
+            if let takeover {
+                // Someone on the desktop resized the terminal after the takeover:
+                // the stream no longer matches the phone's grid.
+                sizeDrift = size != takeover
+                return
+            }
             if desktop == nil {
                 desktop = size
             } else if desktop != size {
@@ -88,7 +115,33 @@ struct TerminalPane: View {
     /// When a terminal is already on screen, problems show below it instead of replacing it.
     @ViewBuilder
     private var banner: some View {
-        if desktop != nil {
+        if let takeover {
+            Group {
+                switch observer.phase {
+                case .failed(let reason):
+                    HStack(spacing: 10) {
+                        BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
+                        Button("重试") { start(takeover: takeover) }.buttonStyle(.bordered)
+                    }
+                case .closed(let reason):
+                    BannerLabel(text: reason, systemImage: "stop.circle")
+                default:
+                    HStack(spacing: 10) {
+                        BannerLabel(
+                            text: sizeDrift
+                                ? "桌面已改变终端尺寸，画面可能错位"
+                                : "已适配手机宽度 · 桌面终端变窄",
+                            systemImage: "arrow.up.left.and.arrow.down.right")
+                        if sizeDrift {
+                            Button("重新适配") { start(takeover: takeover) }.buttonStyle(.bordered)
+                        }
+                        Button("恢复桌面") { start() }.buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        } else if desktop != nil {
             Group {
                 switch observer.phase {
                 case .closed(let reason):
@@ -96,10 +149,20 @@ struct TerminalPane: View {
                 case .failed(let reason):
                     HStack {
                         BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
-                        Button("重试", action: start).buttonStyle(.bordered)
+                        Button("重试") { start() }.buttonStyle(.bordered)
                     }
                 default:
-                    EmptyView()
+                    // A full-screen program draws with absolute positions, so
+                    // reflowing it to the phone's width scrambles the screen.
+                    if fullScreen {
+                        HStack(spacing: 10) {
+                            BannerLabel(text: "全屏界面 · 按手机宽度显示会错位",
+                                        systemImage: "exclamationmark.triangle")
+                            Button("适配手机") { confirmingTakeover = true }
+                                .buttonStyle(.bordered)
+                                .accessibilityIdentifier("takeoverButton")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -118,15 +181,19 @@ struct TerminalPane: View {
         }
     }
 
-    private func start() {
+    private func start(takeover grid: TerminalGrid? = nil) {
         let feed = TerminalFeed()
+        feed.onFullScreenChange = { fullScreen = $0 }
         self.feed = feed
+        takeover = grid
+        fullScreen = false
+        sizeDrift = false
         desktop = nil
-        grid = nil
+        self.grid = nil
         selection = nil
         attempt += 1
         observer.onBytes = { feed.receive($0) }
-        observer.start(config, session: session)
+        observer.start(config, session: session, takeover: grid)
     }
 
     /// Core now draws for another desktop width; the screen held here was laid
