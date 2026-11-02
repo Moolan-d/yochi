@@ -118,6 +118,28 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.keys`�
 - 核对与按键之间 core 仍要等约 3 秒无人输入，这段时间内桌面作答的竞争无法排除；App 不自动重试。
 - 多题、多选和自由输入不支持，App 引导用户到终端作答。
 
+### 新建会话
+
+在同一个 `/v0/ws` 连接上让 Gateway 经 core 启动一个新终端：
+
+```jsonc
+// App → Gateway；machine 为 null 表示主 Mac；cwd 留空用 core 的默认目录；
+// argv 为空时启动该机器的 shell
+{"type": "run", "id": "<客户端生成>", "machine": "vps-us", "cwd": "/root/app", "argv": ["claude"]}
+
+// Gateway → App
+{"type": "run_created", "id": "<客户端生成>", "session": "vps-us/t25"}
+{"type": "run_failed", "id": "<客户端生成>", "kind": "machine_unknown", "message": "no such machine"}
+```
+
+Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，带 `no_parent` 与 `no_notify`：Gateway 不是终端，新终端不会挂在它下面，也不会向任何父终端写入提示。它不 attach，因此不是 Takeover。
+
+- `session` 已是会话列表里的 id（远端带机器前缀）；Gateway 通过 `sessions` 推送把新终端列出来，App 据此打开它。
+- `kind` 同 Agent Message，常见为 `machine_unknown`、`spawn_failed`、`name_taken`、`invalid_params`。
+- 请求写出后连接中断或超时，都返回 `unknown`：终端可能已经创建，App 提示到列表确认，不自动重试。
+- 不指定 Space/Tab：新终端不在任何 Space 中，App 按机器列出（见路线图待决问题 2）。
+- App 只提供会话列表中出现过的远端机器；Gateway 本身把 `machine` 原样交给 core。
+
 ### 对话（Conversation History）
 
 `ws://<host>:7420/v0/conversation?session=<id>`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。

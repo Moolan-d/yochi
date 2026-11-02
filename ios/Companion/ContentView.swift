@@ -4,7 +4,10 @@ struct ContentView: View {
     @State private var config = GatewayConfig.load()
     @State private var client = GatewayClient()
     @State private var showingSettings = false
+    @State private var showingNewSession = false
     @State private var path: [Session] = []
+    /// A terminal just started from the phone; opened once the list has it.
+    @State private var opening: String?
     /// Opened from a pairing QR code; fills in the pairing form.
     @State private var invite: PairingInvite?
     /// Opened while already paired; replaces the Gateway once confirmed.
@@ -23,10 +26,22 @@ struct ContentView: View {
                             ObserveView(session: session, config: config, client: client)
                         }
                         .toolbar {
-                            Button("设置", systemImage: "gearshape") { showingSettings = true }
+                            ToolbarItemGroup(placement: .topBarTrailing) {
+                                Button("新建会话", systemImage: "plus") { showingNewSession = true }
+                                    .disabled(client.phase != .connected)
+                                Button("设置", systemImage: "gearshape") { showingSettings = true }
+                            }
                         }
                         .sheet(isPresented: $showingSettings) {
                             GatewaySettingsView(client: client, config: config, onForget: forget)
+                        }
+                        .sheet(isPresented: $showingNewSession) {
+                            NewSessionView(client: client) { session in
+                                opening = session
+                                // The list may already carry it; otherwise its
+                                // next change opens it.
+                                openPending()
+                            }
                         }
                 } else {
                     PairingView(invite: invite) { config in
@@ -85,6 +100,9 @@ struct ContentView: View {
             path = [session]
         }
         #endif
+        .onChange(of: client.sessions) { _, sessions in
+            openPending(sessions)
+        }
         .onChange(of: scenePhase) { _, phase in
             guard let config else { return }
             switch phase {
@@ -93,6 +111,13 @@ struct ContentView: View {
             default: break
             }
         }
+    }
+
+    /// Opens a terminal just started from the phone, once the list has it.
+    private func openPending(_ sessions: [Session]? = nil) {
+        guard let opening, let session = (sessions ?? client.sessions).first(where: { $0.id == opening }) else { return }
+        self.opening = nil
+        path = [session]
     }
 
     private func forget() {

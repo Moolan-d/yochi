@@ -72,7 +72,7 @@ struct SessionListView: View {
             ContentUnavailableView(
                 "没有运行中的会话",
                 systemImage: "terminal",
-                description: Text("在主 Mac 或已连接的机器上启动会话后，会显示在这里。"))
+                description: Text("点右上角的 + 新建会话，或让 Agent 在 Herdr 中开始运行。"))
         }
     }
 }

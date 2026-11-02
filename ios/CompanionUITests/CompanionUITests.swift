@@ -204,6 +204,46 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    @MainActor
+    func testNewSessionSheet() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        app.buttons["新建会话"].tap()
+        XCTAssert(app.navigationBars["新建会话"].waitForExistence(timeout: 5), "no new session sheet")
+        XCTAssert(app.buttons["Claude Code"].exists, "no program choice")
+        let directory = app.textFields["newSessionDirectory"]
+        XCTAssert(directory.exists, "no directory field")
+        directory.tap()
+        directory.typeText("/tmp/companion-ui-work")
+        snapshot("1 new session")
+        app.buttons["取消"].tap()
+        XCTAssert(app.buttons["新建会话"].waitForExistence(timeout: 5), "sheet did not close")
+        unpair(app)
+    }
+
+    /// Creates a shell terminal on the core and opens it. Off by default: it
+    /// leaves a terminal on the developer's machine until it is killed there.
+    @MainActor
+    func testCreatesTerminal() throws {
+        guard ProcessInfo.processInfo.environment["COMPANION_CREATE_SESSION"] == "1" else {
+            throw XCTSkip("COMPANION_CREATE_SESSION is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        app.buttons["新建会话"].tap()
+        XCTAssert(app.navigationBars["新建会话"].waitForExistence(timeout: 5), "no new session sheet")
+        app.buttons["终端"].tap()
+        app.buttons["createSession"].tap()
+        // The app opens the new terminal once the session list carries it.
+        XCTAssert(composer(app).waitForExistence(timeout: 20), "did not open the new session")
+        snapshot("1 created")
+        leaveAndUnpair(app)
+    }
+
     /// The keyboard must not cover the conversation or the composer; the
     /// newest message stays visible above it.
     @MainActor
@@ -309,11 +349,16 @@ final class CompanionUITests: XCTestCase {
     @MainActor
     private func leaveAndUnpair(_ app: XCUIApplication) {
         app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
+    @MainActor
+    private func unpair(_ app: XCUIApplication) {
         app.buttons["设置"].tap()
-        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5))
+        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5), "no settings sheet")
         app.buttons["取消配对"].tap()
         confirm(app, "取消配对")
-        XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 10))
+        XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 10), "did not unpair")
     }
 
     @MainActor

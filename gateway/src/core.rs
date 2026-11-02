@@ -58,3 +58,69 @@ impl Client {
 pub fn error_kind(error: &Value) -> &str {
     error["data"]["kind"].as_str().unwrap_or("")
 }
+
+/// A one-shot plain-mode connection: `hello`, one call, then close. Work that
+/// happens once (a message, keys, a new terminal) uses this instead of keeping
+/// a connection open.
+pub enum RequestError {
+    /// The call was never written: it certainly did not happen.
+    BeforeSend(anyhow::Error),
+    /// The call was written and something broke: it may have happened.
+    AfterSend(anyhow::Error),
+}
+
+impl RequestError {
+    pub fn before(error: impl Into<anyhow::Error>) -> Self {
+        Self::BeforeSend(error.into())
+    }
+
+    pub fn after(error: impl Into<anyhow::Error>) -> Self {
+        Self::AfterSend(error.into())
+    }
+}
+
+/// The whole reply (`result` or `error`), after checking the protocol generation.
+pub async fn request(hc: &str, method: &str, params: Value) -> std::result::Result<Value, RequestError> {
+    let mut child = Command::new(hc)
+        .arg("connect")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("starting `{hc} connect`"))
+        .map_err(RequestError::before)?;
+    let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin")).map_err(RequestError::before)?;
+    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout")).map_err(RequestError::before)?;
+    let mut lines = BufReader::new(stdout).lines();
+
+    let hello = json!({"jsonrpc": "2.0", "id": 0, "method": "hello", "params": {}});
+    stdin.write_all(format!("{hello}\n").as_bytes()).await.map_err(RequestError::before)?;
+    stdin.flush().await.map_err(RequestError::before)?;
+    let line = lines
+        .next_line()
+        .await
+        .map_err(RequestError::before)?
+        .ok_or_else(|| anyhow!("core closed before hello"))
+        .map_err(RequestError::before)?;
+    let reply: Value = serde_json::from_str(&line).context("bad hello reply from core").map_err(RequestError::before)?;
+    if let Some(error) = reply.get("error") {
+        return Err(RequestError::before(anyhow!("core refused hello: {error}")));
+    }
+    if reply["result"]["generation"] != 1 {
+        return Err(RequestError::before(anyhow!(
+            "unsupported herdr-core protocol generation {}",
+            reply["result"]["generation"]
+        )));
+    }
+
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+    stdin.write_all(format!("{call}\n").as_bytes()).await.map_err(RequestError::after)?;
+    stdin.flush().await.map_err(RequestError::after)?;
+    while let Some(line) = lines.next_line().await.map_err(RequestError::after)? {
+        let reply: Value = serde_json::from_str(&line).with_context(|| format!("bad {method} reply from core")).map_err(RequestError::after)?;
+        if reply["id"] == 1 {
+            return Ok(reply);
+        }
+    }
+    Err(RequestError::after(anyhow!("core closed before {method} replied")))
+}

@@ -6,6 +6,7 @@ mod following;
 mod herdr;
 mod layout;
 mod observe;
+mod run;
 mod server;
 mod session;
 mod transcript;

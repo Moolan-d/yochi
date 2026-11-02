@@ -18,10 +18,19 @@ final class GatewayClient {
         case unknown
     }
 
+    enum RunResult {
+        /// The new terminal's id in the session list.
+        case created(session: String)
+        case failed(kind: String, message: String)
+        /// The terminal may have been created; the session list will show it.
+        case unknown
+    }
+
     /// A reply to any request the app makes on this socket, matched by id.
     private enum Reply {
         case sent(turn: UInt64, status: String?, started: Bool?)
         case keysSent
+        case runCreated(session: String)
         case failed(kind: String, message: String)
         case unknown
     }
@@ -93,7 +102,7 @@ final class GatewayClient {
         switch reply {
         case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .keysSent, .unknown: return .unknown
+        case .keysSent, .runCreated, .unknown: return .unknown
         }
     }
 
@@ -110,7 +119,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .unknown: return .unknown
+        case .sent, .runCreated, .unknown: return .unknown
         }
     }
 
@@ -128,7 +137,25 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .unknown: return .unknown
+        case .sent, .runCreated, .unknown: return .unknown
+        }
+    }
+
+    /// Starts a new terminal on the Gateway's core (or a connected machine):
+    /// `argv` empty means the machine's shell.
+    func runSession(machine: String?, cwd: String, argv: [String]) async -> RunResult {
+        struct Request: Encodable {
+            let type = "run"
+            let id: String
+            let machine: String?
+            let cwd: String
+            let argv: [String]
+        }
+        let reply = await request { Request(id: $0, machine: machine, cwd: cwd, argv: argv) }
+        switch reply {
+        case .runCreated(let session): return .created(session: session)
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .sent, .keysSent, .unknown: return .unknown
         }
     }
 
@@ -225,6 +252,10 @@ final class GatewayClient {
                 complete(id: id, with: .failed(kind: kind, message: message))
             case .keysSent(let id):
                 complete(id: id, with: .keysSent)
+            case .runCreated(let id, let session):
+                complete(id: id, with: .runCreated(session: session))
+            case .runFailed(let id, let kind, let message):
+                complete(id: id, with: .failed(kind: kind, message: message))
             case .unknown:
                 break
             }

@@ -18,6 +18,7 @@ use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::layout::Space;
 use crate::observe::{Observer, Output};
+use crate::run;
 use crate::session::Session;
 use anyhow::{Context as _, Result};
 use axum::Router;
@@ -94,6 +95,16 @@ enum AppMessage {
         session: String,
         choice: String,
         expect: Option<String>,
+    },
+    /// Start a new terminal: a program in a directory, here or on a machine.
+    Run {
+        id: String,
+        #[serde(default)]
+        machine: Option<String>,
+        #[serde(default)]
+        cwd: String,
+        #[serde(default)]
+        argv: Vec<String>,
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
@@ -433,6 +444,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                         tokio::spawn(async move {
                             let request = agent::AnswerRequest { id, session, choice, expect };
                             let response = agent::answer(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
+                    Ok(AppMessage::Run { id, machine, cwd, argv }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = run::RunRequest { id, machine, cwd, argv };
+                            let response = run::run(&state.hc, request).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }

@@ -2,14 +2,12 @@
 //! terminal.send or terminal.keys, then close. This never occupies the
 //! connection that pushes the session list.
 
+use crate::core::{RequestError, request as request_core};
 use crate::herdr::CoreView;
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::Result;
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::process::Command;
 use tokio::sync::watch;
 
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
@@ -78,7 +76,7 @@ pub async fn send(hc: &str, view: &watch::Receiver<CoreView>, request: Request) 
     let params = json!({"terminal": request.session, "text": request.text, "force": request.force});
     match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.send", params)).await {
         Ok(Ok(reply)) => map_reply(request, reply),
-        Ok(Err(err)) => err.into_response(request.id),
+        Ok(Err(err)) => request_failure(err, request.id),
         Err(_) => Response::failed(request.id, "timeout", "发送超时，结果未知"),
     }
 }
@@ -159,74 +157,14 @@ fn validate(view: &CoreView, request: &Request) -> Result<(), Response> {
     Ok(())
 }
 
-/// Once any part of terminal.send may have been written, a transport failure
-/// cannot prove that core did not accept it.
-enum RequestError {
-    BeforeSend(anyhow::Error),
-    AfterSend(anyhow::Error),
-}
-
-impl RequestError {
-    fn before(error: impl Into<anyhow::Error>) -> Self {
-        Self::BeforeSend(error.into())
-    }
-
-    fn after(error: impl Into<anyhow::Error>) -> Self {
-        Self::AfterSend(error.into())
-    }
-
-    fn into_response(self, id: String) -> Response {
-        let (kind, error) = match self {
-            Self::BeforeSend(error) => ("unavailable", error),
-            Self::AfterSend(error) => ("unknown", error),
-        };
-        Response::failed(id, kind, format!("{error:#}"))
-    }
-}
-
-async fn request_core(hc: &str, method: &str, params: Value) -> std::result::Result<Value, RequestError> {
-    let mut child = Command::new(hc)
-        .arg("connect")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("starting `{hc} connect`"))
-        .map_err(RequestError::before)?;
-    let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin")).map_err(RequestError::before)?;
-    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout")).map_err(RequestError::before)?;
-    let mut lines = BufReader::new(stdout).lines();
-
-    let hello = json!({"jsonrpc": "2.0", "id": 0, "method": "hello", "params": {}});
-    stdin.write_all(format!("{hello}\n").as_bytes()).await.map_err(RequestError::before)?;
-    stdin.flush().await.map_err(RequestError::before)?;
-    let line = lines
-        .next_line()
-        .await
-        .map_err(RequestError::before)?
-        .ok_or_else(|| anyhow!("core closed before hello"))
-        .map_err(RequestError::before)?;
-    let reply: Value = serde_json::from_str(&line).context("bad hello reply from core").map_err(RequestError::before)?;
-    if let Some(error) = reply.get("error") {
-        return Err(RequestError::before(anyhow!("core refused hello: {error}")));
-    }
-    if reply["result"]["generation"] != 1 {
-        return Err(RequestError::before(anyhow!(
-            "unsupported herdr-core protocol generation {}",
-            reply["result"]["generation"]
-        )));
-    }
-
-    let call = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    stdin.write_all(format!("{call}\n").as_bytes()).await.map_err(RequestError::after)?;
-    stdin.flush().await.map_err(RequestError::after)?;
-    while let Some(line) = lines.next_line().await.map_err(RequestError::after)? {
-        let reply: Value = serde_json::from_str(&line).with_context(|| format!("bad {method} reply from core")).map_err(RequestError::after)?;
-        if reply["id"] == 1 {
-            return Ok(reply);
-        }
-    }
-    Err(RequestError::after(anyhow!("core closed before {method} replied")))
+/// A transport failure before the call was written is `unavailable`; after,
+/// the call may have happened, which is `unknown`.
+fn request_failure(error: RequestError, id: String) -> Response {
+    let (kind, error) = match error {
+        RequestError::BeforeSend(error) => ("unavailable", error),
+        RequestError::AfterSend(error) => ("unknown", error),
+    };
+    Response::failed(id, kind, format!("{error:#}"))
 }
 
 fn map_reply(request: Request, reply: Value) -> Response {
@@ -364,12 +302,12 @@ mod tests {
 
     #[test]
     fn transport_failure_knows_whether_send_may_have_started() {
-        let before = RequestError::before(anyhow!("no hc")).into_response("request-1".into());
+        let before = request_failure(RequestError::before(anyhow!("no hc")), "request-1".into());
         assert!(matches!(
             before,
             Response::SendFailed { kind, .. } if kind == "unavailable"
         ));
-        let after = RequestError::after(anyhow!("connection closed")).into_response("request-1".into());
+        let after = request_failure(RequestError::after(anyhow!("connection closed")), "request-1".into());
         assert!(matches!(
             after,
             Response::SendFailed { kind, .. } if kind == "unknown"

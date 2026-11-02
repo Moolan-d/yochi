@@ -45,7 +45,7 @@ xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINA
     -resultBundlePath "$RESULTS/unit-tests.xcresult" || failed=1
 
 # TESTS="testA testB" runs a subset.
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation}; do
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
