@@ -1,5 +1,6 @@
-//! One Agent Message per plain-mode `hc connect`: hello, terminal.send, then
-//! close. This never occupies the connection that pushes the session list.
+//! One Agent Message or key press per plain-mode `hc connect`: hello,
+//! terminal.send or terminal.keys, then close. This never occupies the
+//! connection that pushes the session list.
 
 use crate::herdr::CoreView;
 use anyhow::{Context as _, Result, anyhow};
@@ -12,6 +13,8 @@ use tokio::process::Command;
 use tokio::sync::watch;
 
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
+/// Enough for a chord sequence such as `down down enter`; the app sends one tap at a time.
+pub const MAX_KEYS: usize = 8;
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Request {
@@ -19,6 +22,13 @@ pub struct Request {
     pub session: String,
     pub text: String,
     pub force: bool,
+}
+
+/// Named keys for terminal.keys (`up`, `enter`, `esc`, `shift+tab`, `1`, …).
+pub struct KeysRequest {
+    pub id: String,
+    pub session: String,
+    pub keys: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +45,14 @@ pub enum Response {
         kind: String,
         message: String,
     },
+    KeysSent {
+        id: String,
+    },
+    KeysFailed {
+        id: String,
+        kind: String,
+        message: String,
+    },
 }
 
 impl Response {
@@ -47,11 +65,48 @@ pub async fn send(hc: &str, view: &watch::Receiver<CoreView>, request: Request) 
     if let Err(response) = validate(&view.borrow(), &request) {
         return response;
     }
-    match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, &request)).await {
+    let params = json!({"terminal": request.session, "text": request.text, "force": request.force});
+    match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.send", params)).await {
         Ok(Ok(reply)) => map_reply(request, reply),
         Ok(Err(err)) => err.into_response(request.id),
         Err(_) => Response::failed(request.id, "timeout", "发送超时，结果未知"),
     }
+}
+
+/// Like an Agent Message, pressing keys never attaches to the terminal, so it
+/// neither takes over nor resizes it; core applies the same quiet rule.
+pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequest) -> Response {
+    let failed = |kind: &str, message: String| Response::KeysFailed { id: request.id.clone(), kind: kind.into(), message };
+    if let Err(message) = validate_keys(&view.borrow(), &request) {
+        return failed("invalid_params", message.into());
+    }
+    let params = json!({"terminal": request.session, "keys": request.keys});
+    let reply = match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.keys", params)).await {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(RequestError::BeforeSend(error))) => return failed("unavailable", format!("{error:#}")),
+        Ok(Err(RequestError::AfterSend(error))) => return failed("unknown", format!("{error:#}")),
+        Err(_) => return failed("timeout", "按键超时，结果未知".into()),
+    };
+    match reply.get("error") {
+        Some(error) => failed(
+            error["data"]["kind"].as_str().unwrap_or("unavailable"),
+            error["message"].as_str().unwrap_or("按键发送失败").into(),
+        ),
+        None => Response::KeysSent { id: request.id },
+    }
+}
+
+fn validate_keys(view: &CoreView, request: &KeysRequest) -> Result<(), &'static str> {
+    if request.keys.is_empty() || request.keys.len() > MAX_KEYS {
+        return Err("按键数量无效");
+    }
+    if request.keys.iter().any(|key| key.is_empty() || key.len() > 16) {
+        return Err("按键名称无效");
+    }
+    if !view.sessions.iter().any(|session| session.id == request.session) {
+        return Err("会话不存在或已结束");
+    }
+    Ok(())
 }
 
 fn validate(view: &CoreView, request: &Request) -> Result<(), Response> {
@@ -92,7 +147,7 @@ impl RequestError {
     }
 }
 
-async fn request_core(hc: &str, request: &Request) -> std::result::Result<Value, RequestError> {
+async fn request_core(hc: &str, method: &str, params: Value) -> std::result::Result<Value, RequestError> {
     let mut child = Command::new(hc)
         .arg("connect")
         .stdin(Stdio::piped())
@@ -125,18 +180,16 @@ async fn request_core(hc: &str, request: &Request) -> std::result::Result<Value,
         )));
     }
 
-    let send = json!({"jsonrpc": "2.0", "id": 1, "method": "terminal.send", "params": {
-        "terminal": request.session, "text": request.text, "force": request.force,
-    }});
-    stdin.write_all(format!("{send}\n").as_bytes()).await.map_err(RequestError::after)?;
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+    stdin.write_all(format!("{call}\n").as_bytes()).await.map_err(RequestError::after)?;
     stdin.flush().await.map_err(RequestError::after)?;
     while let Some(line) = lines.next_line().await.map_err(RequestError::after)? {
-        let reply: Value = serde_json::from_str(&line).context("bad terminal.send reply from core").map_err(RequestError::after)?;
+        let reply: Value = serde_json::from_str(&line).with_context(|| format!("bad {method} reply from core")).map_err(RequestError::after)?;
         if reply["id"] == 1 {
             return Ok(reply);
         }
     }
-    Err(RequestError::after(anyhow!("core closed before terminal.send replied")))
+    Err(RequestError::after(anyhow!("core closed before {method} replied")))
 }
 
 fn map_reply(request: Request, reply: Value) -> Response {
@@ -200,6 +253,23 @@ mod tests {
             validate(&view, &missing),
             Err(Response::SendFailed { kind, .. }) if kind == "not_found"
         ));
+    }
+
+    #[test]
+    fn validates_keys_and_live_session() {
+        let view = view();
+        let keys = |keys: &[&str]| KeysRequest {
+            id: "k1".into(),
+            session: "t1".into(),
+            keys: keys.iter().map(|key| (*key).into()).collect(),
+        };
+        assert!(validate_keys(&view, &keys(&["down", "enter"])).is_ok());
+        assert!(validate_keys(&view, &keys(&[])).is_err());
+        assert!(validate_keys(&view, &keys(&["up"; MAX_KEYS + 1])).is_err());
+        assert!(validate_keys(&view, &keys(&[""])).is_err());
+        let mut missing = keys(&["esc"]);
+        missing.session = "t404".into();
+        assert!(validate_keys(&view, &missing).is_err());
     }
 
     #[test]

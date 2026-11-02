@@ -60,6 +60,8 @@ enum ServerMessage: Decodable {
     case sessions(core: String?, connected: Bool, sessions: [Session], spaces: [Space])
     case sent(id: String, turn: UInt64, status: String?, started: Bool?)
     case sendFailed(id: String, kind: String, message: String)
+    case keysSent(id: String)
+    case keysFailed(id: String, kind: String, message: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
@@ -86,6 +88,13 @@ enum ServerMessage: Decodable {
                 started: try c.decodeIfPresent(Bool.self, forKey: .started))
         case "send_failed":
             self = .sendFailed(
+                id: try c.decode(String.self, forKey: .id),
+                kind: try c.decode(String.self, forKey: .kind),
+                message: try c.decode(String.self, forKey: .message))
+        case "keys_sent":
+            self = .keysSent(id: try c.decode(String.self, forKey: .id))
+        case "keys_failed":
+            self = .keysFailed(
                 id: try c.decode(String.self, forKey: .id),
                 kind: try c.decode(String.self, forKey: .kind),
                 message: try c.decode(String.self, forKey: .message))

@@ -32,7 +32,10 @@ struct GatewayConfig: Equatable {
         // `simctl launch` passes SIMCTL_CHILD_COMPANION_* through as these.
         let env = ProcessInfo.processInfo.environment
         // UI tests start unpaired.
-        if env["COMPANION_RESET"] != nil { clear() }
+        if env["COMPANION_RESET"] != nil {
+            clear()
+            AgentMessageStore.clearAllDrafts()
+        }
         if let host = env["COMPANION_HOST"], let token = env["COMPANION_TOKEN"] {
             return GatewayConfig(host: host, token: token)
         }

@@ -18,6 +18,16 @@ enum AgentMessageStore {
     static func clearDraft(host: String, session: String) {
         UserDefaults.standard.removeObject(forKey: "agent-message.draft.\(key(host: host, session: session))")
     }
+
+    #if DEBUG
+    /// UI tests start from nothing; several of them share one test session.
+    static func clearAllDrafts() {
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("agent-message.draft.") {
+            defaults.removeObject(forKey: key)
+        }
+    }
+    #endif
 }
 
 /// The result of one submitted Agent Message, from local draft to a completed turn.

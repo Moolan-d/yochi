@@ -44,7 +44,8 @@ xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINA
     -only-testing:CompanionTests \
     -resultBundlePath "$RESULTS/unit-tests.xcresult" || failed=1
 
-for test in testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testAgentMessageDraftSurvivesNavigation; do
+# TESTS="testA testB" runs a subset.
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
@@ -63,6 +64,13 @@ for test in testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMess
     if [ "$test" = testAgentMessageIsAccepted ]; then
         if [ -z "$test_session" ] || ! hc read "$test_session" | grep -q "Companion UI test"; then
             echo "test terminal did not receive the Agent Message" >&2
+            failed=1
+        fi
+    fi
+    # Likewise for keys: cat echoes the pressed "2", then prints it again after Enter.
+    if [ "$test" = testTerminalKeysArePressed ]; then
+        if [ -z "$test_session" ] || [ "$(hc read "$test_session" | grep -c '^2$')" -lt 2 ]; then
+            echo "test terminal did not receive the pressed keys" >&2
             failed=1
         fi
     fi

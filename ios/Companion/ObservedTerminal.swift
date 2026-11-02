@@ -50,6 +50,15 @@ struct ObservedTerminal: UIViewRepresentable {
 final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate {
     private static let fontSize: Float = 9
     private static let readableZoomScale: CGFloat = 12 / 9
+    /// A grid that fits the width at this size or larger opens fitted, with no sideways panning.
+    private static let fittedFontSize: CGFloat = 8.5
+    /// Ghostty's default theme backgrounds (Alabaster, Afterglow), so the area
+    /// around a grid shorter than the screen reads as part of the terminal.
+    private static let terminalBackground = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0x21 / 255, green: 0x21 / 255, blue: 0x21 / 255, alpha: 1)
+            : UIColor(red: 0xF7 / 255, green: 0xF7 / 255, blue: 0xF7 / 255, alpha: 1)
+    }
 
     var grid: TerminalGrid {
         didSet { if grid != oldValue { sizeTerminal() } }
@@ -82,7 +91,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         self.grid = grid
         super.init(frame: .zero)
         delegate = self
-        backgroundColor = .systemBackground
+        backgroundColor = Self.terminalBackground
         maximumZoomScale = 3
         showsHorizontalScrollIndicator = true
 
@@ -100,7 +109,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
 
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
-        accessibilityHint = "终端只读，不能逐键输入；可在下方发送 Agent 消息。双击在全貌与可读字号之间切换，双指缩放，拖动平移。"
+        accessibilityHint = "终端画面只读；可用下方按键栏按键，或发送 Agent 消息。双击在全貌与可读字号之间切换，双指缩放，拖动平移。"
     }
 
     @available(*, unavailable)
@@ -150,6 +159,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         contentSize = natural
         fitZoom()
         if zoomMode == .custom { zoomScale = max(previousZoom, minimumZoomScale) }
+        alignToBottom()
     }
 
     // MARK: Zoom
@@ -157,10 +167,28 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
     override func layoutSubviews() {
         super.layoutSubviews()
         fitZoom()
+        alignToBottom()
     }
 
     private var defaultZoomScale: CGFloat {
-        max(minimumZoomScale, Self.readableZoomScale)
+        if minimumZoomScale * CGFloat(Self.fontSize) >= Self.fittedFontSize { return minimumZoomScale }
+        return max(minimumZoomScale, Self.readableZoomScale)
+    }
+
+    /// The height not covered by the navigation bar or the composer.
+    private var visibleHeight: CGFloat {
+        bounds.height - (adjustedContentInset.top - contentInset.top) - adjustedContentInset.bottom
+    }
+
+    /// A grid shorter than the screen sits at the bottom, next to the composer,
+    /// where Agents keep their prompt.
+    private func alignToBottom() {
+        let top = max(0, visibleHeight - contentSize.height).rounded(.down)
+        guard contentInset.top != top else { return }
+        contentInset.top = top
+        if contentSize.height <= visibleHeight {
+            contentOffset.y = -adjustedContentInset.top
+        }
     }
 
     private func fitZoom() {
@@ -198,6 +226,7 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
                 // No caret: use the required bottom, leading-aligned fallback.
                 setContentOffset(CGPoint(x: 0, y: max(0, contentSize.height - bounds.height)),
                                  animated: false)
+                pinShortGrid()
             }
             return
         }
@@ -207,6 +236,13 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         let scaledCaret = caret.applying(CGAffineTransform(scaleX: zoomScale, y: zoomScale))
         let offset = Self.initialOffset(caret: scaledCaret, content: contentSize, visible: bounds.size)
         setContentOffset(offset, animated: false)
+        pinShortGrid()
+    }
+
+    private func pinShortGrid() {
+        if contentSize.height <= visibleHeight {
+            contentOffset.y = -adjustedContentInset.top
+        }
     }
 
     private func scheduleInitialViewport() {
@@ -252,6 +288,10 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         terminal
     }
 
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        alignToBottom()
+    }
+
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
         initialViewportPending = false
         zoomMode = abs(scale - minimumZoomScale) < 0.001 ? .overview : .custom
@@ -265,8 +305,8 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         } else {
             // Zoom to a readable font around the tap.
             let point = gesture.location(in: terminal)
-            let size = CGSize(width: bounds.width / defaultZoomScale,
-                              height: bounds.height / defaultZoomScale)
+            let scale = max(minimumZoomScale * 1.5, Self.readableZoomScale)
+            let size = CGSize(width: bounds.width / scale, height: bounds.height / scale)
             zoomMode = .custom
             zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
                             width: size.width, height: size.height), animated: true)

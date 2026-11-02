@@ -2,7 +2,7 @@
 //! `ws://`). `/v0/pair` trades a pairing code for a device token; the others
 //! need `Authorization: Bearer <device token>`:
 //! - `/v0/ws` pushes `hello`, then the whole session list whenever it changes.
-//!   The app may send Agent Messages or `unpair` to remove itself.
+//!   The app may send Agent Messages, key presses, or `unpair` to remove itself.
 //! - `/v0/observe?session=<id>` streams one terminal read-only: control as text,
 //!   terminal bytes as binary messages.
 //!
@@ -70,6 +70,12 @@ enum AppMessage {
         text: String,
         #[serde(default)]
         force: bool,
+    },
+    /// Press named keys in a session without taking it over.
+    Keys {
+        id: String,
+        session: String,
+        keys: Vec<String>,
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
@@ -315,6 +321,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::Keys { id, session, keys }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = agent::KeysRequest { id, session, keys };
+                            let response = agent::press(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     _ => {}
                 },
                 Some(Ok(_)) => {}
@@ -351,6 +368,9 @@ mod tests {
         .unwrap();
         assert!(matches!(message, AppMessage::Send { force: true, .. }));
         assert!(matches!(serde_json::from_str(r#"{"type":"unpair"}"#), Ok(AppMessage::Unpair)));
+        let message: AppMessage =
+            serde_json::from_str(r#"{"type":"keys","id":"k1","session":"t1","keys":["down","enter"]}"#).unwrap();
+        assert!(matches!(message, AppMessage::Keys { keys, .. } if keys == ["down", "enter"]));
     }
 
     #[test]

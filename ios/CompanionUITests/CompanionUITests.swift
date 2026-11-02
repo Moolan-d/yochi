@@ -102,6 +102,30 @@ final class CompanionUITests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalKeysArePressed() throws {
+        let app = launchUnpaired(observing: env("COMPANION_SESSION"))
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+
+        _ = composer(app)
+        snapshot("1 key bar and composer")
+        // /bin/cat echoes "2" and prints it back after Enter; ui-test.sh checks the screen.
+        let two = app.buttons["key-2"]
+        XCTAssert(two.waitForExistence(timeout: 10))
+        two.tap()
+        app.buttons["key-enter"].tap()
+        XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 3))
+
+        app.buttons["quickCommands"].tap()
+        XCTAssert(app.buttons["继续"].waitForExistence(timeout: 5))
+        snapshot("2 quick commands")
+        app.buttons["继续"].tap()
+        XCTAssertEqual(composer(app).value as? String, "继续")
+        snapshot("3 filled draft")
+        leaveAndUnpair(app)
+    }
+
+    @MainActor
     func testAgentMessageDraftSurvivesNavigation() throws {
         let app = launchUnpaired(observing: env("COMPANION_SESSION"))
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))

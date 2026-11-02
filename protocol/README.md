@@ -86,6 +86,21 @@ Gateway 校验会话仍存在且 live、文本非空且 UTF-8 不超过 16 KiB�
 
 发送请求写出后的连接中断、无效回复或超时都使结果不明；App 显示「结果未知，可能已发送」，保留 Draft，不自动重试。
 
+### 按键
+
+在同一个 `/v0/ws` 连接上按命名按键，用于 Agent 的选择框、确认框和模式切换（ADR 0004）：
+
+```jsonc
+// App → Gateway；keys 为 core 的按键名，最多 8 个，按顺序按下
+{"type": "keys", "id": "<客户端生成>", "session": "vps-us/t1", "keys": ["down", "enter"]}
+
+// Gateway → App
+{"type": "keys_sent", "id": "<客户端生成>"}
+{"type": "keys_failed", "id": "<客户端生成>", "kind": "finished", "message": "finished"}
+```
+
+Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.keys`。它不 attach，因此不是 Takeover，不改变终端尺寸；core 同样等终端约 3 秒无人输入后再按。`kind` 同 Agent Message，另有 Gateway 的 `invalid_params`（按键为空、超过 8 个或会话不存在）、`unknown`、`timeout`。结果不明时 App 不自动重按。App 依次发送：上一个请求未返回时的点按合并进下一个请求，保证顺序。
+
 ### 只读查看终端（Observer）
 
 `ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并以 `observe` 模式 attach，因此手机不会向终端输入，也不会改变终端尺寸。

@@ -11,6 +11,21 @@ final class GatewayClient {
         case unknown
     }
 
+    enum KeysResult {
+        case pressed
+        case failed(kind: String, message: String)
+        /// The keys may have been pressed; pressing again could repeat them.
+        case unknown
+    }
+
+    /// A reply to any request the app makes on this socket, matched by id.
+    private enum Reply {
+        case sent(turn: UInt64, status: String?, started: Bool?)
+        case keysSent
+        case failed(kind: String, message: String)
+        case unknown
+    }
+
     enum Phase: Equatable {
         case disconnected
         case connecting
@@ -39,7 +54,7 @@ final class GatewayClient {
 
     private struct Pending {
         let socket: URLSessionWebSocketTask
-        let continuation: CheckedContinuation<AgentMessageResult, Never>
+        let continuation: CheckedContinuation<Reply, Never>
     }
 
     func delivery(host: String, session: String) -> AgentDelivery? {
@@ -67,10 +82,6 @@ final class GatewayClient {
     /// Sends one complete Agent Message without taking over the terminal. The
     /// continuation resolves only from its matching reply or a broken connection.
     func sendMessage(session: String, text: String, force: Bool = false) async -> AgentMessageResult {
-        guard phase == .connected, let socket else {
-            return .failed(kind: "unavailable", message: "未连接")
-        }
-        let id = UUID().uuidString
         struct Request: Encodable {
             let type = "send"
             let id: String
@@ -78,8 +89,38 @@ final class GatewayClient {
             let text: String
             let force: Bool
         }
-        guard let data = try? JSONEncoder().encode(Request(id: id, session: session, text: text, force: force)) else {
-            return .failed(kind: "invalid_params", message: "消息编码失败")
+        let reply = await request { Request(id: $0, session: session, text: text, force: force) }
+        switch reply {
+        case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .keysSent, .unknown: return .unknown
+        }
+    }
+
+    /// Presses named keys (`up`, `enter`, `esc`, …) without taking over the
+    /// terminal: no attach, so the desktop's size is untouched.
+    func pressKeys(session: String, keys: [String]) async -> KeysResult {
+        struct Request: Encodable {
+            let type = "keys"
+            let id: String
+            let session: String
+            let keys: [String]
+        }
+        let reply = await request { Request(id: $0, session: session, keys: keys) }
+        switch reply {
+        case .keysSent: return .pressed
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .sent, .unknown: return .unknown
+        }
+    }
+
+    private func request(_ make: (String) -> some Encodable) async -> Reply {
+        guard phase == .connected, let socket else {
+            return .failed(kind: "unavailable", message: "未连接")
+        }
+        let id = UUID().uuidString
+        guard let data = try? JSONEncoder().encode(make(id)) else {
+            return .failed(kind: "invalid_params", message: "请求编码失败")
         }
         return await withCheckedContinuation { continuation in
             pending[id] = Pending(socket: socket, continuation: continuation)
@@ -161,16 +202,18 @@ final class GatewayClient {
                 self.sessions = sessions
                 self.spaces = spaces
             case .sent(let id, let turn, let status, let started):
-                complete(id: id, with: .accepted(turn: turn, status: status, started: started))
-            case .sendFailed(let id, let kind, let message):
+                complete(id: id, with: .sent(turn: turn, status: status, started: started))
+            case .sendFailed(let id, let kind, let message), .keysFailed(let id, let kind, let message):
                 complete(id: id, with: .failed(kind: kind, message: message))
+            case .keysSent(let id):
+                complete(id: id, with: .keysSent)
             case .unknown:
                 break
             }
         }
     }
 
-    private func complete(id: String, with result: AgentMessageResult) {
+    private func complete(id: String, with result: Reply) {
         responseTimeouts.removeValue(forKey: id)?.cancel()
         pending.removeValue(forKey: id)?.continuation.resume(returning: result)
     }

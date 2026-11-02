@@ -13,6 +13,8 @@ struct ObserveView: View {
     @State private var attempt = 0
     @State private var draft: String
     @State private var confirmingBlocked = false
+    @State private var keys = KeyPresser()
+    @State private var resizeRestart: Task<Void, Never>?
     @Environment(\.scenePhase) private var scenePhase
 
     init(session: Session, config: GatewayConfig, client: GatewayClient) {
@@ -75,7 +77,7 @@ struct ObserveView: View {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityHint("可查看终端并发送整段 Agent 消息，不会接管终端或逐键输入。")
+                .accessibilityHint("可查看终端、按方向键等常用按键、发送整段 Agent 消息，都不会接管终端或改变桌面上的终端尺寸。")
             }
         }
         .confirmationDialog("仍然发送消息？", isPresented: $confirmingBlocked, titleVisibility: .visible) {
@@ -95,51 +97,104 @@ struct ObserveView: View {
             if case .sent(let text, _, _, _) = delivery, draft == text { draft = "" }
         }
         .onChange(of: observer.phase) { _, phase in
-            if case .observing(let cols, let rows) = phase {
-                grid = TerminalGrid(cols: cols, rows: rows)
+            guard case .observing(let cols, let rows) = phase else { return }
+            let size = TerminalGrid(cols: cols, rows: rows)
+            if grid == nil {
+                grid = size
+            } else if grid != size {
+                restartAfterResize()
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, case .failed = observer.phase { start() }
         }
         .task { start() }
-        .onDisappear { observer.stop() }
+        .onDisappear {
+            resizeRestart?.cancel()
+            observer.stop()
+        }
     }
 
     /// Terminal and message status stay above the composer; safeAreaInset also
     /// gives the software keyboard room instead of covering the terminal.
     @ViewBuilder
     private var bottomPanel: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             banner
+            if let failure = keys.failure {
+                BannerLabel(text: failure, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
             if let delivery { DeliveryBanner(delivery: delivery) }
-            HStack(alignment: .bottom, spacing: 10) {
+            TerminalKeyBar { key in
+                keys.press(key.id, session: session.id, client: client)
+            }
+            composer
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Menu {
+                Section("填入输入框") {
+                    ForEach(QuickCommand.phrases, id: \.self) { phrase in
+                        Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
+                    }
+                }
+                let commands = QuickCommand.commands(for: currentSession.program)
+                if !commands.isEmpty {
+                    Section("Claude Code 命令") {
+                        ForEach(commands, id: \.self) { command in
+                            Button(command) { draft = QuickCommand.insert(command, into: draft) }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "bolt.circle")
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(isSending)
+            .accessibilityLabel("快捷指令")
+            .accessibilityIdentifier("quickCommands")
+
+            HStack(alignment: .bottom, spacing: 4) {
                 TextField("给 Agent 发消息", text: $draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...6)
+                    .font(.body)
+                    .padding(.leading, 14)
+                    .padding(.vertical, 10)
                     .disabled(isSending)
                     .accessibilityIdentifier("agentMessageField")
                 Button { send() } label: {
                     Group {
                         if isSending {
-                            ProgressView().controlSize(.small)
+                            ProgressView()
                         } else {
-                            Image(systemName: "arrow.up.circle.fill").font(.title2)
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 30))
                         }
                     }
-                    .frame(width: 32, height: 32)
-                    // Keep the icon small but the HIG-minimum tap target.
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+                    .frame(width: 34, height: 34)
+                    // A 44-point target around the smaller visible button.
+                    .contentShape(Rectangle().inset(by: -5))
                 }
                 .disabled(!canSend)
+                .padding(.trailing, 5)
+                .padding(.bottom, 5)
                 .accessibilityLabel("发送消息")
                 .accessibilityIdentifier("sendAgentMessage")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .background(Color(.systemBackground), in: .rect(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Color(.separator))
+            }
         }
-        .background(.bar)
     }
 
     /// When a terminal is already on screen, problems show below it instead of replacing it.
@@ -154,8 +209,6 @@ struct ObserveView: View {
                     BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
                     Button("重试", action: start).buttonStyle(.bordered)
                 }
-                .padding(.trailing)
-                .background(.bar)
             default:
                 EmptyView()
             }
@@ -175,6 +228,19 @@ struct ObserveView: View {
         attempt += 1
         observer.onBytes = { feed.receive($0) }
         observer.start(config, session: session.id)
+    }
+
+    /// Bytes drawn for the new size would land in a grid of the old one, and
+    /// the local terminal would rewrap what it already holds; neither matches
+    /// the desktop any more. A fresh attach starts from core's exact screen.
+    private func restartAfterResize() {
+        resizeRestart?.cancel()
+        resizeRestart = Task {
+            // Dragging a desktop split resizes many times; attach once it settles.
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            start()
+        }
     }
 
     private func send(force: Bool = false) {
@@ -215,17 +281,17 @@ private struct DeliveryBanner: View {
     let delivery: AgentDelivery
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(delivery.text)
-                .lineLimit(1)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
             Label(delivery.state, systemImage: delivery.symbol)
                 .foregroundStyle(delivery.color)
+                .layoutPriority(1)
+            Text(delivery.text)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .font(.footnote)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
     }
 }
@@ -236,9 +302,8 @@ private struct BannerLabel: View {
 
     var body: some View {
         Label(text, systemImage: systemImage)
-            .font(.subheadline)
+            .font(.footnote)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(.bar)
+            .padding(.horizontal, 4)
     }
 }
