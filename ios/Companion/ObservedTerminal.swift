@@ -98,6 +98,8 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         backgroundColor = Self.terminalBackground
         maximumZoomScale = 3
         showsHorizontalScrollIndicator = true
+        // Dragging the terminal puts the keyboard away, as on the conversation page.
+        keyboardDismissMode = .interactive
 
         terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(feed.session))
         terminal.controller = controller

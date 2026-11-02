@@ -18,6 +18,7 @@ struct ObserveView: View {
     @State private var draft: String
     @State private var confirmingBlocked = false
     @State private var keys = KeyPresser()
+    @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
     init(session: Session, config: GatewayConfig, client: GatewayClient) {
@@ -68,6 +69,9 @@ struct ObserveView: View {
                 TerminalPane(session: session.id, config: config, grid: $grid)
             }
         }
+        // Tapping the conversation or the terminal puts the keyboard away, as
+        // do dragging and the keyboard's 收起 button above it.
+        .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
         .safeAreaInset(edge: .top, spacing: 0) {
             if hasConversation {
                 Picker("显示", selection: $mode) {
@@ -139,7 +143,8 @@ struct ObserveView: View {
             }
             if let delivery { DeliveryBanner(delivery: delivery) }
             if mode == .terminal {
-                TerminalKeyBar { key in
+                TerminalKeyBar(keyboardShown: composerFocused,
+                               toggleKeyboard: { composerFocused.toggle() }) { key in
                     keys.press(key.id, session: session.id, client: client)
                 }
             }
@@ -183,6 +188,7 @@ struct ObserveView: View {
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
                     .disabled(isSending)
+                    .focused($composerFocused)
                     .accessibilityIdentifier("agentMessageField")
                 Button { send() } label: {
                     Group {

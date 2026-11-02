@@ -135,13 +135,26 @@ final class CompanionUITests: XCTestCase {
         let field = composer(app)
         field.tap()
         field.typeText(draft)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssert(keyboard.waitForExistence(timeout: 10), "keyboard never appeared")
+        snapshot("1 keyboard up")
+        let keyboardKey = app.buttons["toggleKeyboard"]
+        XCTAssert(keyboardKey.waitForExistence(timeout: 5), "no keyboard toggle")
+        keyboardKey.tap()
+        XCTAssert(keyboard.waitForNonExistence(timeout: 10), "keyboard would not go away")
+        snapshot("2 keyboard away, keys still there")
+        keyboardKey.tap()
+        XCTAssert(keyboard.waitForExistence(timeout: 10), "keyboard would not come back")
+        keyboardKey.tap()
+        XCTAssert(keyboard.waitForNonExistence(timeout: 10), "keyboard would not go away")
+        snapshot("3 keyboard dismissed")
         app.navigationBars.buttons.firstMatch.tap()
         let session = testSession(app)
         XCTAssert(session.waitForExistence(timeout: 10))
         session.tap()
         XCTAssert(composer(app).waitForExistence(timeout: 10))
         XCTAssertEqual(composer(app).value as? String, draft)
-        snapshot("1 restored draft")
+        snapshot("4 restored draft")
         leaveAndUnpair(app)
     }
 

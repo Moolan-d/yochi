@@ -75,6 +75,7 @@ struct ConversationPane: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
+        .scrollDismissesKeyboard(.interactively)
         .scrollPosition($position)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .onScrollGeometryChange(for: Bool.self) { geometry in

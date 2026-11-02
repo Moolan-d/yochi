@@ -64,8 +64,18 @@ final class KeyPresser {
 }
 
 struct TerminalKeyBar: View {
+    /// The composer is the only text input; the last key toggles its keyboard
+    /// so the bar stays usable with the keyboard away (as Moshi's toolbar does).
+    let keyboardShown: Bool
+    let toggleKeyboard: () -> Void
     let press: (TerminalKey) -> Void
     @State private var taps = 0
+
+    init(keyboardShown: Bool, toggleKeyboard: @escaping () -> Void, press: @escaping (TerminalKey) -> Void) {
+        self.keyboardShown = keyboardShown
+        self.toggleKeyboard = toggleKeyboard
+        self.press = press
+    }
 
     var body: some View {
         // Every key fits one row on a phone; at large text sizes the row scrolls instead.
@@ -79,7 +89,7 @@ struct TerminalKeyBar: View {
     }
 
     private var row: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             ForEach(TerminalKey.bar) { key in
                 Button {
                     taps += 1
@@ -92,13 +102,22 @@ struct TerminalKeyBar: View {
                             Text(key.label)
                         }
                     }
-                    .font(.body.weight(.medium))
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 }
                 .buttonStyle(KeyCapStyle())
                 .accessibilityLabel(key.spoken)
                 .accessibilityIdentifier("key-\(key.id)")
             }
+            Button(action: toggleKeyboard) {
+                Image(systemName: keyboardShown ? "keyboard.chevron.compact.down" : "keyboard")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+            }
+            .buttonStyle(KeyCapStyle())
+            .accessibilityLabel(keyboardShown ? "收起键盘" : "显示键盘")
+            .accessibilityIdentifier("toggleKeyboard")
         }
     }
 }
@@ -109,8 +128,8 @@ private struct KeyCapStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.primary)
-            .padding(.horizontal, 6)
-            .frame(minWidth: 32, maxWidth: .infinity, minHeight: 38)
+            .padding(.horizontal, 2)
+            .frame(minWidth: 30, maxWidth: .infinity, minHeight: 38)
             .background(Color(.secondarySystemFill), in: .capsule)
             .opacity(configuration.isPressed ? 0.5 : 1)
             .contentShape(.capsule)
