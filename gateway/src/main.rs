@@ -8,6 +8,7 @@ mod layout;
 mod observe;
 mod run;
 mod server;
+mod service;
 mod session;
 mod transcript;
 
@@ -49,6 +50,24 @@ enum Command {
     Devices,
     /// Unpair a device; its open connections close within seconds.
     Revoke { id: String },
+    /// Run the Gateway at login, as a LaunchAgent.
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+        /// The LaunchAgent's label; another one can try a second Gateway alongside.
+        #[arg(long, default_value = service::LABEL, global = true, hide = true)]
+        label: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// Install (or update) the LaunchAgent and start it.
+    Install,
+    /// Stop the LaunchAgent and remove it.
+    Uninstall,
+    /// Show whether the LaunchAgent is installed and running.
+    Status,
 }
 
 const DEFAULT_PORT: u16 = 7420;
@@ -56,8 +75,8 @@ const DEFAULT_PORT: u16 = 7420;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let store = Store::open(match args.state_dir {
-        Some(dir) => dir,
+    let store = Store::open(match &args.state_dir {
+        Some(dir) => dir.clone(),
         None => Store::default_dir()?,
     })?;
     match args.command.unwrap_or(Command::Serve) {
@@ -78,11 +97,81 @@ async fn main() -> Result<()> {
             }
             None => bail!("no paired device {id:?}; see `companion-gateway devices`"),
         },
+        Command::Service { action, label } => match action {
+            ServiceAction::Install => install(&label, args.listen, args.state_dir, &args.hc).await,
+            ServiceAction::Uninstall => {
+                if service::uninstall(&label)? {
+                    println!("Stopped and removed the LaunchAgent {label}.");
+                } else {
+                    println!("The LaunchAgent {label} was not installed.");
+                }
+                Ok(())
+            }
+            ServiceAction::Status => status(&label, args.listen).await,
+        },
     }
 }
 
+async fn install(label: &str, listen: Option<SocketAddr>, state_dir: Option<PathBuf>, hc: &str) -> Result<()> {
+    let agent = service::Agent {
+        label: label.into(),
+        exe: std::env::current_exe()?.canonicalize()?,
+        hc: service::which(hc)?,
+        tailscale: service::which("tailscale")?,
+        listen,
+        state_dir,
+        log: service::default_log()?,
+    };
+    let addr = listen_addr(listen).await?;
+    // The LaunchAgent would only crash-loop on a port another Gateway holds.
+    if service::status(label)?.running.is_none() && answering(addr).await {
+        bail!("a Gateway is already listening at {addr}; stop it first, then install");
+    }
+    if agent.exe.components().any(|part| part.as_os_str() == "target") {
+        eprintln!("Note: running from a cargo build directory; the LaunchAgent picks up rebuilds only when it restarts.");
+        eprintln!("`cargo install --path gateway` gives it a stable copy.\n");
+    }
+    let plist = service::install(&agent)?;
+    println!("Installed {}", plist.display());
+    for _ in 0..20 {
+        if answering(addr).await {
+            println!("The Gateway is running at {addr} and will start again at login.");
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    bail!("the Gateway did not start listening at {addr}; see {}", agent.log.display())
+}
+
+async fn status(label: &str, listen: Option<SocketAddr>) -> Result<()> {
+    let status = service::status(label)?;
+    let Some(plist) = status.plist else {
+        println!("The LaunchAgent {label} is not installed; `companion-gateway service install` installs it.");
+        return Ok(());
+    };
+    println!("Installed  {}", plist.display());
+    match (status.running, status.last_exit) {
+        (Some(pid), _) => println!("Running    pid {pid}"),
+        (None, Some(code)) => println!("Stopped    last exit code {code}"),
+        (None, None) => println!("Stopped"),
+    }
+    match listen_addr(listen).await {
+        Ok(addr) if answering(addr).await => println!("Listening  {addr}"),
+        Ok(addr) => println!("Listening  nothing at {addr}"),
+        Err(err) => println!("Listening  unknown ({err:#})"),
+    }
+    println!("Log        {}", service::default_log()?.display());
+    Ok(())
+}
+
+async fn answering(addr: SocketAddr) -> bool {
+    tokio::time::timeout(Duration::from_secs(1), tokio::net::TcpStream::connect(addr))
+        .await
+        .is_ok_and(|connected| connected.is_ok())
+}
+
 async fn pair(store: &Store, listen: SocketAddr) -> Result<()> {
-    if tokio::time::timeout(Duration::from_secs(1), tokio::net::TcpStream::connect(listen)).await.map_or(true, |r| r.is_err()) {
+    if !answering(listen).await {
         eprintln!("Note: no Gateway is answering at {listen}; start it (`companion-gateway`) before the phone pairs.\n");
     }
     let before: HashSet<String> = store.devices()?.into_iter().map(|device| device.id).collect();
