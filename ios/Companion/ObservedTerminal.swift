@@ -45,6 +45,22 @@ final class TerminalFeed {
     }
 }
 
+/// The terminal text a long press handed to the sheet, with the word under
+/// the finger pre-selected; nil anchor means select the whole viewport.
+struct TerminalTextSelection: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+    let anchor: NSRange?
+
+    /// What the sheet starts with selected, so Copy is one tap away.
+    static func initialText(_ text: String, anchor: NSRange?) -> String {
+        let text = text as NSString
+        guard let anchor, anchor.length > 0,
+              anchor.location >= 0, NSMaxRange(anchor) <= text.length else { return text as String }
+        return text.substring(with: anchor)
+    }
+}
+
 struct ObservedTerminal: UIViewRepresentable {
     let feed: TerminalFeed
     let grid: TerminalGrid
@@ -52,22 +68,27 @@ struct ObservedTerminal: UIViewRepresentable {
     /// The page's title says which zoom the terminal is at; a double tap or a
     /// pinch is otherwise invisible.
     @Binding var zoomNote: String
+    /// Set by a long press; the page presents the selection sheet.
+    @Binding var selection: TerminalTextSelection?
 
     func makeUIView(context: Context) -> ObservedTerminalScrollView {
         let view = ObservedTerminalScrollView(feed: feed, grid: grid, fontSize: fontSize)
         view.onZoomChange = { zoomNote = $0 }
+        view.onTextSelection = { selection = $0 }
         return view
     }
 
     func updateUIView(_ view: ObservedTerminalScrollView, context: Context) {
         view.grid = grid
         view.onZoomChange = { zoomNote = $0 }
+        view.onTextSelection = { selection = $0 }
     }
 }
 
 /// A Ghostty surface sized to the remote grid inside a scroll view. It opens
 /// at a readable font size; a double tap alternates that with the whole grid.
-final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate {
+final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate,
+    TerminalSurfaceTextSelectionRequestDelegate {
     /// Readability is judged by a cell's width on screen, in points: Ghostty's
     /// cell at font size 9 is about 7.3 pt wide, not what 9 pt suggests.
     /// A grid whose cells are at least this wide when it fits the screen opens
@@ -89,9 +110,11 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
 
     /// Reports the zoom as the page's title should read it; only changes are sent.
     var onZoomChange: ((String) -> Void)?
+    /// A long press selected text; the page presents it for copying.
+    var onTextSelection: ((TerminalTextSelection) -> Void)?
 
     private let feed: TerminalFeed
-    private let terminal = UITerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 320))
+    private let terminal = SelectionOnlyTerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 320))
     private let controller: TerminalController
     private var lastZoomNote: String?
     /// One cell in points, once Ghostty has measured it.
@@ -128,8 +151,12 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(feed.session))
         terminal.controller = controller
         terminal.delegate = self
-        // The scroll view owns every gesture; an observer has nothing to type.
-        terminal.isUserInteractionEnabled = false
+        // The library pans its scrollback and pinches its font; this page's
+        // scroll view owns both. Its long press still reports selections.
+        for gesture in terminal.gestureRecognizers ?? []
+        where gesture is UIPanGestureRecognizer || gesture is UIPinchGestureRecognizer {
+            gesture.isEnabled = false
+        }
         terminal.alpha = 0
         addSubview(terminal)
 
@@ -139,7 +166,8 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
 
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
-        accessibilityHint = "终端画面只读；可用下方按键栏按键，或发送 Agent 消息。双击在全貌与可读字号之间切换，双指缩放，拖动平移。"
+        accessibilityIdentifier = "terminalGrid"
+        accessibilityHint = "终端画面只读；长按可选取文字复制，可用下方按键栏按键，或发送 Agent 消息。双击在全貌与可读字号之间切换，双指缩放，拖动平移。"
     }
 
     @available(*, unavailable)
@@ -412,4 +440,21 @@ final class ObservedTerminalScrollView: UIScrollView, UIScrollViewDelegate, Term
         notifyZoom()
         UIAccessibility.post(notification: .announcement, argument: lastZoomNote)
     }
+
+    // MARK: Text selection
+
+    /// Ghostty snapshots the visible rows and the word under the finger; the
+    /// page turns that into a selectable sheet. Nothing is typed or resized.
+    func terminalDidRequestTextSelection(_ request: TerminalTextSelectionRequest) {
+        onTextSelection?(TerminalTextSelection(text: request.text, anchor: request.anchorRange))
+    }
+}
+
+/// Lets a long press select text without making the terminal a text input:
+/// a tap never becomes first responder, so no keyboard appears, and the
+/// surrounding scroll view keeps its pan and zoom.
+private final class SelectionOnlyTerminalView: UITerminalView {
+    override var canBecomeFirstResponder: Bool { false }
+
+    override func toggleSoftwareKeyboard() {}
 }

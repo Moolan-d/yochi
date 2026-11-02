@@ -15,6 +15,8 @@ struct TerminalPane: View {
     @State private var feed = TerminalFeed()
     @State private var attempt = 0
     @State private var resizeRestart: Task<Void, Never>?
+    @State private var selection: TerminalTextSelection?
+    @State private var copiedNotice = false
     @AppStorage(TerminalTextSize.key) private var fontSize = TerminalTextSize.standard
     @Environment(\.scenePhase) private var scenePhase
 
@@ -22,7 +24,7 @@ struct TerminalPane: View {
         ZStack {
             if let grid {
                 ObservedTerminal(feed: feed, grid: grid, fontSize: Float(fontSize),
-                                 zoomNote: $zoomNote)
+                                 zoomNote: $zoomNote, selection: $selection)
                     .id(attempt)
             }
             switch observer.phase {
@@ -44,6 +46,22 @@ struct TerminalPane: View {
             }
         }
         .safeAreaInset(edge: .bottom) { banner }
+        .sheet(item: $selection) { selection in
+            TerminalTextSheet(selection: selection, onCopied: showCopied)
+        }
+        .overlay(alignment: .top) {
+            if copiedNotice {
+                Label("已复制", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.regularMaterial, in: .capsule)
+                    .padding(.top, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .accessibilityIdentifier("terminalCopied")
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: copiedNotice)
         .onChange(of: observer.phase) { _, phase in
             guard case .observing(let cols, let rows) = phase else { return }
             let size = TerminalGrid(cols: cols, rows: rows)
@@ -85,6 +103,17 @@ struct TerminalPane: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+        }
+    }
+
+    /// The sheet closed after copying: confirm it somewhere the user is
+    /// looking, since the sheet slides away immediately.
+    private func showCopied() {
+        AccessibilityNotification.Announcement("已复制").post()
+        copiedNotice = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            copiedNotice = false
         }
     }
 

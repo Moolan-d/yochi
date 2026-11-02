@@ -39,6 +39,17 @@ final class CompanionUITests: XCTestCase {
         app.buttons["终端字号"].tap()
         app.buttons["恢复默认字号"].tap()
 
+        // A long press opens the visible rows in a selectable sheet; Copy is
+        // one tap and confirms on the terminal page.
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        XCTAssert(terminal.waitForExistence(timeout: 10), "terminal grid is not accessible")
+        terminal.press(forDuration: 1.0)
+        XCTAssert(text(app, containing: "选取文字").waitForExistence(timeout: 5), "no selection sheet")
+        XCTAssert(app.buttons["copyTerminalSelection"].waitForExistence(timeout: 5))
+        app.buttons["copyTerminalSelection"].tap()
+        XCTAssert(text(app, containing: "已复制").waitForExistence(timeout: 5), "no copy confirmation")
+        snapshot("3 copied")
+
         app.navigationBars.buttons.firstMatch.tap()
 
         app.buttons["设置"].tap()
