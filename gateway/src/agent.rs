@@ -302,12 +302,12 @@ mod tests {
 
     #[test]
     fn transport_failure_knows_whether_send_may_have_started() {
-        let before = request_failure(RequestError::before(anyhow!("no hc")), "request-1".into());
+        let before = request_failure(RequestError::before(anyhow::anyhow!("no hc")), "request-1".into());
         assert!(matches!(
             before,
             Response::SendFailed { kind, .. } if kind == "unavailable"
         ));
-        let after = request_failure(RequestError::after(anyhow!("connection closed")), "request-1".into());
+        let after = request_failure(RequestError::after(anyhow::anyhow!("connection closed")), "request-1".into());
         assert!(matches!(
             after,
             Response::SendFailed { kind, .. } if kind == "unknown"
