@@ -22,7 +22,7 @@ struct SessionListView: View {
                 Section {
                     ForEach(section.tabs) { tab in
                         if let title = tab.title {
-                            TabHeader(title: title, status: tab.status)
+                            TabHeader(title: title)
                         }
                         ForEach(tab.entries) { entry in
                             NavigationLink(value: entry.session) {
@@ -104,11 +104,6 @@ private struct SectionHeader: View {
                 Text(machine)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            // The needs-me section is all blocked; its badge would only repeat the title.
-            if section.kind != .needsMe, let status = section.status {
-                StatusBadge(state: status)
-            }
         }
         .textCase(nil)
         .accessibilityElement(children: .combine)
@@ -116,21 +111,16 @@ private struct SectionHeader: View {
     }
 }
 
-/// A tab's name above its sessions, for spaces with more than one tab.
+/// A tab's name above its sessions, for spaces with more than one tab. Status
+/// lives on the rows only: every row is always listed, so a roll-up would repeat it.
 private struct TabHeader: View {
     let title: String
-    let status: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Label(title, systemImage: "rectangle.split.2x1")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer()
-            if let status { StatusBadge(state: status) }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        Label(title, systemImage: "rectangle.split.2x1")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -168,15 +158,16 @@ private struct SessionRow: View {
     }
 }
 
-/// The program's own status word, localized, with a symbol so it never relies on color alone.
+/// The program's own status as a symbol; each state has its own shape so it never
+/// relies on color alone, and the localized word is its VoiceOver label.
 private struct StatusBadge: View {
     let state: String
 
     var body: some View {
         Label(title, systemImage: symbol)
-            .font(.caption.weight(.semibold))
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(color)
-            .labelStyle(.titleAndIcon)
+            .labelStyle(.iconOnly)
     }
 
     private var title: String {

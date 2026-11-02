@@ -16,9 +16,6 @@ struct SessionSection: Identifiable, Equatable {
     /// A remote machine's name; nil for the Gateway's own Mac.
     let machine: String?
     let tabs: [SessionTabGroup]
-
-    /// The most urgent Agent Status in the section.
-    var status: String? { AgentStatus.mostUrgent(tabs.flatMap(\.entries).map(\.session)) }
 }
 
 struct SessionTabGroup: Identifiable, Equatable {
@@ -26,8 +23,6 @@ struct SessionTabGroup: Identifiable, Equatable {
     /// Nil when the section has only this tab: its rows go straight under the header.
     let title: String?
     let entries: [SessionEntry]
-
-    var status: String? { AgentStatus.mostUrgent(entries.map(\.session)) }
 }
 
 struct SessionEntry: Identifiable, Equatable {
@@ -36,24 +31,6 @@ struct SessionEntry: Identifiable, Equatable {
     let place: String?
 
     var id: String { session.id }
-}
-
-enum AgentStatus {
-    /// Blocked first: it is the one that needs the user.
-    static func rank(_ state: String) -> Int {
-        switch state {
-        case "blocked": 0
-        case "error": 1
-        case "working": 2
-        case "done": 3
-        case "idle": 4
-        default: 5
-        }
-    }
-
-    static func mostUrgent(_ sessions: [Session]) -> String? {
-        sessions.compactMap { $0.status?.state }.min { rank($0) < rank($1) }
-    }
 }
 
 /// Agents waiting on the user first, then Herdr's spaces and their tabs, then

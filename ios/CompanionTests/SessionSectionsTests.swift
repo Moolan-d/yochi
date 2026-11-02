@@ -43,7 +43,6 @@ final class SessionSectionsTests: XCTestCase {
         XCTAssertEqual(sections.map(\.title), ["app", "infra", "其他终端"])
         XCTAssertEqual(sections[0].tabs.map(\.title), ["1", "logs"])
         XCTAssertEqual(sections[0].tabs[0].entries.map(\.id), ["t1", "t2"])
-        XCTAssertEqual(sections[0].status, "working")
         XCTAssertNil(sections[1].tabs[0].title, "a single tab needs no header")
         XCTAssertEqual(sections[1].machine, "vps")
         XCTAssertEqual(sections[2].tabs[0].entries.map(\.id), ["t9"])
@@ -64,12 +63,6 @@ final class SessionSectionsTests: XCTestCase {
         XCTAssertEqual(sections[0].tabs[0].entries.map(\.place), ["app · review", "vps · infra", nil])
         // Still listed in their own space too.
         XCTAssertEqual(sections[1].title, "app")
-        XCTAssertEqual(sections[1].status, "blocked")
-    }
-
-    func testMostUrgentStatus() throws {
-        XCTAssertEqual(AgentStatus.mostUrgent([try session("a", state: "idle"), try session("b", state: "blocked")]), "blocked")
-        XCTAssertEqual(AgentStatus.mostUrgent([try session("a"), try session("b", state: "done")]), "done")
-        XCTAssertNil(AgentStatus.mostUrgent([try session("a")]))
+        XCTAssertEqual(sections[1].tabs[1].entries.map(\.id), ["t2"])
     }
 }
