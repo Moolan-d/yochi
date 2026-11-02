@@ -62,7 +62,8 @@ struct ObserveView: View {
         Group {
             switch mode {
             case .conversation:
-                ConversationPane(feed: conversation, status: currentSession.status) {
+                ConversationPane(feed: conversation, status: currentSession.status,
+                                 keyboardShown: composerFocused) {
                     conversation.start(config, session: session.id)
                 }
             case .terminal:

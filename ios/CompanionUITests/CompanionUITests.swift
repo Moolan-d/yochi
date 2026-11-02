@@ -204,6 +204,37 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// The keyboard must not cover the conversation or the composer; the
+    /// newest message stays visible above it.
+    @MainActor
+    func testConversationKeepsContentAboveKeyboard() throws {
+        guard let agent = ProcessInfo.processInfo.environment["COMPANION_AGENT_SESSION"], !agent.isEmpty else {
+            throw XCTSkip("COMPANION_AGENT_SESSION is not set")
+        }
+        let app = launchUnpaired(observing: agent)
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+        XCTAssert(app.descendants(matching: .any)["sessionMode"].waitForExistence(timeout: 15), "no conversation")
+
+        // A tall reply fills the list; the keyboard then keeps the viewport
+        // short while it arrives, and the newest line must stay above it.
+        send(app, "Reply with the numbers 1 through 60, one per line, then a final line ZEND with no punctuation after it.")
+        let last = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "ZEND")).firstMatch
+        XCTAssert(last.waitForExistence(timeout: 90), "no reply")
+        let field = composer(app)
+        field.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssert(keyboard.waitForExistence(timeout: 10), "keyboard never appeared")
+        // Let the keyboard's layout and the follow settle.
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+
+        let info = "composer=\(field.frame) keyboard=\(keyboard.frame) last=\(last.frame)"
+        XCTAssertTrue(field.frame.maxY <= keyboard.frame.minY + 1, "composer runs under the keyboard: \(info)")
+        XCTAssertTrue(last.frame.maxY <= keyboard.frame.minY + 1, "newest reply runs under the keyboard: \(info)")
+        snapshot("1 keyboard up, reply visible")
+        leaveAndUnpair(app)
+    }
+
     // MARK: - Helpers
 
     @MainActor

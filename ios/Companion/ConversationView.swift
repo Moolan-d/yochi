@@ -5,10 +5,18 @@ import SwiftUI
 struct ConversationPane: View {
     let feed: ConversationFeed
     let status: Status?
+    /// The composer's keyboard shortens the viewport; the newest item must
+    /// stay above it, whatever the system does with the scroll view's insets.
+    let keyboardShown: Bool
     let retry: () -> Void
 
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var atBottom = true
+    /// How far the content's end is below the visible area, and how tall that
+    /// area is: the keyboard changes both, and the follow must keep the newest
+    /// item above it.
+    @State private var distanceBelow = CGFloat.zero
+    @State private var viewport = CGFloat.zero
 
     private var working: Bool { status?.state == "working" }
 
@@ -78,19 +86,33 @@ struct ConversationPane: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollPosition($position)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 60
-        } action: { _, atBottom in
-            self.atBottom = atBottom
+        .onScrollGeometryChange(for: CGPoint.self) { geometry in
+            // visibleRect is what the reader sees, so a keyboard-inset bottom
+            // counts as the bottom; the system's frame may extend under it.
+            CGPoint(x: max(0, geometry.contentSize.height - geometry.visibleRect.maxY),
+                    y: geometry.visibleRect.height)
+        } action: { _, metrics in
+            distanceBelow = metrics.x
+            viewport = metrics.y
+            atBottom = metrics.x < 60
         }
         .onChange(of: feed.items) { _, _ in follow() }
         .onChange(of: working) { _, _ in follow() }
+        .onChange(of: keyboardShown) { _, _ in followAfterKeyboard() }
         .accessibilityIdentifier("conversation")
     }
 
     private func follow() {
         guard atBottom else { return }
         withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(edge: .bottom) }
+    }
+
+    /// The keyboard shortens the viewport without moving the list: the newest
+    /// item would sit behind it. Follow the bottom when the reader was within
+    /// a screen of it, and leave someone reading further back where they are.
+    private func followAfterKeyboard() {
+        guard distanceBelow < viewport else { return }
+        withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
     }
 }
 
