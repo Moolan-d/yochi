@@ -79,25 +79,59 @@ final class ConversationTests: XCTestCase {
 
         - one
           - nested
+        - two
+
+          more of two
+        3. third
         > quoted
         ```swift
         let x = 1
 
         print(x)
         ```
+        ---
         Tail
         """)
-        XCTAssertEqual(blocks, [
-            .heading("Plan"),
-            .paragraph("First **line**\ncontinues here."),
-            .paragraph("• one\n  • nested"),
-            .quote("quoted"),
-            .code("let x = 1\n\nprint(x)"),
-            .paragraph("Tail"),
+        XCTAssertEqual(blocks.map(\.kind), [
+            .heading(1), .paragraph, .listItem(marker: "•"), .listItem(marker: "◦"), .listItem(marker: "•"),
+            .paragraph, .listItem(marker: "3."), .paragraph, .code(language: "swift"), .rule, .paragraph,
         ])
+        XCTAssertEqual(blocks.map(\.text), [
+            "Plan", "First line\ncontinues here.", "one", "nested", "two",
+            "more of two", "third", "quoted", "let x = 1\n\nprint(x)", "", "Tail",
+        ])
+        XCTAssertEqual(blocks.map(\.listDepth), [0, 0, 1, 2, 1, 1, 1, 0, 0, 0, 0])
+        XCTAssertEqual(blocks[7].quoteDepth, 1)
+    }
+
+    func testMarkdownTable() throws {
+        let blocks = MarkdownBlock.parse("""
+        | 目录 | 内容 |
+        |:---|---:|
+        | `ios/` | SwiftUI **App** |
+        | a |  |
+        """)
+        XCTAssertEqual(blocks.count, 1)
+        guard case .table(let table) = try XCTUnwrap(blocks.first).kind else { return XCTFail("not a table") }
+        XCTAssertEqual(table.columns, [.leading, .trailing])
+        XCTAssertEqual(table.rows.map { $0.map { String($0.characters) } },
+                       [["目录", "内容"], ["ios/", "SwiftUI App"], ["a", ""]])
+    }
+
+    func testTableColumnsShareTheWidthByContent() {
+        // Room to spare: each column grows with its content.
+        XCTAssertEqual(MarkdownTableLayout.share(300, ideal: [50, 100], minimum: 96), [100, 200])
+        // Too wide: the short columns keep their width, the long one takes the rest.
+        XCTAssertEqual(MarkdownTableLayout.share(370, ideal: [120, 400, 90], minimum: 96), [120, 160, 90])
+        // Two long ones split what is left.
+        XCTAssertEqual(MarkdownTableLayout.share(300, ideal: [60, 400, 500], minimum: 96), [60, 120, 120])
+        // Below the floors the table overruns and scrolls.
+        XCTAssertEqual(MarkdownTableLayout.share(0, ideal: [60, 400, 500], minimum: 96), [60, 96, 96])
     }
 
     func testUnclosedCodeFenceKeepsItsText() {
-        XCTAssertEqual(MarkdownBlock.parse("```\nstill typing"), [.code("still typing")])
+        let blocks = MarkdownBlock.parse("```\nstill typing")
+        XCTAssertEqual(blocks.map(\.kind), [.code(language: nil)])
+        XCTAssertEqual(blocks.map(\.text), ["still typing"])
     }
 }
