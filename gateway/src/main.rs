@@ -1,10 +1,14 @@
 mod agent;
+mod conversation;
+mod core;
 mod devices;
+mod following;
 mod herdr;
 mod layout;
 mod observe;
 mod server;
 mod session;
+mod transcript;
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};

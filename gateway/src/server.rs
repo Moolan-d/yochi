@@ -5,11 +5,16 @@
 //!   The app may send Agent Messages, key presses, or `unpair` to remove itself.
 //! - `/v0/observe?session=<id>` streams one terminal read-only: control as text,
 //!   terminal bytes as binary messages.
+//! - `/v0/conversation?session=<id>` follows the conversation of the Agent in
+//!   one terminal, read from its transcript.
 //!
 //! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
 use crate::agent;
+use crate::conversation::{Item, Pending};
+use crate::core::Client;
 use crate::devices::{Device, Store};
+use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::layout::Space;
 use crate::observe::{Observer, Output};
@@ -25,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::watch;
 
 pub const API_VERSION: u32 = 0;
@@ -54,6 +59,12 @@ enum ServerMessage<'a> {
     Paired { device: &'a str, token: &'a str },
     /// Wrong or expired pairing code.
     Rejected,
+    /// The whole conversation again; `supported: false` means terminal view only.
+    Conversation { supported: bool, items: &'a [Item] },
+    /// Conversation items added or changed, replacing any with the same id.
+    Items { items: &'a [Item] },
+    /// What the Agent is waiting for, or null once it isn't.
+    Pending { pending: Option<&'a Pending> },
 }
 
 #[derive(Deserialize)]
@@ -77,6 +88,13 @@ enum AppMessage {
         session: String,
         keys: Vec<String>,
     },
+    /// Answer what the Agent is waiting for, if it still is.
+    Answer {
+        id: String,
+        session: String,
+        choice: String,
+        expect: Option<String>,
+    },
     /// Forget this device (the app's own "unpair").
     Unpair,
 }
@@ -94,6 +112,7 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
         .route("/v0/pair", get(pair))
         .route("/v0/ws", get(upgrade))
         .route("/v0/observe", get(observe))
+        .route("/v0/conversation", get(conversation))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(listen)
         .await
@@ -259,6 +278,93 @@ async fn relay(mut socket: WebSocket, state: AppState, device: String, id: Strin
     observer.detach().await;
 }
 
+async fn conversation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ObserveQuery>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if session_size(&state.view.borrow(), &query.session).is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    ws.on_upgrade(move |socket| follow(socket, state, device, query.session))
+}
+
+/// What a tick depends on; a change in it means look again now.
+fn watched(view: &CoreView, id: &str) -> Option<(Option<u64>, u64, Option<crate::session::Status>)> {
+    view.sessions.iter().find(|s| s.id == id).map(|s| (s.pid, s.turn, s.status.clone()))
+}
+
+/// Polls the transcript while a phone follows the conversation: every second
+/// while the Agent works or waits and for a few seconds after any change
+/// (Claude Code may finish before its last line is written), else every few.
+async fn follow(mut socket: WebSocket, state: AppState, device: String, id: String) {
+    let mut client = match Client::connect(&state.hc).await {
+        Ok(client) => client,
+        Err(err) => {
+            let reason = Value::String(format!("{err:#}"));
+            let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
+            return;
+        }
+    };
+    let mut follower = Follower::default();
+    let mut view = state.view.clone();
+    let mut devices = state.devices.subscribe();
+    let mut seen = None;
+    let mut busy_until = Instant::now();
+    loop {
+        let Some(session) = view.borrow_and_update().sessions.iter().find(|s| s.id == id).cloned() else {
+            let reason = Value::String("finished".into());
+            let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
+            return;
+        };
+        let updates = match follower.tick(&mut client, &session).await {
+            Ok(updates) => updates,
+            Err(err) => {
+                let reason = Value::String(format!("{err:#}"));
+                let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
+                return;
+            }
+        };
+        for update in &updates {
+            let message = match update {
+                Update::Conversation { supported, items } => ServerMessage::Conversation { supported: *supported, items },
+                Update::Items(items) => ServerMessage::Items { items },
+                Update::Pending(pending) => ServerMessage::Pending { pending: pending.as_ref() },
+            };
+            if send(&mut socket, &message).await.is_err() {
+                return;
+            }
+        }
+        let current = watched(&view.borrow(), &id);
+        if current != seen {
+            seen = current;
+            busy_until = Instant::now() + Duration::from_secs(5);
+        }
+        let active = session.status.as_ref().is_some_and(|status| matches!(status.state.as_str(), "working" | "blocked"));
+        let wait = if active || Instant::now() < busy_until { Duration::from_secs(1) } else { Duration::from_secs(4) };
+        let sleep = tokio::time::sleep(wait);
+        tokio::pin!(sleep);
+        loop {
+            tokio::select! {
+                () = &mut sleep => break,
+                changed = view.changed() => {
+                    if changed.is_err() { return }
+                    if watched(&view.borrow(), &id) != seen { break }
+                },
+                incoming = socket.recv() => match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                    Some(Ok(_)) => {}
+                },
+                () = unpaired(&mut devices, &device) => return,
+            }
+        }
+    }
+}
+
 /// The paired device whose token the request carries.
 fn authorize(headers: &HeaderMap, devices: &[Device]) -> Option<String> {
     let token = headers
@@ -321,6 +427,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::Answer { id, session, choice, expect }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = agent::AnswerRequest { id, session, choice, expect };
+                            let response = agent::answer(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     Ok(AppMessage::Keys { id, session, keys }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -371,6 +488,12 @@ mod tests {
         let message: AppMessage =
             serde_json::from_str(r#"{"type":"keys","id":"k1","session":"t1","keys":["down","enter"]}"#).unwrap();
         assert!(matches!(message, AppMessage::Keys { keys, .. } if keys == ["down", "enter"]));
+        let message: AppMessage = serde_json::from_str(
+            r#"{"type":"answer","id":"a1","session":"t1","choice":"allow","expect":"approve Bash: ls"}"#,
+        )
+        .unwrap();
+        assert!(matches!(message, AppMessage::Answer { choice, expect: Some(expect), .. }
+            if choice == "allow" && expect == "approve Bash: ls"));
     }
 
     #[test]

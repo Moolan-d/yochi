@@ -101,6 +101,62 @@ Gateway 校验会话仍存在且 live、文本非空且 UTF-8 不超过 16 KiB�
 
 Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.keys`。它不 attach，因此不是 Takeover，不改变终端尺寸；core 同样等终端约 3 秒无人输入后再按。`kind` 同 Agent Message，另有 Gateway 的 `invalid_params`（按键为空、超过 8 个或会话不存在）、`unknown`、`timeout`。结果不明时 App 不自动重按。App 依次发送：上一个请求未返回时的点按合并进下一个请求，保证顺序。
 
+### 作答（Agent Question）
+
+回答 Agent 正在等待的批准或单选提问，同样在 `/v0/ws` 上：
+
+```jsonc
+// App → Gateway；expect 为 App 展示的 pending.message
+{"type": "answer", "id": "<客户端生成>", "session": "t3", "choice": "allow", "expect": "approve Bash: date > stamp.txt"}
+// Gateway → App：与按键相同
+{"type": "keys_sent", "id": "<客户端生成>"}
+{"type": "keys_failed", "id": "<客户端生成>", "kind": "changed", "message": "Agent 等待的内容已变化"}
+```
+
+- `choice`：权限请求为 `allow` 或 `deny`；提问为选项序号 `1`–`9`（按 transcript 中 `options` 的顺序），或 `deny` 取消。
+- Gateway 先核对会话状态仍为 `blocked`、`status.message` 等于 `expect`，否则返回 `kind: "changed"`（例如桌面上已有人作答）。核对通过后按键：`allow` 按 `1`，`deny` 按 Esc，序号按对应数字（ADR 0004、实验 0001）。
+- 核对与按键之间 core 仍要等约 3 秒无人输入，这段时间内桌面作答的竞争无法排除；App 不自动重试。
+- 多题、多选和自由输入不支持，App 引导用户到终端作答。
+
+### 对话（Conversation History）
+
+`ws://<host>:7420/v0/conversation?session=<id>`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。
+
+```jsonc
+// 开始时、以及换了对话（/clear、Agent 重启）时：整份替换
+{"type": "conversation", "supported": true, "items": [ … ]}
+// 前台不是可解读的 Agent：App 只提供终端视图；之后若启动了 Claude Code 会再发 supported: true
+{"type": "conversation", "supported": false, "items": []}
+// 新增或变化的条目，按 id 覆盖
+{"type": "items", "items": [ … ]}
+// Agent 在等什么；不再等待时为 null
+{"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
+// 会话结束或读取失败
+{"type": "closed", "reason": "finished"}
+```
+
+条目（`kind` 区分）：
+
+```jsonc
+{"kind": "user", "id": "…", "text": "请继续"}
+{"kind": "agent", "id": "…", "text": "Markdown 正文"}
+{"kind": "tool", "id": "toolu_01…", "name": "Bash", "summary": "date > stamp.txt",
+ "state": "running", "output": "前 40 行、2000 字节以内"}
+{"kind": "tool", "id": "toolu_02…", "name": "AskUserQuestion", "summary": "Cats or Dogs?", "state": "done",
+ "questions": [{"question": "Cats or Dogs?", "header": "Pet", "multi_select": false,
+                "options": [{"label": "Cats", "description": "…"}, {"label": "Dogs", "description": "…"}]}],
+ "answers": {"Cats or Dogs?": "Cats"}}
+{"kind": "command", "id": "…", "name": "/model haiku", "output": "Set model to haiku"}
+{"kind": "notice", "id": "…", "text": "上下文已压缩"}   // 也用于「已中断」和 API 错误
+```
+
+- 只发显示所需的字段；thinking、用量、请求记录和附件不离开 Gateway。图片显示为「［图片］」。
+- 首次只发最近 300 条，最多回溯 transcript 的最后 2000 行。
+- `tool.state` 为 `running` / `done` / `error`；结果到达时同一 `id` 的条目被替换。
+- `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
+- Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。
+- Gateway 在有 App 订阅时才读取：Agent 工作或等待时、以及状态变化后几秒内每秒一次，其余每 4 秒。core 的 `file.read` 每次读取整个文件，超过 64 MB 的 transcript 读取失败。
+
 ### 只读查看终端（Observer）
 
 `ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并以 `observe` 模式 attach，因此手机不会向终端输入，也不会改变终端尺寸。

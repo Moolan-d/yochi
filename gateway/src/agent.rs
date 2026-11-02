@@ -31,6 +31,16 @@ pub struct KeysRequest {
     pub keys: Vec<String>,
 }
 
+/// An answer to what the Agent is waiting for: `allow` or `deny` a
+/// permission, or an option's number (from 1) for a question.
+pub struct AnswerRequest {
+    pub id: String,
+    pub session: String,
+    pub choice: String,
+    /// core's status message the phone showed; the answer only goes in while it still holds.
+    pub expect: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -94,6 +104,33 @@ pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequ
         ),
         None => Response::KeysSent { id: request.id },
     }
+}
+
+/// Presses the keys for an answer, after checking the Agent still waits for
+/// the same thing the phone showed: someone at the desk may have answered.
+/// Claude Code's dialogs put Yes first, cancel on Esc, and number a single
+/// question's options from 1 (experiment 0001).
+pub async fn answer(hc: &str, view: &watch::Receiver<CoreView>, request: AnswerRequest) -> Response {
+    let keys = match answer_keys(&view.borrow(), &request) {
+        Ok(keys) => keys,
+        Err((kind, message)) => return Response::KeysFailed { id: request.id, kind: kind.into(), message: message.into() },
+    };
+    press(hc, view, KeysRequest { id: request.id, session: request.session, keys }).await
+}
+
+fn answer_keys(view: &CoreView, request: &AnswerRequest) -> Result<Vec<String>, (&'static str, &'static str)> {
+    let session = view.sessions.iter().find(|session| session.id == request.session).ok_or(("not_found", "会话不存在或已结束"))?;
+    let status = session.status.as_ref().filter(|status| status.state == "blocked").ok_or(("changed", "Agent 已不在等待"))?;
+    if status.message != request.expect {
+        return Err(("changed", "Agent 等待的内容已变化"));
+    }
+    let key = match (status.kind.as_deref(), request.choice.as_str()) {
+        (Some("permission"), "allow") => "1",
+        (Some("permission" | "question"), "deny") => "esc",
+        (Some("question"), number) if matches!(number.parse::<u8>(), Ok(1..=9)) => number,
+        _ => return Err(("invalid_params", "无法这样作答")),
+    };
+    Ok(vec![key.to_owned()])
 }
 
 fn validate_keys(view: &CoreView, request: &KeysRequest) -> Result<(), &'static str> {
@@ -230,6 +267,7 @@ mod tests {
                 turn: 0,
                 parent: None,
                 place: None,
+                pid: None,
             }],
             spaces: Vec::new(),
         }
@@ -270,6 +308,35 @@ mod tests {
         let mut missing = keys(&["esc"]);
         missing.session = "t404".into();
         assert!(validate_keys(&view, &missing).is_err());
+    }
+
+    #[test]
+    fn answers_only_what_is_still_asked() {
+        let mut view = view();
+        let answer = |choice: &str, expect: &str| AnswerRequest {
+            id: "a1".into(),
+            session: "t1".into(),
+            choice: choice.into(),
+            expect: Some(expect.into()),
+        };
+        assert_eq!(answer_keys(&view, &answer("allow", "x")).unwrap_err().0, "changed", "not blocked");
+        view.sessions[0].status = Some(crate::session::Status {
+            state: "blocked".into(),
+            app: Some("claude-code".into()),
+            message: Some("approve Bash: ls".into()),
+            kind: Some("permission".into()),
+        });
+        assert_eq!(answer_keys(&view, &answer("allow", "approve Bash: ls")).unwrap(), ["1"]);
+        assert_eq!(answer_keys(&view, &answer("deny", "approve Bash: ls")).unwrap(), ["esc"]);
+        assert_eq!(answer_keys(&view, &answer("allow", "approve Bash: rm")).unwrap_err().0, "changed");
+        assert_eq!(answer_keys(&view, &answer("2", "approve Bash: ls")).unwrap_err().0, "invalid_params");
+
+        let status = view.sessions[0].status.as_mut().unwrap();
+        status.kind = Some("question".into());
+        status.message = Some("answer: Red or Blue?".into());
+        assert_eq!(answer_keys(&view, &answer("2", "answer: Red or Blue?")).unwrap(), ["2"]);
+        assert_eq!(answer_keys(&view, &answer("allow", "answer: Red or Blue?")).unwrap_err().0, "invalid_params");
+        assert_eq!(answer_keys(&view, &answer("12", "answer: Red or Blue?")).unwrap_err().0, "invalid_params");
     }
 
     #[test]

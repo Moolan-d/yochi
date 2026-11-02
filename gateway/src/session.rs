@@ -25,6 +25,9 @@ pub struct Session {
     /// Herdr's `where` label, `<space> / <tab>`, used to name spaces.
     #[serde(skip)]
     pub place: Option<String>,
+    /// The foreground process, which names an Agent's own session records.
+    #[serde(skip)]
+    pub pid: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -46,7 +49,14 @@ impl Session {
         let id = record["address"].as_str()?.to_owned();
         let machine = id.rsplit_once('/').map(|(machine, _)| machine.to_owned());
         let foreground = &record["foreground"];
-        let program = text(&foreground["name"]);
+        // The command as started: Claude Code's process is named after its version (`2.1.316`).
+        let program = foreground["argv"][0]
+            .as_str()
+            .and_then(|argv0| argv0.rsplit('/').next())
+            .map(|name| name.trim_start_matches('-'))
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .or_else(|| text(&foreground["name"]));
         let title = text(&record["name"])
             .or_else(|| text(&record["title"]))
             .or_else(|| program.clone())
@@ -73,6 +83,7 @@ impl Session {
             rows: size("rows", 24),
             parent: text(&record["parent"]),
             place: text(&record["labels"]["where"]),
+            pid: foreground["pid"].as_u64(),
         })
     }
 }
@@ -92,18 +103,32 @@ mod tests {
         let record = json!({
             "address": "vps-us/t1", "state": "live", "name": null, "title": "",
             "cwd": "/root", "cols": 200, "rows": 50, "turn": 4,
-            "foreground": {"name": "claude", "cwd": "/root/app"},
+            "foreground": {"name": "2.1.316", "argv": ["claude", "--resume"], "pid": 42, "cwd": "/root/app"},
             "status": {"state": "blocked", "app": "claude", "kind": "permission", "msg": "Run ls?"},
         });
         let session = Session::from_record(&record).unwrap();
         assert_eq!(session.machine.as_deref(), Some("vps-us"));
         assert_eq!(session.title, "claude");
+        assert_eq!(session.program.as_deref(), Some("claude"));
+        assert_eq!(session.pid, Some(42));
         assert_eq!(session.cwd, "/root/app");
         assert_eq!((session.cols, session.rows), (200, 50));
         assert_eq!(session.turn, 4);
         let status = session.status.unwrap();
         assert_eq!(status.state, "blocked");
         assert_eq!(status.kind.as_deref(), Some("permission"));
+    }
+
+    #[test]
+    fn program_is_the_command_as_started() {
+        let program = |foreground: Value| {
+            Session::from_record(&json!({"address": "t1", "state": "live", "cwd": "/", "foreground": foreground}))
+                .unwrap()
+                .program
+        };
+        assert_eq!(program(json!({"name": "zsh", "argv": ["-zsh"]})).as_deref(), Some("zsh"));
+        assert_eq!(program(json!({"name": "zsh", "argv": ["/bin/zsh", "-l"]})).as_deref(), Some("zsh"));
+        assert_eq!(program(json!({"name": "pi"})).as_deref(), Some("pi"));
     }
 
     #[test]
