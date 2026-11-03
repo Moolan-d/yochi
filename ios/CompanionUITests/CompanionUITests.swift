@@ -502,6 +502,7 @@ final class CompanionUITests: XCTestCase {
         RunLoop.current.run(until: .now.addingTimeInterval(5))
         send(app, "In the foreground, not in the background, run the shell command `python3 -c 'import time; time.sleep(40)'`, then reply with just: done")
         XCTAssert(app.buttons["stopAgent"].waitForExistence(timeout: 30), "the Agent never started working")
+        XCTAssert(text(app, containing: "工作中 · ").waitForExistence(timeout: 10), "no working timer in the title")
 
         let field = composer(app)
         field.tap()
@@ -584,6 +585,22 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(app.descendants(matching: .any)["stopAgent"].waitForNonExistence(timeout: 90), "the Agent kept working")
         snapshot("3 described")
         leaveAndUnpair(app)
+    }
+
+    /// A child Agent's row sits under the terminal that started it, one level in.
+    @MainActor
+    func testChildAgentRow() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+        let child = sessionCell(app, name: "companion-uitest-child")
+        XCTAssert(child.waitForExistence(timeout: 15), "no child session")
+        XCTAssert(child.label.hasPrefix("子 Agent"), "the child row reads \(child.label)")
+        let rows = app.cells.buttons.allElementsBoundByIndex.map(\.label)
+        let parent = try XCTUnwrap(rows.firstIndex { $0.contains("companion-uitest") && !$0.contains("companion-uitest-") })
+        XCTAssertEqual(rows.firstIndex { $0.contains("companion-uitest-child") }, parent + 1, "\(rows)")
+        snapshot("child row")
+        unpair(app)
     }
 
     /// Edit, to-do, subtask and peer cards in the DEBUG sample conversation,

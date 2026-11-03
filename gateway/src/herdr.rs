@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, watch};
@@ -276,7 +276,16 @@ impl Terminals {
                     "foreground" => {
                         record.insert("foreground".into(), data.clone());
                     }
-                    "status" | "keep" | "title" | "size" => merge(record, data),
+                    // The event carries no `status_ms`, only snapshots do: a new word dates from now.
+                    "status" => {
+                        let changed = record.get("status").map(|s| &s["state"]) != Some(&data["status"]["state"]);
+                        merge(record, data);
+                        if changed && data.get("status_ms").is_none() {
+                            let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+                            record.insert("status_ms".into(), now.into());
+                        }
+                    }
+                    "keep" | "title" | "size" => merge(record, data),
                     _ => {}
                 }
             }
@@ -328,6 +337,23 @@ mod tests {
         assert_eq!(ids, ["t1", "vps/t9"]);
         assert_eq!(sessions[0].status.as_ref().unwrap().state, "working");
         assert_eq!(terminals.0["t1"]["state"], "live");
+    }
+
+    #[test]
+    fn a_new_status_word_dates_from_the_event() {
+        let mut terminals = Terminals::default();
+        terminals.reset(&json!([{"address": "t1", "state": "live", "cwd": "/",
+            "status": {"state": "idle", "app": "claude"}, "status_ms": 5}]));
+        let status = |state: &str| json!({"type": "status", "terminal": "t1",
+            "data": {"status": {"state": state, "app": "claude"}, "records": {}, "reported": true}});
+
+        terminals.apply(&status("idle"));
+        assert_eq!(terminals.sessions()[0].status_ms, Some(5), "the same word keeps its time");
+        terminals.apply(&status("working"));
+        let since = terminals.sessions()[0].status_ms.unwrap();
+        assert!(since > 1_700_000_000_000, "{since}");
+        terminals.apply(&status("working"));
+        assert_eq!(terminals.sessions()[0].status_ms, Some(since));
     }
 
     #[test]

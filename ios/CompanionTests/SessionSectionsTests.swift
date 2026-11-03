@@ -2,8 +2,9 @@ import XCTest
 @testable import Companion
 
 final class SessionSectionsTests: XCTestCase {
-    private func session(_ id: String, machine: String? = nil, state: String? = nil) throws -> Session {
+    private func session(_ id: String, machine: String? = nil, state: String? = nil, parent: String? = nil) throws -> Session {
         var json: [String: Any] = ["id": id, "title": id, "cwd": "/"]
+        if let parent { json["parent"] = parent }
         if let machine { json["machine"] = machine }
         if let state { json["status"] = ["state": state] }
         return try JSONDecoder().decode(Session.self, from: JSONSerialization.data(withJSONObject: json))
@@ -20,6 +21,16 @@ final class SessionSectionsTests: XCTestCase {
             return XCTFail("not a sessions message")
         }
         XCTAssertEqual(spaces, [])
+    }
+
+    func testChildAgentsFollowTheirParentOutsideSpaces() throws {
+        let sessions = [
+            try session("t1"), try session("t5", parent: "t9"), try session("t3", parent: "t2"),
+            try session("t2"), try session("t4", parent: "t1"), try session("t6", parent: "t4"),
+        ]
+        let sections = sessionSections(sessions: sessions, spaces: [])
+        // t5's parent is gone, so it stands on its own.
+        XCTAssertEqual(sections[0].tabs[0].entries.map(\.id), ["t1", "t4", "t6", "t5", "t2", "t3"])
     }
 
     func testWithoutSpacesGroupsByMachine() throws {

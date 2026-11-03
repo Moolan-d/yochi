@@ -20,6 +20,20 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(session.status?.state, "working")
     }
 
+    func testWorkingTimerAndParent() throws {
+        let data = Data(#"""
+        {"id":"t2","machine":null,"title":"sub","program":"claude","cwd":"/app",
+         "status":{"state":"working"},"turn":0,"status_ms":1000000,"parent":"t1"}
+        """#.utf8)
+        let session = try JSONDecoder().decode(Session.self, from: data)
+        XCTAssertEqual(session.parent, "t1")
+        XCTAssertEqual(session.working(at: Date(timeIntervalSince1970: 1_012)), "工作中 · 12s")
+        XCTAssertEqual(session.working(at: Date(timeIntervalSince1970: 990)), "工作中 · 0s", "a phone clock behind the Mac's")
+        let idle = try JSONDecoder().decode(Session.self, from: Data(#"{"id":"t1","title":"a","cwd":"/","status":{"state":"idle"},"status_ms":1}"#.utf8))
+        XCTAssertNil(idle.working(at: .now))
+        XCTAssertNil(idle.parent)
+    }
+
     func testRunRepliesDecode() throws {
         let created = Data(#"{"type":"run_created","id":"r1","session":"vps-us/t7"}"#.utf8)
         guard case .runCreated(let id, let session) = try JSONDecoder().decode(ServerMessage.self, from: created) else {

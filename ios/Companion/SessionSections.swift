@@ -57,7 +57,7 @@ func sessionSections(sessions: [Session], spaces: [Space]) -> [SessionSection] {
     let others = Dictionary(grouping: sessions.filter { placed[$0.id] == nil }, by: \.machine)
         .sorted { ($0.key ?? "") < ($1.key ?? "") }
     for (machine, group) in others {
-        let entries = group.map { SessionEntry(session: $0, place: nil) }
+        let entries = childrenAfterParents(group).map { SessionEntry(session: $0, place: nil) }
         sections.append(SessionSection(
             id: "others/\(machine ?? "")", kind: .others,
             title: spaces.isEmpty ? (machine ?? "本机") : "其他终端",
@@ -79,4 +79,22 @@ func sessionSections(sessions: [Session], spaces: [Space]) -> [SessionSection] {
             tabs: [SessionTabGroup(id: "needs-me", title: nil, entries: waiting)]), at: 0)
     }
     return sections
+}
+
+/// Each child Agent right after the terminal that started it and that
+/// terminal's earlier children, as the Gateway orders a tab.
+func childrenAfterParents(_ sessions: [Session]) -> [Session] {
+    let ids = Set(sessions.map(\.id))
+    let children = Dictionary(grouping: sessions.filter { $0.parent.map(ids.contains) == true }, by: { $0.parent ?? "" })
+    var ordered: [Session] = []
+    var seen = Set<String>()
+    func add(_ session: Session) {
+        guard seen.insert(session.id).inserted else { return }
+        ordered.append(session)
+        children[session.id]?.forEach(add)
+    }
+    sessions.filter { $0.parent.map(ids.contains) != true }.forEach(add)
+    // A loop of parents has no root; keep those where they were.
+    sessions.forEach(add)
+    return ordered
 }

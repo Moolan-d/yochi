@@ -381,8 +381,9 @@ struct ObserveView: View {
         .accessibilityIdentifier("terminalTextSize")
     }
 
-    private var subtitle: String {
+    private func subtitle(at now: Date) -> String {
         let place = currentSession.machine ?? "本机"
+        if let working = currentSession.working(at: now) { return "\(working) · \(place)" }
         if isConversation { return "对话 · \(place)" }
         var parts = ["终端", place]
         if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
@@ -511,7 +512,13 @@ struct ObserveView: View {
         ToolbarItem(placement: .principal) {
             VStack(spacing: 0) {
                 Text(currentSession.title).font(.headline).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                if currentSession.working(at: .now) != nil {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(subtitle(at: context.date)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(subtitle(at: .now)).font(.caption).foregroundStyle(.secondary)
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityHint(isConversation

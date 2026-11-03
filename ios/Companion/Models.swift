@@ -12,9 +12,13 @@ struct Session: Decodable, Identifiable, Hashable {
     let status: Status?
     /// The last completed Agent turn, or zero when none has been reported.
     let turn: UInt64
+    /// When the status last changed, by the Mac's clock (ms since 1970).
+    let statusMs: Int64?
+    /// The terminal that started this one: it is a child Agent.
+    let parent: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, machine, title, program, cwd, status, turn
+        case id, machine, title, program, cwd, status, turn, statusMs = "status_ms", parent
     }
 
     init(from decoder: Decoder) throws {
@@ -27,6 +31,14 @@ struct Session: Decodable, Identifiable, Hashable {
         status = try c.decodeIfPresent(Status.self, forKey: .status)
         // A Gateway older than the Agent Message feature sends no turn.
         turn = try c.decodeIfPresent(UInt64.self, forKey: .turn) ?? 0
+        statusMs = try c.decodeIfPresent(Int64.self, forKey: .statusMs)
+        parent = try c.decodeIfPresent(String.self, forKey: .parent)
+    }
+
+    /// 「工作中 · 12s」 while the Agent works and the Gateway says since when.
+    func working(at now: Date) -> String? {
+        guard status?.state == "working", let statusMs else { return nil }
+        return "工作中 · \(Elapsed.text(milliseconds: Int64(now.timeIntervalSince1970 * 1000) - statusMs))"
     }
 }
 

@@ -137,6 +137,13 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
+            if session.parent != nil {
+                // One level in, under the Agent that started it.
+                Label("子 Agent", systemImage: "arrow.turn.down.right")
+                    .labelStyle(.iconOnly)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             Group {
                 if let status = session.status { StatusBadge(state: status.state) } else { Text(" ") }
             }
@@ -152,6 +159,13 @@ private struct SessionRow: View {
             Text(session.title)
                 .font(.headline)
                 .lineLimit(1)
+            if session.working(at: .now) != nil {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(session.working(at: context.date) ?? "")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
             if queued {
                 Label("排队中", systemImage: "clock")
                     .font(.subheadline)
