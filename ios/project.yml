@@ -35,7 +35,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.companion.app$(BUNDLE_ID_SUFFIX)
         # Home-screen name; the project, bundle ID and URL scheme stay "companion".
-        INFOPLIST_KEY_CFBundleDisplayName: Collie
+        INFOPLIST_KEY_CFBundleDisplayName: Hau
         INFOPLIST_KEY_NSCameraUsageDescription: 拍照发给 Agent。
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
