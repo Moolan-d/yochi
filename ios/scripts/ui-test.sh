@@ -85,10 +85,23 @@ start_agent_session() {
         -- "$(command -v claude)" > /dev/null
 }
 
+# A git repository in the Agent's directory with one change and one new
+# file, for testChangesPage. It sits under the git-ignored build directory.
+start_changes_repo() {
+    dir=build/uitest-agent
+    rm -rf "$dir/.git" "$dir/notes.md"
+    seq 1 10 | sed 's/^/line /' > "$dir/app.txt"
+    git -C "$dir" init -q
+    git -C "$dir" add -A
+    git -C "$dir" -c user.name=uitest -c user.email=uitest@example.invalid commit -qm base
+    sed -i '' 's/^line 5$/line five changed/' "$dir/app.txt"
+    printf 'A new note\n' > "$dir/notes.md"
+}
+
 # TESTS="testA testB" runs a subset; testDialogFromScreen,
 # testPickerFromScreen, testPermissionModeFromScreen and
-# testMessageQueuedWhileWorking, testImageSentToAgent and testSlashCompletion
-# run only when named.
+# testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
+# testChangesPage run only when named.
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -118,8 +131,9 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         start_picker_session
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi
-    if [ "$test" = testMessageQueuedWhileWorking ] || [ "$test" = testImageSentToAgent ] || [ "$test" = testSlashCompletion ]; then
+    if [ "$test" = testMessageQueuedWhileWorking ] || [ "$test" = testImageSentToAgent ] || [ "$test" = testSlashCompletion ] || [ "$test" = testChangesPage ]; then
         start_agent_session
+        [ "$test" != testChangesPage ] || start_changes_repo
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi
     env $extra \

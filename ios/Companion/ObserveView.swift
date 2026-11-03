@@ -34,6 +34,7 @@ struct ObserveView: View {
     /// draft starts a slash command.
     @State private var customCommands: [SlashCommand] = []
     @State private var confirmingExit = false
+    @State private var showingChanges = false
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -132,21 +133,8 @@ struct ObserveView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomPanel }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(currentSession.title).font(.headline).lineLimit(1)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityHint(isConversation
-                    ? "可查看对话、批准或回答 Agent 的请求、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。"
-                    : "可查看终端、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
-            }
-            if !isConversation {
-                ToolbarItem(placement: .topBarTrailing) { textSizeMenu }
-            }
-        }
+        .toolbar { toolbar }
+        .navigationDestination(isPresented: $showingChanges) { changesPage }
         .confirmationDialog("仍然发送消息？", isPresented: $confirmingBlocked, titleVisibility: .visible) {
             Button("仍然发送") { send(force: true) }
             // iOS 26 can drop `.cancel` here; an explicit plain button remains.
@@ -511,6 +499,35 @@ struct ObserveView: View {
         guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
         if case .uploaded(let path) = attachments[index].state { draft = DraftPaths.remove(path, from: draft) }
         attachments.remove(at: index)
+    }
+
+    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: 0) {
+                Text(currentSession.title).font(.headline).lineLimit(1)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityHint(isConversation
+                ? "可查看对话、批准或回答 Agent 的请求、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。"
+                : "可查看终端、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button("改动", systemImage: "arrow.triangle.pull") { showingChanges = true }
+                .accessibilityIdentifier("changesButton")
+            if !isConversation { textSizeMenu }
+        }
+    }
+
+    private var changesPage: some View {
+        let ask: (() -> Void)? = QuickCommand.isClaudeCode(currentSession) ? { askToCommit() } : nil
+        return ChangesView(session: session.id, client: client, askToCommit: ask)
+    }
+
+    /// Fills the request into the draft and comes back; the user sends it.
+    private func askToCommit() {
+        draft = QuickCommand.insert(ChangesView.commitRequest, into: draft)
+        showingChanges = false
     }
 
     private var slashQuery: String? { SlashCompletion.query(in: draft) }

@@ -50,6 +50,8 @@ final class GatewayClient {
         case interrupted(outcome: String)
         case putDone(path: String)
         case commandList([SlashCommand])
+        case changes(ChangeList)
+        case changeDiff(patch: String, truncated: Bool)
         case failed(kind: String, message: String)
         case unknown
     }
@@ -203,7 +205,7 @@ final class GatewayClient {
         switch reply {
         case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .keysSent, .runCreated, .interrupted, .putDone, .commandList, .unknown: return .unknown
+        case .keysSent, .runCreated, .interrupted, .putDone, .commandList, .changes, .changeDiff, .unknown: return .unknown
         }
     }
 
@@ -220,7 +222,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .interrupted, .putDone, .commandList, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .putDone, .commandList, .changes, .changeDiff, .unknown: return .unknown
         }
     }
 
@@ -238,7 +240,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .interrupted, .putDone, .commandList, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .putDone, .commandList, .changes, .changeDiff, .unknown: return .unknown
         }
     }
 
@@ -255,7 +257,7 @@ final class GatewayClient {
         case .interrupted(let outcome): return .pressed(outcome: outcome)
         case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .runCreated, .putDone, .commandList, .unknown: return .unknown
+        case .sent, .keysSent, .runCreated, .putDone, .commandList, .changes, .changeDiff, .unknown: return .unknown
         }
     }
 
@@ -278,7 +280,7 @@ final class GatewayClient {
         case .putDone(let path): return .done(path: path)
         case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .runCreated, .interrupted, .commandList, .unknown: return .unknown
+        case .sent, .keysSent, .runCreated, .interrupted, .commandList, .changes, .changeDiff, .unknown: return .unknown
         }
     }
 
@@ -295,6 +297,35 @@ final class GatewayClient {
         return nil
     }
 
+    /// The session's Changes against HEAD.
+    func changes(session: String) async -> Result<ChangeList, ChangesError> {
+        struct Request: Encodable {
+            let type = "changes"
+            let id: String
+            let session: String
+        }
+        switch await request({ Request(id: $0, session: session) }) {
+        case .changes(let list): return .success(list)
+        case .failed(let kind, let message): return .failure(ChangesError(kind: kind, message: message))
+        default: return .failure(ChangesError(kind: "unknown", message: "没有收到结果"))
+        }
+    }
+
+    /// One file's diff; `path` must come from the latest Changes of this session.
+    func changeDiff(session: String, path: String) async -> Result<FileDiff, ChangesError> {
+        struct Request: Encodable {
+            let type = "change_diff"
+            let id: String
+            let session: String
+            let path: String
+        }
+        switch await request({ Request(id: $0, session: session, path: path) }) {
+        case .changeDiff(let patch, let truncated): return .success(FileDiff(patch: patch, truncated: truncated))
+        case .failed(let kind, let message): return .failure(ChangesError(kind: kind, message: message))
+        default: return .failure(ChangesError(kind: "unknown", message: "没有收到结果"))
+        }
+    }
+
     func runSession(machine: String?, cwd: String, argv: [String], space: String?) async -> RunResult {
         struct Request: Encodable {
             let type = "run"
@@ -308,7 +339,7 @@ final class GatewayClient {
         switch reply {
         case .runCreated(let session): return .created(session: session)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .interrupted, .putDone, .commandList, .unknown: return .unknown
+        case .sent, .keysSent, .interrupted, .putDone, .commandList, .changes, .changeDiff, .unknown: return .unknown
         }
     }
 
@@ -380,6 +411,8 @@ final class GatewayClient {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = URLSession.shared.webSocketTask(with: request)
+        // A file's diff can run to half a megabyte.
+        socket.maximumMessageSize = 4 << 20
         self.socket = socket
         socket.resume()
         let pings = Task { await Self.keepAlive(socket) }
@@ -418,6 +451,12 @@ final class GatewayClient {
                 complete(id: id, with: .failed(kind: kind, message: message))
             case .commandList(let id, let commands):
                 complete(id: id, with: .commandList(commands))
+            case .changes(let id, let list):
+                complete(id: id, with: .changes(list))
+            case .changeDiff(let id, let patch, let truncated):
+                complete(id: id, with: .changeDiff(patch: patch, truncated: truncated))
+            case .changesFailed(let id, let kind, let message), .changeDiffFailed(let id, let kind, let message):
+                complete(id: id, with: .failed(kind: kind, message: message))
             case .unknown:
                 break
             }

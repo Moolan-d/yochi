@@ -586,6 +586,51 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// The Changes page of a session whose directory has a modified and a new
+    /// file, one file's diff, and 「让 Agent 提交」 filling the draft.
+    @MainActor
+    func testChangesPage() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+
+        app.buttons["changesButton"].tap()
+        XCTAssert(text(app, containing: "uitest-agent · 相对 HEAD").waitForExistence(timeout: 20), "no changes header")
+        let changed = app.buttons["change-app.txt"]
+        XCTAssert(changed.exists, "no modified file")
+        XCTAssertEqual(changed.label, "app.txt，修改，增加 1 行，删除 1 行")
+        XCTAssertEqual(app.buttons["change-notes.md"].label, "notes.md，未跟踪，增加 1 行")
+        snapshot("1 changes")
+
+        changed.tap()
+        let added = app.descendants(matching: .any)["第 5 行，增加：line five changed"]
+        XCTAssert(added.waitForExistence(timeout: 20), "no added line")
+        XCTAssert(app.descendants(matching: .any)["第 5 行，删除：line 5"].exists, "no deleted line")
+        snapshot("2 diff")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        let ask = app.buttons["askToCommit"]
+        XCTAssert(ask.waitForExistence(timeout: 5), "no 让 Agent 提交")
+        ask.tap()
+        let field = composer(app)
+        XCTAssert(field.waitForExistence(timeout: 5), "did not return to the conversation")
+        XCTAssertEqual(field.value as? String, "请提交这些改动")
+        snapshot("3 draft")
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 20))
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testSlashCompletion() throws {
         guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
@@ -824,10 +869,15 @@ final class CompanionUITests: XCTestCase {
         sessionCell(app, name: "companion-uitest")
     }
 
-    /// A session is titled with the name it was started under.
+    /// A session is titled with the name it was started under. The list is
+    /// lazy and the Mac's own sessions can push it below the fold, so this
+    /// scrolls until the row is on screen.
     @MainActor
     private func sessionCell(_ app: XCUIApplication, name: String) -> XCUIElement {
-        app.cells.buttons.containing(.staticText, identifier: name).firstMatch
+        let cell = app.cells.buttons.containing(.staticText, identifier: name).firstMatch
+        guard app.cells.firstMatch.waitForExistence(timeout: 15) else { return cell }
+        for _ in 0..<8 where !(cell.exists && cell.isHittable) { app.swipeUp() }
+        return cell
     }
 
     @MainActor

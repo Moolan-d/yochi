@@ -72,10 +72,14 @@ enum ServerMessage: Decodable {
     case putFailed(id: String, kind: String, message: String)
     case commandList(id: String, commands: [SlashCommand])
     case commandsFailed(id: String, kind: String, message: String)
+    case changes(id: String, list: ChangeList)
+    case changesFailed(id: String, kind: String, message: String)
+    case changeDiff(id: String, patch: String, truncated: Bool)
+    case changeDiffFailed(id: String, kind: String, message: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path, commands
+        case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path, commands, patch, truncated
     }
 
     init(from decoder: Decoder) throws {
@@ -141,6 +145,19 @@ enum ServerMessage: Decodable {
                 id: try c.decode(String.self, forKey: .id),
                 kind: try c.decode(String.self, forKey: .kind),
                 message: try c.decode(String.self, forKey: .message))
+        case "changes":
+            self = .changes(id: try c.decode(String.self, forKey: .id), list: try ChangeList(from: decoder))
+        case "change_diff":
+            self = .changeDiff(id: try c.decode(String.self, forKey: .id),
+                               patch: try c.decode(String.self, forKey: .patch),
+                               truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false)
+        case "changes_failed", "change_diff_failed":
+            let id = try c.decode(String.self, forKey: .id)
+            let kind = try c.decode(String.self, forKey: .kind)
+            let message = try c.decode(String.self, forKey: .message)
+            self = try c.decode(String.self, forKey: .type) == "changes_failed"
+                ? .changesFailed(id: id, kind: kind, message: message)
+                : .changeDiffFailed(id: id, kind: kind, message: message)
         default:
             self = .unknown
         }
