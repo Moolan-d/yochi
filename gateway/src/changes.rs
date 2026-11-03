@@ -90,7 +90,7 @@ fn session_place(view: &watch::Receiver<CoreView>, session: &str) -> Option<(Opt
         .map(|s| (s.machine.clone(), s.cwd.clone()))
 }
 
-async fn git(hc: &str, machine: Option<&str>, cwd: &str, args: &[&str]) -> Result<Output, Failure> {
+pub(crate) async fn git(hc: &str, machine: Option<&str>, cwd: &str, args: &[&str]) -> Result<Output, Failure> {
     let argv: Vec<&str> = GIT.iter().copied().chain(args.iter().copied()).collect();
     exec(hc, machine, cwd, Program::Argv(&argv), None, GIT_TIMEOUT_SECS).await
 }

@@ -1,5 +1,6 @@
 //! The narrow session model the app sees. Core records stay inside the Gateway.
 
+use crate::about::{Repo, TodoNow};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -25,6 +26,18 @@ pub struct Session {
     /// The terminal that started this one (a sub-agent's Agent), if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// Pinned to the top of the agent lists in Herdr (`herdr.pinned`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+    /// The turn Herdr's desktop last showed (`herdr.seen`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seen: Option<u64>,
+    /// The git repository its folder is in; filled in on the way to the app.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<Repo>,
+    /// The to-do a working Claude Code is on; filled in on the way to the app.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub todo: Option<TodoNow>,
     /// Herdr's `where` label, `<space> / <tab>`, used to name spaces.
     #[serde(skip)]
     pub place: Option<String>,
@@ -63,7 +76,7 @@ impl Session {
             .map(str::to_owned)
             .or_else(|| text(&foreground["name"]));
         let title = text(&record["name"])
-            .or_else(|| text(&record["title"]))
+            .or_else(|| text(&record["title"]).map(|title| without_spinner(&title)))
             .or_else(|| program.clone())
             .unwrap_or_else(|| id.clone());
         let cwd = text(&foreground["cwd"])
@@ -88,10 +101,22 @@ impl Session {
             cols: size("cols", 80),
             rows: size("rows", 24),
             parent: text(&record["parent"]),
+            pinned: text(&record["labels"]["herdr.pinned"]).is_some_and(|value| value != "0" && value != "false"),
+            seen: text(&record["labels"]["herdr.seen"]).and_then(|turn| turn.parse().ok()),
+            repo: None,
+            todo: None,
             place: text(&record["labels"]["where"]),
             pid: foreground["pid"].as_u64(),
         })
     }
+}
+
+/// Claude Code puts a spinner or a star before its title (`✳ Fix login`).
+fn without_spinner(title: &str) -> String {
+    let rest = title.trim_start_matches(|c: char| {
+        matches!(c, '\u{2800}'..='\u{28FF}' | '✳' | '✶' | '✻' | '✽' | '✢' | '·' | '*') || c.is_whitespace()
+    });
+    if rest.is_empty() { title.to_owned() } else { rest.to_owned() }
 }
 
 /// A non-empty string, or None.
@@ -126,6 +151,22 @@ mod tests {
         let status = session.status.unwrap();
         assert_eq!(status.state, "blocked");
         assert_eq!(status.kind.as_deref(), Some("permission"));
+    }
+
+    #[test]
+    fn herdr_labels_and_the_title_without_its_spinner() {
+        let session = |labels: Value, title: &str| {
+            Session::from_record(&json!({"address": "t1", "state": "live", "cwd": "/", "title": title, "labels": labels})).unwrap()
+        };
+        let pinned = session(json!({"herdr.pinned": "1", "herdr.seen": "31"}), "✳ Fix login");
+        assert_eq!((pinned.pinned, pinned.seen, pinned.title.as_str()), (true, Some(31), "Fix login"));
+        let json = serde_json::to_value(&pinned).unwrap();
+        assert_eq!((json["pinned"].as_bool(), json["seen"].as_u64()), (Some(true), Some(31)));
+
+        let plain = session(json!({"herdr.seen": "0"}), "⠂ 修复 · 登录页");
+        assert_eq!((plain.pinned, plain.title.as_str()), (false, "修复 · 登录页"));
+        assert!(serde_json::to_value(&plain).unwrap().get("pinned").is_none());
+        assert_eq!(session(json!({}), "✳").title, "✳", "nothing but the star stays");
     }
 
     #[test]

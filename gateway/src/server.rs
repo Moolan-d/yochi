@@ -12,6 +12,7 @@
 //!
 //! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
+use crate::about::{self, About};
 use crate::agent;
 use crate::changes;
 use crate::commands;
@@ -50,13 +51,15 @@ struct AppState {
     devices: Arc<watch::Sender<Vec<Device>>>,
     /// The latest Changes each session was shown, so only those files open.
     changes: Arc<changes::Listed>,
+    /// Repositories and to-dos the home page shows beside the sessions.
+    about: watch::Receiver<About>,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage<'a> {
     Hello { api: u32, gateway: &'static str },
-    Sessions { core: Option<&'a str>, connected: bool, sessions: &'a [Session], spaces: &'a [Space] },
+    Sessions { core: Option<&'a str>, connected: bool, sessions: Vec<Session>, spaces: &'a [Space] },
     /// Observing began; render a grid of this size.
     Attached { cols: u16, rows: u16 },
     /// The terminal's grid changed (another client resized it).
@@ -161,7 +164,10 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
     let store = Arc::new(store);
     let devices = Arc::new(watch::Sender::new(devices));
     tokio::spawn(reload_devices(store.clone(), devices.clone()));
-    let state = AppState { hc: hc.into(), view, store, devices, changes: Arc::default() };
+    let hc: Arc<str> = hc.into();
+    let (about_sender, about) = watch::channel(About::default());
+    tokio::spawn(about::run(hc.clone(), view.clone(), about_sender));
+    let state = AppState { hc, view, store, devices, changes: Arc::default(), about };
     let app = Router::new()
         .route("/v0/pair", get(pair))
         .route("/v0/ws", get(upgrade))
@@ -537,6 +543,7 @@ async fn unpaired(devices: &mut watch::Receiver<Vec<Device>>, device: &str) {
 
 async fn push(mut socket: WebSocket, state: AppState, device: String) {
     let mut view = state.view.clone();
+    let mut about = state.about.clone();
     let mut devices = state.devices.subscribe();
     let (outgoing, mut responses) = tokio::sync::mpsc::unbounded_channel::<String>();
     let hello = ServerMessage::Hello { api: API_VERSION, gateway: env!("CARGO_PKG_VERSION") };
@@ -549,7 +556,7 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
             serde_json::to_string(&ServerMessage::Sessions {
                 core: current.core.as_deref(),
                 connected: current.connected(),
-                sessions: &current.sessions,
+                sessions: about.borrow_and_update().fill(&current.sessions),
                 spaces: &current.spaces,
             })
         };
@@ -559,6 +566,7 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
         }
         tokio::select! {
             changed = view.changed() => if changed.is_err() { return },
+            changed = about.changed() => if changed.is_err() { return },
             response = responses.recv() => {
                 let Some(response) = response else { return };
                 if socket.send(Message::Text(response.into())).await.is_err() { return }

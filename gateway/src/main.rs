@@ -1,3 +1,4 @@
+mod about;
 mod agent;
 mod changes;
 mod commands;

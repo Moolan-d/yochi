@@ -194,6 +194,16 @@ impl Conversation {
         touched.iter().filter_map(|id| self.index.get(id).map(|&i| self.items[i].clone())).collect()
     }
 
+    /// The to-do in progress on the newest list, with how far the list is.
+    pub fn todo_now(&self) -> Option<crate::about::TodoNow> {
+        let current = self.todos.iter().find(|todo| todo.status == "in_progress")?;
+        Some(crate::about::TodoNow {
+            text: current.active.clone().unwrap_or_else(|| current.text.clone()),
+            done: self.todos.iter().filter(|todo| todo.status == "completed").count(),
+            total: self.todos.len(),
+        })
+    }
+
     /// `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`, …: Claude
     /// Code writes it with each message, so a switch shows after the next one.
     pub fn mode(&self) -> Option<&str> {
@@ -939,7 +949,10 @@ mod tests {
             result(7, r#"{"success":false}"#),
         ];
         let mut conversation = Conversation::default();
-        conversation.apply(lines.iter().map(String::as_str));
+        conversation.apply(lines[..6].iter().map(String::as_str));
+        assert_eq!(conversation.todo_now(), Some(crate::about::TodoNow { text: "读代码中".into(), done: 0, total: 2 }));
+        conversation.apply(lines[6..].iter().map(String::as_str));
+        assert_eq!(conversation.todo_now(), None, "nothing is in progress at the end");
         let items = conversation.items();
         assert_eq!(kinds(items), ["todos", "agent", "todos"]);
         assert_eq!(items[0].id(), "toolu_1", "back-to-back updates share the first one's item");
