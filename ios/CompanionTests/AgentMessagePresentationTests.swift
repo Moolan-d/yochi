@@ -17,4 +17,13 @@ final class AgentMessagePresentationTests: XCTestCase {
         XCTAssertEqual(AgentMessagePresentation.afterTurn(status: "idle"), "Agent 已回应")
         XCTAssertEqual(AgentMessagePresentation.afterTurn(status: nil), "Agent 已回应")
     }
+
+    func testStopSaysOnlyWhatTheConversationWillNot() {
+        XCTAssertNil(AgentMessagePresentation.stopped(.pressed(outcome: "stopped")))
+        XCTAssertEqual(AgentMessagePresentation.stopped(.pressed(outcome: "still_working")), "Agent 没有停下，可以再按一次")
+        XCTAssertEqual(AgentMessagePresentation.stopped(.pressed(outcome: "exited")), "Agent 已退出")
+        XCTAssertEqual(AgentMessagePresentation.stopped(.pressed(outcome: "unknown")), "已按停止键，无法确认 Agent 是否停下")
+        XCTAssertEqual(AgentMessagePresentation.stopped(.failed(kind: "finished", message: "会话已结束")), "停止失败：会话已结束")
+        XCTAssertEqual(AgentMessagePresentation.stopped(.unknown), "停止结果未知")
+    }
 }

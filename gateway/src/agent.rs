@@ -39,6 +39,16 @@ pub struct AnswerRequest {
     pub expect: Option<String>,
 }
 
+/// Stop the Agent's current turn: core presses its stop key (Esc for an
+/// Agent that reports status) and watches what happened.
+pub struct InterruptRequest {
+    pub id: String,
+    pub session: String,
+}
+
+/// How long core watches for the stop to take effect.
+const INTERRUPT_WATCH_SECS: f64 = 5.0;
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -57,6 +67,16 @@ pub enum Response {
         id: String,
     },
     KeysFailed {
+        id: String,
+        kind: String,
+        message: String,
+    },
+    /// core's `outcome`: stopped, exited, still_working or unknown.
+    Interrupted {
+        id: String,
+        outcome: String,
+    },
+    InterruptFailed {
         id: String,
         kind: String,
         message: String,
@@ -101,6 +121,37 @@ pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequ
             error["message"].as_str().unwrap_or("按键发送失败").into(),
         ),
         None => Response::KeysSent { id: request.id },
+    }
+}
+
+/// Never attaches either; core's terminal.interrupt never escalates past
+/// the one stop key, so a second press is the user's call.
+pub async fn interrupt(hc: &str, view: &watch::Receiver<CoreView>, request: InterruptRequest) -> Response {
+    let failed = |kind: &str, message: String| Response::InterruptFailed { id: request.id.clone(), kind: kind.into(), message };
+    if !view.borrow().sessions.iter().any(|session| session.id == request.session) {
+        return failed("not_found", "会话不存在或已结束".into());
+    }
+    let params = json!({"terminal": request.session, "timeout": INTERRUPT_WATCH_SECS});
+    let reply = match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.interrupt", params)).await {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(RequestError::BeforeSend(error))) => return failed("unavailable", format!("{error:#}")),
+        Ok(Err(RequestError::AfterSend(error))) => return failed("unknown", format!("{error:#}")),
+        Err(_) => return failed("timeout", "停止超时，结果未知".into()),
+    };
+    map_interrupt(request.id, reply)
+}
+
+fn map_interrupt(id: String, reply: Value) -> Response {
+    if let Some(error) = reply.get("error") {
+        return Response::InterruptFailed {
+            id,
+            kind: error["data"]["kind"].as_str().unwrap_or("unavailable").into(),
+            message: error["message"].as_str().unwrap_or("停止失败").into(),
+        };
+    }
+    match reply["result"]["outcome"].as_str() {
+        Some(outcome) => Response::Interrupted { id, outcome: outcome.into() },
+        None => Response::InterruptFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的停止结果".into() },
     }
 }
 
@@ -325,5 +376,19 @@ mod tests {
             Response::SendFailed { id, kind, message }
                 if id == "request-1" && kind == "blocked" && message == "waiting for permission"
         ));
+    }
+
+    #[test]
+    fn maps_interrupt_outcome_and_errors() {
+        let response = map_interrupt("i1".into(), json!({"result": {"outcome": "stopped", "key": "esc"}}));
+        assert!(matches!(response, Response::Interrupted { id, outcome } if id == "i1" && outcome == "stopped"));
+        let response = map_interrupt("i2".into(), json!({
+            "error": {"code": -32000, "message": "finished", "data": {"kind": "finished"}},
+        }));
+        assert!(matches!(response, Response::InterruptFailed { kind, .. } if kind == "finished"));
+        let response = map_interrupt("i3".into(), json!({"result": {}}));
+        assert!(matches!(response, Response::InterruptFailed { kind, .. } if kind == "unknown"));
+        let json = serde_json::to_value(Response::Interrupted { id: "i1".into(), outcome: "still_working".into() }).unwrap();
+        assert_eq!(json, json!({"type": "interrupted", "id": "i1", "outcome": "still_working"}));
     }
 }

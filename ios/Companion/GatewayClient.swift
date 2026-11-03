@@ -26,11 +26,20 @@ final class GatewayClient {
         case unknown
     }
 
+    enum InterruptResult {
+        /// core's outcome: stopped, exited, still_working or unknown.
+        case pressed(outcome: String)
+        case failed(kind: String, message: String)
+        /// The stop key may have been pressed.
+        case unknown
+    }
+
     /// A reply to any request the app makes on this socket, matched by id.
     private enum Reply {
         case sent(turn: UInt64, status: String?, started: Bool?)
         case keysSent
         case runCreated(session: String)
+        case interrupted(outcome: String)
         case failed(kind: String, message: String)
         case unknown
     }
@@ -102,7 +111,7 @@ final class GatewayClient {
         switch reply {
         case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .keysSent, .runCreated, .unknown: return .unknown
+        case .keysSent, .runCreated, .interrupted, .unknown: return .unknown
         }
     }
 
@@ -119,7 +128,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .unknown: return .unknown
         }
     }
 
@@ -137,7 +146,24 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .unknown: return .unknown
+        }
+    }
+
+    /// Stops the Agent's current turn: core presses its stop key (Esc for an
+    /// Agent that reports status) once and reports what happened.
+    func interrupt(session: String) async -> InterruptResult {
+        struct Request: Encodable {
+            let type = "interrupt"
+            let id: String
+            let session: String
+        }
+        let reply = await request { Request(id: $0, session: session) }
+        switch reply {
+        case .interrupted(let outcome): return .pressed(outcome: outcome)
+        case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .sent, .keysSent, .runCreated, .unknown: return .unknown
         }
     }
 
@@ -157,7 +183,7 @@ final class GatewayClient {
         switch reply {
         case .runCreated(let session): return .created(session: session)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .unknown: return .unknown
+        case .sent, .keysSent, .interrupted, .unknown: return .unknown
         }
     }
 
@@ -256,8 +282,10 @@ final class GatewayClient {
                 complete(id: id, with: .keysSent)
             case .runCreated(let id, let session):
                 complete(id: id, with: .runCreated(session: session))
-            case .runFailed(let id, let kind, let message):
+            case .runFailed(let id, let kind, let message), .interruptFailed(let id, let kind, let message):
                 complete(id: id, with: .failed(kind: kind, message: message))
+            case .interrupted(let id, let outcome):
+                complete(id: id, with: .interrupted(outcome: outcome))
             case .unknown:
                 break
             }

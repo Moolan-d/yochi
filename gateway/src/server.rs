@@ -95,6 +95,11 @@ enum AppMessage {
         session: String,
         keys: Vec<String>,
     },
+    /// Stop the Agent's current turn.
+    Interrupt {
+        id: String,
+        session: String,
+    },
     /// Answer what the Agent is waiting for, if it still is.
     Answer {
         id: String,
@@ -557,6 +562,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::Interrupt { id, session }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = agent::InterruptRequest { id, session };
+                            let response = agent::interrupt(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     Ok(AppMessage::Run { id, machine, cwd, argv, space }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -624,6 +640,8 @@ mod tests {
         .unwrap();
         assert!(matches!(message, AppMessage::Answer { choice, expect: Some(expect), .. }
             if choice == "allow" && expect == "approve Bash: ls"));
+        let message: AppMessage = serde_json::from_str(r#"{"type":"interrupt","id":"i1","session":"t1"}"#).unwrap();
+        assert!(matches!(message, AppMessage::Interrupt { id, session } if id == "i1" && session == "t1"));
     }
 
     #[test]

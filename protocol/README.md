@@ -102,6 +102,24 @@ Gateway 校验会话仍存在且 live、文本非空且 UTF-8 不超过 16 KiB�
 
 Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.keys`。它不 attach，因此不是 Takeover，不改变终端尺寸；core 同样等终端约 3 秒无人输入后再按。`kind` 同 Agent Message，另有 Gateway 的 `invalid_params`（按键为空、超过 8 个或会话不存在）、`unknown`、`timeout`。结果不明时 App 不自动重按。App 依次发送：上一个请求未返回时的点按合并进下一个请求，保证顺序。
 
+### 停止
+
+在同一个 `/v0/ws` 连接上结束 Agent 当前这一轮：
+
+```jsonc
+// App → Gateway
+{"type": "interrupt", "id": "<客户端生成>", "session": "vps-us/t1"}
+// Gateway → App
+{"type": "interrupted", "id": "<客户端生成>", "outcome": "stopped"}
+{"type": "interrupt_failed", "id": "<客户端生成>", "kind": "finished", "message": "finished"}
+```
+
+Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interrupt`（观察 5 秒）：会上报状态的程序按 Esc，否则按 Ctrl+C，只按一次，不升级。它不 attach，不是 Takeover。
+
+- `outcome`：`stopped`（离开了 working）、`exited`、`still_working`（5 秒内没变化）、`unknown`（程序不上报状态）。
+- `kind` 同 Agent Message，另有 Gateway 的 `not_found`、`unknown`、`timeout`。结果不明时 App 不自动再按。
+- App 只在 Agent 为 `working` 时提供停止；`blocked` 时 Esc 会取消对话框，由对话框卡片处理。
+
 ### 作答（Agent Question）
 
 回答 Agent 正在等待的批准或单选提问，同样在 `/v0/ws` 上：

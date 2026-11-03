@@ -36,4 +36,20 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(kind, "machine_unknown")
         XCTAssertEqual(message, "no such machine")
     }
+
+    func testInterruptRepliesDecode() throws {
+        let done = Data(#"{"type":"interrupted","id":"i1","outcome":"still_working"}"#.utf8)
+        guard case .interrupted(let id, let outcome) = try JSONDecoder().decode(ServerMessage.self, from: done) else {
+            return XCTFail("not interrupted")
+        }
+        XCTAssertEqual(id, "i1")
+        XCTAssertEqual(outcome, "still_working")
+
+        let failed = Data(#"{"type":"interrupt_failed","id":"i2","kind":"finished","message":"finished"}"#.utf8)
+        guard case .interruptFailed(let id, let kind, _) = try JSONDecoder().decode(ServerMessage.self, from: failed) else {
+            return XCTFail("not interrupt_failed")
+        }
+        XCTAssertEqual(id, "i2")
+        XCTAssertEqual(kind, "finished")
+    }
 }

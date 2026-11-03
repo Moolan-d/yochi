@@ -17,6 +17,8 @@ struct ObserveView: View {
     @State private var draft: String
     @State private var confirmingBlocked = false
     @State private var keys = KeyPresser()
+    @State private var stopping = false
+    @State private var stopNotice: String?
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -46,6 +48,13 @@ struct ObserveView: View {
 
     private var canSend: Bool {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// With nothing to send while the Agent works, the send button stops it.
+    /// Not while it waits: Esc would cancel the dialog, which its card does.
+    private var showsStop: Bool {
+        currentSession.status?.state == "working" && !isSending
+            && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Claude Code draws some dialogs only on screen; they show on the
@@ -107,6 +116,9 @@ struct ObserveView: View {
             AgentMessageStore.saveDraft(draft, host: config.host, session: session.id)
         }
         .onChange(of: currentSession.turn, initial: true) { _, _ in updateResponse() }
+        .onChange(of: currentSession.status?.state) { _, state in
+            if state != "working" { stopNotice = nil }
+        }
         // Returning while a send was in flight restores the draft from before the
         // send; once it is accepted, this view clears it too.
         .onChange(of: delivery) { _, delivery in
@@ -174,6 +186,11 @@ struct ObserveView: View {
                 BannerLabel(text: failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
+            if let stopNotice {
+                BannerLabel(text: stopNotice, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("stopNotice")
+            }
             if let delivery { DeliveryBanner(delivery: delivery) }
             if !isConversation {
                 TerminalKeyBar(keyboardShown: composerFocused,
@@ -223,24 +240,44 @@ struct ObserveView: View {
                     .disabled(isSending)
                     .focused($composerFocused)
                     .accessibilityIdentifier("agentMessageField")
-                Button { send() } label: {
-                    Group {
-                        if isSending {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 30))
+                Group {
+                    if showsStop {
+                        Button { stop() } label: {
+                            Group {
+                                if stopping {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "stop.circle.fill")
+                                        .font(.system(size: 30))
+                                }
+                            }
+                            .frame(width: 34, height: 34)
+                            .contentShape(Rectangle().inset(by: -5))
                         }
+                        .disabled(stopping)
+                        .accessibilityLabel("停止 Agent")
+                        .accessibilityIdentifier("stopAgent")
+                    } else {
+                        Button { send() } label: {
+                            Group {
+                                if isSending {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "arrow.up.circle.fill")
+                                        .font(.system(size: 30))
+                                }
+                            }
+                            .frame(width: 34, height: 34)
+                            // A 44-point target around the smaller visible button.
+                            .contentShape(Rectangle().inset(by: -5))
+                        }
+                        .disabled(!canSend)
+                        .accessibilityLabel("发送消息")
+                        .accessibilityIdentifier("sendAgentMessage")
                     }
-                    .frame(width: 34, height: 34)
-                    // A 44-point target around the smaller visible button.
-                    .contentShape(Rectangle().inset(by: -5))
                 }
-                .disabled(!canSend)
                 .padding(.trailing, 5)
                 .padding(.bottom, 5)
-                .accessibilityLabel("发送消息")
-                .accessibilityIdentifier("sendAgentMessage")
             }
             .background(Color(.systemBackground), in: .rect(cornerRadius: 22, style: .continuous))
             .overlay {
@@ -325,6 +362,18 @@ struct ObserveView: View {
             case .unknown:
                 client.remember(.unknown(text: text), host: config.host, session: session.id)
             }
+        }
+    }
+
+    /// No confirmation: Esc only ends this turn. A second press is the
+    /// user's choice; core never escalates on its own.
+    private func stop() {
+        guard !stopping else { return }
+        stopping = true
+        stopNotice = nil
+        Task {
+            stopNotice = AgentMessagePresentation.stopped(await client.interrupt(session: session.id))
+            stopping = false
         }
     }
 
