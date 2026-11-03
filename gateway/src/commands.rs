@@ -4,16 +4,12 @@
 //! head of each command or skill file; the Gateway reads their frontmatter.
 //! Built-in commands are the app's own list; plugins are not listed.
 
-use crate::core::{RequestError, request as request_core};
+use crate::exec::{Program, exec};
 use crate::herdr::CoreView;
-use base64::Engine;
 use serde::Serialize;
-use serde_json::{Value, json};
 use std::collections::HashSet;
-use std::time::Duration;
 use tokio::sync::watch;
 
-const EXEC_TIMEOUT: Duration = Duration::from_secs(15);
 const SCRIPT_TIMEOUT_SECS: u64 = 10;
 pub const MAX_COMMANDS: usize = 200;
 const MAX_DESCRIPTION_CHARS: usize = 120;
@@ -58,39 +54,10 @@ pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, request: Request) 
     else {
         return failed("not_found", "会话不存在或已结束".into());
     };
-    let mut params = json!({"line": SCRIPT, "cwd": cwd, "timeout": SCRIPT_TIMEOUT_SECS});
-    if let Some(machine) = machine {
-        params["on"] = json!(machine);
-    }
-    let reply = match tokio::time::timeout(EXEC_TIMEOUT, request_core(hc, "machine.exec", params)).await {
-        Ok(Ok(reply)) => reply,
-        // Only reads; either way it is safe to ask again.
-        Ok(Err(RequestError::BeforeSend(error) | RequestError::AfterSend(error))) => {
-            return failed("unavailable", format!("{error:#}"));
-        }
-        Err(_) => return failed("timeout", "列命令超时".into()),
-    };
-    map_reply(request.id, reply)
-}
-
-fn map_reply(id: String, reply: Value) -> Response {
-    if let Some(error) = reply.get("error") {
-        return Response::CommandsFailed {
-            id,
-            kind: error["data"]["kind"].as_str().unwrap_or("unavailable").into(),
-            message: error["message"].as_str().unwrap_or("列命令失败").into(),
-        };
-    }
-    let result = &reply["result"];
-    let stdout = result["stdout"]
-        .as_str()
-        .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok());
-    match stdout {
-        Some(stdout) if result["timed_out"] != true => {
-            Response::CommandList { id, commands: parse(&String::from_utf8_lossy(&stdout)) }
-        }
-        Some(_) => Response::CommandsFailed { id, kind: "timeout".into(), message: "列命令超时".into() },
-        None => Response::CommandsFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的结果".into() },
+    match exec(hc, machine.as_deref(), &cwd, Program::Line(SCRIPT), None, SCRIPT_TIMEOUT_SECS).await {
+        Ok(output) if output.cut => failed("timeout", "列命令超时".into()),
+        Ok(output) => Response::CommandList { id: request.id, commands: parse(&String::from_utf8_lossy(&output.stdout)) },
+        Err(failure) => failed(&failure.kind, failure.message),
     }
 }
 
@@ -223,19 +190,6 @@ mod tests {
         let commands = parse(&output);
         assert_eq!(commands.len(), MAX_COMMANDS);
         assert_eq!(commands[0].description.chars().count(), MAX_DESCRIPTION_CHARS);
-    }
-
-    #[test]
-    fn maps_exec_results() {
-        let stdout = base64::engine::general_purpose::STANDARD.encode("\u{1e}user\t/c/a.md\nHello\n");
-        let reply = json!({"result": {"code": 0, "stdout": stdout, "timed_out": false}});
-        assert!(matches!(map_reply("c1".into(), reply), Response::CommandList { commands, .. } if commands == [command("/a", "Hello", "user")]));
-        let reply = json!({"result": {"code": null, "stdout": "", "timed_out": true}});
-        assert!(matches!(map_reply("c1".into(), reply), Response::CommandsFailed { kind, .. } if kind == "timeout"));
-        let reply = json!({"error": {"message": "no answer", "data": {"kind": "unreachable"}}});
-        assert!(matches!(map_reply("c1".into(), reply), Response::CommandsFailed { kind, .. } if kind == "unreachable"));
-        let json = serde_json::to_value(Response::CommandList { id: "c1".into(), commands: vec![] }).unwrap();
-        assert_eq!(json, json!({"type": "command_list", "id": "c1", "commands": []}));
     }
 
     /// The script itself, against a sample home and project.

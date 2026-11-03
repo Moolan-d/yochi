@@ -1,8 +1,10 @@
 mod agent;
+mod changes;
 mod commands;
 mod conversation;
 mod core;
 mod devices;
+mod exec;
 mod following;
 mod herdr;
 mod layout;

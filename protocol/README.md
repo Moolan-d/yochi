@@ -152,6 +152,32 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interru
 - `source`：`project`、`user`、`skill`。同名时项目的优先。最多 200 项，说明截到 120 字。插件带来的不列。
 - `kind`：会话不存在为 `not_found`，其余为 core 的错误类型、`unavailable` 或 `timeout`。只读，失败可直接重试。
 
+### 改动（Changes）
+
+会话工作目录所在 git 仓库相对 HEAD 的改动，含未跟踪文件；只读：
+
+```jsonc
+// App → Gateway
+{"type": "changes", "id": "<客户端生成>", "session": "vps-us/t1"}
+// Gateway → App；按路径排序，最多 1000 个
+{"type": "changes", "id": "<客户端生成>", "repo": "companion", "truncated": false, "files": [
+  {"path": "ios/A.swift", "status": "M", "added": 12, "deleted": 3},
+  {"path": "new.txt", "old_path": "old.txt", "status": "R", "added": 0, "deleted": 0},
+  {"path": "logo.png", "status": "?"}
+]}
+{"type": "changes_failed", "id": "<客户端生成>", "kind": "not_git", "message": "不是 git 仓库"}
+
+// 单个文件，path 必须是这个会话最近一次 changes 列出的
+{"type": "change_diff", "id": "<客户端生成>", "session": "vps-us/t1", "path": "ios/A.swift"}
+{"type": "change_diff", "id": "<客户端生成>", "patch": "diff --git a/ios/A.swift b/ios/A.swift\n…", "truncated": false}
+{"type": "change_diff_failed", "id": "<客户端生成>", "kind": "changed", "message": "改动已变化，请刷新"}
+```
+
+- Gateway 经 core 的 `machine.exec` 在会话所在机器跑固定的只读 git 命令：先在会话目录找仓库根，之后在根目录里跑。都带 `--no-optional-locks -c core.fsmonitor=false -c diff.autoRefreshIndex=false`，不写 index；diff 带 `--no-ext-diff --no-textconv`。还没有提交的仓库相对空树比较。
+- `status`：`M` 修改、`A` 新增、`D` 删除、`R` 改名（带 `old_path`）、`T` 类型变化、`U` 冲突、`?` 未跟踪。二进制文件没有 `added`、`deleted`。只是时间戳变了的文件（增删都是 0 的修改）不列。
+- `patch` 是统一 diff 原文，最多 5000 行、512 KB，超出时 `truncated: true`。未跟踪文件相对 `/dev/null` 比较。
+- `kind`：`not_found`（会话不在）、`not_git`、`changed`（路径不在最近的列表里，或 Gateway 重启过）、`timeout`、`unavailable`，以及 core 的错误类型。只读，失败可直接重试。
+
 ### 作答（Agent Question）
 
 回答 Agent 正在等待的批准或单选提问，同样在 `/v0/ws` 上：

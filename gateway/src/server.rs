@@ -13,6 +13,7 @@
 //! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
 use crate::agent;
+use crate::changes;
 use crate::commands;
 use crate::conversation::{Item, Pending};
 use crate::core::Client;
@@ -47,6 +48,8 @@ struct AppState {
     store: Arc<Store>,
     /// Paired devices, reloaded when the CLI changes the state file.
     devices: Arc<watch::Sender<Vec<Device>>>,
+    /// The latest Changes each session was shown, so only those files open.
+    changes: Arc<changes::Listed>,
 }
 
 #[derive(Serialize)]
@@ -110,6 +113,17 @@ enum AppMessage {
         name: String,
         data: String,
     },
+    /// The session's Changes: its repository against HEAD.
+    Changes {
+        id: String,
+        session: String,
+    },
+    /// One file's diff, from the latest Changes this session was shown.
+    ChangeDiff {
+        id: String,
+        session: String,
+        path: String,
+    },
     /// The session's custom slash commands and skills, for completion.
     Commands {
         id: String,
@@ -147,7 +161,7 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
     let store = Arc::new(store);
     let devices = Arc::new(watch::Sender::new(devices));
     tokio::spawn(reload_devices(store.clone(), devices.clone()));
-    let state = AppState { hc: hc.into(), view, store, devices };
+    let state = AppState { hc: hc.into(), view, store, devices, changes: Arc::default() };
     let app = Router::new()
         .route("/v0/pair", get(pair))
         .route("/v0/ws", get(upgrade))
@@ -600,6 +614,28 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::Changes { id, session }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = changes::Request { id, session };
+                            let response = changes::list(&state.hc, &state.view, &state.changes, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
+                    Ok(AppMessage::ChangeDiff { id, session, path }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = changes::DiffRequest { id, session, path };
+                            let response = changes::diff(&state.hc, &state.changes, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     Ok(AppMessage::Commands { id, session }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -685,6 +721,8 @@ mod tests {
         assert!(matches!(message, AppMessage::Put { name, data, .. } if name == "a.jpg" && data == "AAAA"));
         let message: AppMessage = serde_json::from_str(r#"{"type":"commands","id":"c1","session":"t1"}"#).unwrap();
         assert!(matches!(message, AppMessage::Commands { id, session } if id == "c1" && session == "t1"));
+        let message: AppMessage = serde_json::from_str(r#"{"type":"change_diff","id":"g2","session":"t1","path":"a b.txt"}"#).unwrap();
+        assert!(matches!(message, AppMessage::ChangeDiff { path, .. } if path == "a b.txt"));
     }
 
     #[test]
