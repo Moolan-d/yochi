@@ -13,6 +13,7 @@
 //! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
 use crate::agent;
+use crate::commands;
 use crate::conversation::{Item, Pending};
 use crate::core::Client;
 use crate::devices::{Device, Store};
@@ -108,6 +109,11 @@ enum AppMessage {
         session: String,
         name: String,
         data: String,
+    },
+    /// The session's custom slash commands and skills, for completion.
+    Commands {
+        id: String,
+        session: String,
     },
     /// Answer what the Agent is waiting for, if it still is.
     Answer {
@@ -594,6 +600,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::Commands { id, session }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = commands::Request { id, session };
+                            let response = commands::list(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     Ok(AppMessage::Run { id, machine, cwd, argv, space }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -666,6 +683,8 @@ mod tests {
         let message: AppMessage =
             serde_json::from_str(r#"{"type":"put","id":"p1","session":"t1","name":"a.jpg","data":"AAAA"}"#).unwrap();
         assert!(matches!(message, AppMessage::Put { name, data, .. } if name == "a.jpg" && data == "AAAA"));
+        let message: AppMessage = serde_json::from_str(r#"{"type":"commands","id":"c1","session":"t1"}"#).unwrap();
+        assert!(matches!(message, AppMessage::Commands { id, session } if id == "c1" && session == "t1"));
     }
 
     #[test]

@@ -136,6 +136,22 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interru
 - `name` 只能含 ASCII 字母数字和 `.-_`，不以 `.` 开头，最长 100 字符，否则 `kind: "invalid"`。会话不存在为 `not_found`，过大为 `too_large`；其余同 Agent Message，另有 `unknown`、`timeout`。
 - App 先把图片长边缩到 2048 像素、编成 JPEG，一条消息最多 4 张。
 
+### 斜杠命令
+
+列出会话可用的自定义斜杠命令和 skill，供 App 补全；内置命令由 App 自带：
+
+```jsonc
+// App → Gateway
+{"type": "commands", "id": "<客户端生成>", "session": "vps-us/t1"}
+// Gateway → App；name 带斜杠，按名字排序
+{"type": "command_list", "id": "<客户端生成>", "commands": [{"name": "/research", "description": "Investigate a question", "source": "skill"}]}
+{"type": "commands_failed", "id": "<客户端生成>", "kind": "unreachable", "message": "no answer from any machine"}
+```
+
+- Gateway 经 core 的 `machine.exec`，在会话所在机器、会话的工作目录里跑一段写死的只读脚本（10 秒超时），列出项目和个人的 `.claude/commands/*.md`、`.claude/skills/*/SKILL.md` 的文件头，再读 frontmatter 的 `name`、`description`。
+- `source`：`project`、`user`、`skill`。同名时项目的优先。最多 200 项，说明截到 120 字。插件带来的不列。
+- `kind`：会话不存在为 `not_found`，其余为 core 的错误类型、`unavailable` 或 `timeout`。只读，失败可直接重试。
+
 ### 作答（Agent Question）
 
 回答 Agent 正在等待的批准或单选提问，同样在 `/v0/ws` 上：

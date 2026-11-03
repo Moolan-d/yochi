@@ -1,4 +1,5 @@
 mod agent;
+mod commands;
 mod conversation;
 mod core;
 mod devices;

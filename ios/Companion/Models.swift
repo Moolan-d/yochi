@@ -70,10 +70,12 @@ enum ServerMessage: Decodable {
     case interruptFailed(id: String, kind: String, message: String)
     case putDone(id: String, path: String)
     case putFailed(id: String, kind: String, message: String)
+    case commandList(id: String, commands: [SlashCommand])
+    case commandsFailed(id: String, kind: String, message: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path
+        case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path, commands
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +130,14 @@ enum ServerMessage: Decodable {
             self = .putDone(id: try c.decode(String.self, forKey: .id), path: try c.decode(String.self, forKey: .path))
         case "put_failed":
             self = .putFailed(
+                id: try c.decode(String.self, forKey: .id),
+                kind: try c.decode(String.self, forKey: .kind),
+                message: try c.decode(String.self, forKey: .message))
+        case "command_list":
+            self = .commandList(id: try c.decode(String.self, forKey: .id),
+                                commands: try c.decode([SlashCommand].self, forKey: .commands))
+        case "commands_failed":
+            self = .commandsFailed(
                 id: try c.decode(String.self, forKey: .id),
                 kind: try c.decode(String.self, forKey: .kind),
                 message: try c.decode(String.self, forKey: .message))

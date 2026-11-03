@@ -30,6 +30,10 @@ struct ObserveView: View {
     @State private var pickedPhotos: [PhotosPickerItem] = []
     @State private var pickingPhotos = false
     @State private var takingPhoto = false
+    /// This session's custom commands and skills, listed again each time the
+    /// draft starts a slash command.
+    @State private var customCommands: [SlashCommand] = []
+    @State private var confirmingExit = false
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -150,8 +154,17 @@ struct ObserveView: View {
         } message: {
             Text("Agent 正在等待确认，消息可能被当作对话框的回答")
         }
+        .confirmationDialog("发送 /exit 会结束这个会话", isPresented: $confirmingExit, titleVisibility: .visible) {
+            Button("填入 /exit", role: .destructive) { draft = "/exit" }
+            Button("取消") {}
+        } message: {
+            Text("Claude Code 退出后，终端里的程序也就结束了")
+        }
         .onChange(of: draft) { _, draft in
             AgentMessageStore.saveDraft(draft, host: config.host, session: session.id)
+        }
+        .onChange(of: slashQuery != nil) { _, started in
+            if started && isConversation { loadCommands() }
         }
         .onChange(of: currentSession.turn, initial: true) { _, _ in updateResponse() }
         .onChange(of: currentSession.status?.state) { _, state in
@@ -265,6 +278,9 @@ struct ObserveView: View {
                              withdraw: withdrawQueued)
             }
             if isConversation, let shownMode { modeChip(shownMode) }
+            if !slashMatches.isEmpty {
+                SlashSuggestions(commands: slashMatches, pick: pickCommand)
+            }
             if !isConversation {
                 TerminalKeyBar(keyboardShown: composerFocused,
                                toggleKeyboard: { composerFocused.toggle() }) { key in
@@ -445,14 +461,6 @@ struct ObserveView: View {
                     Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
                 }
             }
-            let commands = QuickCommand.commands(for: currentSession)
-            if !commands.isEmpty {
-                Section("Claude Code 命令") {
-                    ForEach(commands, id: \.self) { command in
-                        Button(command) { draft = QuickCommand.insert(command, into: draft) }
-                    }
-                }
-            }
         } label: {
             Image(systemName: "plus")
                 .font(.body.weight(.semibold))
@@ -503,6 +511,28 @@ struct ObserveView: View {
         guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
         if case .uploaded(let path) = attachments[index].state { draft = DraftPaths.remove(path, from: draft) }
         attachments.remove(at: index)
+    }
+
+    private var slashQuery: String? { SlashCompletion.query(in: draft) }
+
+    private var slashMatches: [SlashCommand] {
+        guard isConversation, let slashQuery else { return [] }
+        return SlashCompletion.matches(slashQuery, custom: customCommands)
+    }
+
+    private func loadCommands() {
+        Task {
+            // A failure keeps the last list; the built-in ones show anyway.
+            if let commands = await client.commands(session: session.id) { customCommands = commands }
+        }
+    }
+
+    private func pickCommand(_ command: SlashCommand) {
+        if command.endsSession {
+            confirmingExit = true
+        } else {
+            draft = SlashCompletion.fill(command)
+        }
     }
 
     /// The queued text goes back ahead of whatever the draft holds now.

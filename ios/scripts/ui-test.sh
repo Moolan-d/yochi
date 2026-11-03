@@ -74,18 +74,21 @@ start_picker_session() {
         -- "$(command -v claude)" > /dev/null
 }
 
-# Claude Code under the build folder, for the queue test: it inherits the
-# repository's trust, and the turns it runs stay out of the repository's
-# own Claude Code history.
+# Claude Code under the build folder, for the queue, image and slash tests:
+# it inherits the repository's trust, and the turns it runs stay out of the
+# repository's own Claude Code history. One project command for completion.
 start_agent_session() {
-    mkdir -p build/uitest-agent
+    mkdir -p build/uitest-agent/.claude/commands
+    printf -- '---\ndescription: Say hello from the UI test\n---\nSay hello.\n' \
+        > build/uitest-agent/.claude/commands/uitest-hello.md
     hc run --bg --rm --no-parent --no-notify --name companion-uitest-picker --cwd "$(pwd)/build/uitest-agent" --json \
         -- "$(command -v claude)" > /dev/null
 }
 
 # TESTS="testA testB" runs a subset; testDialogFromScreen,
 # testPickerFromScreen, testPermissionModeFromScreen and
-# testMessageQueuedWhileWorking and testImageSentToAgent run only when named.
+# testMessageQueuedWhileWorking, testImageSentToAgent and testSlashCompletion
+# run only when named.
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -115,7 +118,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         start_picker_session
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi
-    if [ "$test" = testMessageQueuedWhileWorking ] || [ "$test" = testImageSentToAgent ]; then
+    if [ "$test" = testMessageQueuedWhileWorking ] || [ "$test" = testImageSentToAgent ] || [ "$test" = testSlashCompletion ]; then
         start_agent_session
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi

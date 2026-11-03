@@ -139,19 +139,10 @@ private struct KeyCapStyle: ButtonStyle {
 /// Text the composer can fill in; the user still taps send.
 enum QuickCommand {
     static let phrases = ["继续", "好的，按你的建议做", "先停下，说明你接下来的计划"]
-    static let claudeCode = ["/compact", "/clear", "/model", "/context", "/resume"]
-
-    static func commands(for program: String?) -> [String] {
-        program?.localizedCaseInsensitiveContains("claude") == true ? claudeCode : []
-    }
-
-    static func commands(for session: Session) -> [String] {
-        isClaudeCode(session) ? claudeCode : []
-    }
 
     /// By its own status report, or by the command it was started with.
     static func isClaudeCode(_ session: Session) -> Bool {
-        session.status?.app == "claude-code" || !commands(for: session.program).isEmpty
+        session.status?.app == "claude-code" || session.program?.localizedCaseInsensitiveContains("claude") == true
     }
 
     static func insert(_ command: String, into draft: String) -> String {

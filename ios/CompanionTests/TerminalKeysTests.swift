@@ -22,12 +22,6 @@ final class TerminalKeysTests: XCTestCase {
         XCTAssertEqual(QuickCommand.insert("继续", into: "第一行\n"), "第一行\n继续")
     }
 
-    func testSlashCommandsOnlyForClaudeCode() {
-        XCTAssertFalse(QuickCommand.commands(for: "claude").isEmpty)
-        XCTAssertTrue(QuickCommand.commands(for: "zsh").isEmpty)
-        XCTAssertTrue(QuickCommand.commands(for: nil).isEmpty)
-    }
-
     func testKeyBarUsesCoreKeyNames() {
         XCTAssertEqual(TerminalKey.bar.map(\.id), ["up", "down", "enter", "esc", "1", "2", "3", "shift+tab"])
     }

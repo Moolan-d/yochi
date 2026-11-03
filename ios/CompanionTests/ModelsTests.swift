@@ -67,4 +67,20 @@ final class ModelsTests: XCTestCase {
         }
         XCTAssertEqual(kind, "too_large")
     }
+
+    func testCommandListDecodes() throws {
+        let list = Data(#"{"type":"command_list","id":"c1","commands":[{"name":"/tdd","description":"Test first","source":"skill"},{"name":"/x","description":"","source":"plugin"}]}"#.utf8)
+        guard case .commandList(let id, let commands) = try JSONDecoder().decode(ServerMessage.self, from: list) else {
+            return XCTFail("not command_list")
+        }
+        XCTAssertEqual(id, "c1")
+        XCTAssertEqual(commands, [SlashCommand(name: "/tdd", description: "Test first", source: .skill),
+                                  SlashCommand(name: "/x", description: "", source: .other)])
+
+        let failed = Data(#"{"type":"commands_failed","id":"c2","kind":"unreachable","message":"no answer"}"#.utf8)
+        guard case .commandsFailed(_, let kind, _) = try JSONDecoder().decode(ServerMessage.self, from: failed) else {
+            return XCTFail("not commands_failed")
+        }
+        XCTAssertEqual(kind, "unreachable")
+    }
 }

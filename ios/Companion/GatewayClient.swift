@@ -49,6 +49,7 @@ final class GatewayClient {
         case runCreated(session: String)
         case interrupted(outcome: String)
         case putDone(path: String)
+        case commandList([SlashCommand])
         case failed(kind: String, message: String)
         case unknown
     }
@@ -202,7 +203,7 @@ final class GatewayClient {
         switch reply {
         case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .keysSent, .runCreated, .interrupted, .putDone, .unknown: return .unknown
+        case .keysSent, .runCreated, .interrupted, .putDone, .commandList, .unknown: return .unknown
         }
     }
 
@@ -219,7 +220,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .interrupted, .putDone, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .putDone, .commandList, .unknown: return .unknown
         }
     }
 
@@ -237,7 +238,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .interrupted, .putDone, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .putDone, .commandList, .unknown: return .unknown
         }
     }
 
@@ -254,7 +255,7 @@ final class GatewayClient {
         case .interrupted(let outcome): return .pressed(outcome: outcome)
         case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .runCreated, .putDone, .unknown: return .unknown
+        case .sent, .keysSent, .runCreated, .putDone, .commandList, .unknown: return .unknown
         }
     }
 
@@ -277,8 +278,21 @@ final class GatewayClient {
         case .putDone(let path): return .done(path: path)
         case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .runCreated, .interrupted, .unknown: return .unknown
+        case .sent, .keysSent, .runCreated, .interrupted, .commandList, .unknown: return .unknown
         }
+    }
+
+    /// The session's custom slash commands and skills; nil when they
+    /// couldn't be listed (the built-in ones still are).
+    func commands(session: String) async -> [SlashCommand]? {
+        struct Request: Encodable {
+            let type = "commands"
+            let id: String
+            let session: String
+        }
+        let reply = await request { Request(id: $0, session: session) }
+        if case .commandList(let commands) = reply { return commands }
+        return nil
     }
 
     func runSession(machine: String?, cwd: String, argv: [String], space: String?) async -> RunResult {
@@ -294,7 +308,7 @@ final class GatewayClient {
         switch reply {
         case .runCreated(let session): return .created(session: session)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .interrupted, .putDone, .unknown: return .unknown
+        case .sent, .keysSent, .interrupted, .putDone, .commandList, .unknown: return .unknown
         }
     }
 
@@ -400,8 +414,10 @@ final class GatewayClient {
                 complete(id: id, with: .interrupted(outcome: outcome))
             case .putDone(let id, let path):
                 complete(id: id, with: .putDone(path: path))
-            case .putFailed(let id, let kind, let message):
+            case .putFailed(let id, let kind, let message), .commandsFailed(let id, let kind, let message):
                 complete(id: id, with: .failed(kind: kind, message: message))
+            case .commandList(let id, let commands):
+                complete(id: id, with: .commandList(commands))
             case .unknown:
                 break
             }

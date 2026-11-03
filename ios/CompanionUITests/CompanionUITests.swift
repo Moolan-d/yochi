@@ -587,6 +587,54 @@ final class CompanionUITests: XCTestCase {
     }
 
     @MainActor
+    func testSlashCompletion() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+
+        let field = composer(app)
+        field.tap()
+        field.typeText("/")
+        let list = app.descendants(matching: .any)["slashSuggestions"]
+        XCTAssert(list.waitForExistence(timeout: 5), "no completion list")
+        XCTAssert(app.buttons["slash-/compact"].exists, "no built-in commands")
+        snapshot("1 all commands")
+
+        // The project's own command, listed by the Gateway.
+        field.typeText("uitest")
+        let hello = app.buttons["slash-/uitest-hello"]
+        XCTAssert(hello.waitForExistence(timeout: 20), "no project command")
+        XCTAssertEqual(hello.value as? String, "Say hello from the UI test")
+        snapshot("2 filtered")
+        hello.tap()
+        XCTAssertEqual(field.value as? String, "/uitest-hello ")
+        XCTAssert(list.waitForNonExistence(timeout: 5), "the list stayed after the space")
+
+        // /exit asks first; cancelling leaves the draft alone.
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 20))
+        field.typeText("/exi")
+        let exit = app.buttons["slash-/exit"]
+        XCTAssert(exit.waitForExistence(timeout: 5), "no /exit")
+        exit.tap()
+        let fill = app.buttons["填入 /exit"]
+        XCTAssert(fill.waitForExistence(timeout: 5), "/exit did not ask first")
+        snapshot("3 exit asks")
+        app.buttons["取消"].tap()
+        XCTAssertEqual(field.value as? String, "/exi")
+        leaveAndUnpair(app)
+    }
+
+    @MainActor
     func testNewSessionSheet() throws {
         let app = launchUnpaired()
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
