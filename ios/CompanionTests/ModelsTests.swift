@@ -52,4 +52,19 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(id, "i2")
         XCTAssertEqual(kind, "finished")
     }
+
+    func testPutRepliesDecode() throws {
+        let done = Data(#"{"type":"put_done","id":"p1","path":"/tmp/t7/image.jpg"}"#.utf8)
+        guard case .putDone(let id, let path) = try JSONDecoder().decode(ServerMessage.self, from: done) else {
+            return XCTFail("not put_done")
+        }
+        XCTAssertEqual(id, "p1")
+        XCTAssertEqual(path, "/tmp/t7/image.jpg")
+
+        let failed = Data(#"{"type":"put_failed","id":"p2","kind":"too_large","message":"文件为空或超过 8 MB"}"#.utf8)
+        guard case .putFailed(_, let kind, _) = try JSONDecoder().decode(ServerMessage.self, from: failed) else {
+            return XCTFail("not put_failed")
+        }
+        XCTAssertEqual(kind, "too_large")
+    }
 }

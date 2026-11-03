@@ -49,6 +49,19 @@ pub struct InterruptRequest {
 /// How long core watches for the stop to take effect.
 const INTERRUPT_WATCH_SECS: f64 = 5.0;
 
+/// A file for the terminal's program to read, such as a photo from the
+/// phone: core keeps it beside the terminal and removes it with it.
+pub struct PutRequest {
+    pub id: String,
+    pub session: String,
+    pub name: String,
+    /// Base64, passed through to core as is.
+    pub data: String,
+}
+
+/// core's limit is 8 MB of bytes; base64 takes four characters per three.
+const PUT_MAX_BASE64: usize = 8 * 1024 * 1024 / 3 * 4 + 4;
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -77,6 +90,16 @@ pub enum Response {
         outcome: String,
     },
     InterruptFailed {
+        id: String,
+        kind: String,
+        message: String,
+    },
+    /// Where the file landed, on the terminal's machine.
+    PutDone {
+        id: String,
+        path: String,
+    },
+    PutFailed {
         id: String,
         kind: String,
         message: String,
@@ -152,6 +175,49 @@ fn map_interrupt(id: String, reply: Value) -> Response {
     match reply["result"]["outcome"].as_str() {
         Some(outcome) => Response::Interrupted { id, outcome: outcome.into() },
         None => Response::InterruptFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的停止结果".into() },
+    }
+}
+
+pub async fn put(hc: &str, view: &watch::Receiver<CoreView>, request: PutRequest) -> Response {
+    let failed = |kind: &str, message: String| Response::PutFailed { id: request.id.clone(), kind: kind.into(), message };
+    if !view.borrow().sessions.iter().any(|session| session.id == request.session) {
+        return failed("not_found", "会话不存在或已结束".into());
+    }
+    if !valid_put_name(&request.name) {
+        return failed("invalid", "文件名无效".into());
+    }
+    if request.data.is_empty() || request.data.len() > PUT_MAX_BASE64 {
+        return failed("too_large", "文件为空或超过 8 MB".into());
+    }
+    let params = json!({"terminal": request.session, "name": request.name, "data": request.data});
+    let reply = match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.put", params)).await {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(RequestError::BeforeSend(error))) => return failed("unavailable", format!("{error:#}")),
+        Ok(Err(RequestError::AfterSend(error))) => return failed("unknown", format!("{error:#}")),
+        Err(_) => return failed("timeout", "上传超时，结果未知".into()),
+    };
+    map_put(request.id, reply)
+}
+
+/// A plain file name: no folders, nothing hidden, short enough for any disk.
+fn valid_put_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+fn map_put(id: String, reply: Value) -> Response {
+    if let Some(error) = reply.get("error") {
+        return Response::PutFailed {
+            id,
+            kind: error["data"]["kind"].as_str().unwrap_or("unavailable").into(),
+            message: error["message"].as_str().unwrap_or("上传失败").into(),
+        };
+    }
+    match reply["result"]["path"].as_str() {
+        Some(path) => Response::PutDone { id, path: path.into() },
+        None => Response::PutFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的上传结果".into() },
     }
 }
 
@@ -390,5 +456,22 @@ mod tests {
         assert!(matches!(response, Response::InterruptFailed { kind, .. } if kind == "unknown"));
         let json = serde_json::to_value(Response::Interrupted { id: "i1".into(), outcome: "still_working".into() }).unwrap();
         assert_eq!(json, json!({"type": "interrupted", "id": "i1", "outcome": "still_working"}));
+    }
+
+    #[test]
+    fn maps_put_result_and_checks_names() {
+        let response = map_put("p1".into(), json!({"result": {"path": "/tmp/t7/image.jpg", "bytes": 3}}));
+        assert!(matches!(response, Response::PutDone { id, path } if id == "p1" && path == "/tmp/t7/image.jpg"));
+        let response = map_put("p2".into(), json!({
+            "error": {"code": -32602, "message": "invalid_params", "data": {"kind": "invalid_params"}},
+        }));
+        assert!(matches!(response, Response::PutFailed { kind, .. } if kind == "invalid_params"));
+        let json = serde_json::to_value(Response::PutDone { id: "p1".into(), path: "/x.jpg".into() }).unwrap();
+        assert_eq!(json, json!({"type": "put_done", "id": "p1", "path": "/x.jpg"}));
+
+        assert!(valid_put_name("image-20261103-182301.jpg"));
+        for name in ["", "../x.jpg", "a/b.jpg", ".hidden", "空格 名.jpg"] {
+            assert!(!valid_put_name(name), "{name}");
+        }
     }
 }

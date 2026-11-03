@@ -120,6 +120,22 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interru
 - `kind` 同 Agent Message，另有 Gateway 的 `not_found`、`unknown`、`timeout`。结果不明时 App 不自动再按。
 - App 只在 Agent 为 `working` 时提供停止；`blocked` 时 Esc 会取消对话框，由对话框卡片处理。
 
+### 附图片
+
+把一个文件放到终端旁边，回复它在终端那台机器上的路径。App 把路径填进草稿，随 Agent Message 发出，Claude Code 看到路径会自己读这张图：
+
+```jsonc
+// App → Gateway；data 为 base64，解码后不超过 8 MB
+{"type": "put", "id": "<客户端生成>", "session": "vps-us/t1", "name": "image-20261103-192759-1.jpg", "data": "<base64>"}
+// Gateway → App
+{"type": "put_done", "id": "<客户端生成>", "path": "/Users/me/.local/state/herdr-core/default/files/t1/image-20261103-192759-1.jpg"}
+{"type": "put_failed", "id": "<客户端生成>", "kind": "too_large", "message": "图片超过 8 MB"}
+```
+
+- Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.put`，不 attach，不是 Takeover。
+- `name` 只能含 ASCII 字母数字和 `.-_`，不以 `.` 开头，最长 100 字符，否则 `kind: "invalid"`。会话不存在为 `not_found`，过大为 `too_large`；其余同 Agent Message，另有 `unknown`、`timeout`。
+- App 先把图片长边缩到 2048 像素、编成 JPEG，一条消息最多 4 张。
+
 ### 作答（Agent Question）
 
 回答 Agent 正在等待的批准或单选提问，同样在 `/v0/ws` 上：

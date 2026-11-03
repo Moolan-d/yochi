@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// One session on one page: an Agent's conversation, or for a shell its
@@ -25,6 +26,10 @@ struct ObserveView: View {
     @State private var seenModes: Set<PermissionMode> = []
     @State private var switchingMode = false
     @State private var modeFailure: String?
+    @State private var attachments: [ImageAttachment] = []
+    @State private var pickedPhotos: [PhotosPickerItem] = []
+    @State private var pickingPhotos = false
+    @State private var takingPhoto = false
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -63,6 +68,7 @@ struct ObserveView: View {
 
     private var canSend: Bool {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !attachments.contains { $0.state == .uploading }
     }
 
     /// The mode line when the screen shows it (the transcript has none
@@ -150,6 +156,22 @@ struct ObserveView: View {
         .onChange(of: currentSession.turn, initial: true) { _, _ in updateResponse() }
         .onChange(of: currentSession.status?.state) { _, state in
             if state != "working" { stopNotice = nil }
+        }
+        .photosPicker(isPresented: $pickingPhotos, selection: $pickedPhotos,
+                      maxSelectionCount: max(1, ImageAttachment.limit - attachments.count), matching: .images)
+        .onChange(of: pickedPhotos) { _, items in
+            guard !items.isEmpty else { return }
+            pickedPhotos = []
+            Task {
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                        attach(image)
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $takingPhoto) {
+            CameraPicker { attach($0) }.ignoresSafeArea()
         }
         .onChange(of: conversation.mode) { _, mode in
             switchedMode = nil
@@ -257,79 +279,65 @@ struct ObserveView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Menu {
-                Section("填入输入框") {
-                    ForEach(QuickCommand.phrases, id: \.self) { phrase in
-                        Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
-                    }
-                }
-                let commands = QuickCommand.commands(for: currentSession)
-                if !commands.isEmpty {
-                    Section("Claude Code 命令") {
-                        ForEach(commands, id: \.self) { command in
-                            Button(command) { draft = QuickCommand.insert(command, into: draft) }
-                        }
-                    }
-                }
-            } label: {
-                Image(systemName: "bolt.circle")
-                    .font(.title2)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .disabled(isSending)
-            .accessibilityLabel("快捷指令")
-            .accessibilityIdentifier("quickCommands")
+        HStack(alignment: .bottom, spacing: 4) {
+            composerMenu
 
-            HStack(alignment: .bottom, spacing: 4) {
-                TextField("给 Agent 发消息", text: $draft, axis: .vertical)
-                    .lineLimit(1...6)
-                    .font(.body)
-                    .padding(.leading, 14)
-                    .padding(.vertical, 10)
-                    .disabled(isSending)
-                    .focused($composerFocused)
-                    .accessibilityIdentifier("agentMessageField")
-                Group {
-                    if showsStop {
-                        Button { stop() } label: {
-                            Group {
-                                if stopping {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "stop.circle.fill")
-                                        .font(.system(size: 30))
-                                }
-                            }
-                            .frame(width: 34, height: 34)
-                            .contentShape(Rectangle().inset(by: -5))
-                        }
-                        .disabled(stopping)
-                        .accessibilityLabel("停止 Agent")
-                        .accessibilityIdentifier("stopAgent")
-                    } else {
-                        Button { send() } label: {
-                            Group {
-                                if isSending {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "arrow.up.circle.fill")
-                                        .font(.system(size: 30))
-                                }
-                            }
-                            .frame(width: 34, height: 34)
-                            // A 44-point target around the smaller visible button.
-                            .contentShape(Rectangle().inset(by: -5))
-                        }
-                        .disabled(!canSend)
-                        .accessibilityLabel(queuesMessage ? "排队发送" : "发送消息")
-                        .accessibilityHint(queuesMessage ? "这一轮结束后发出" : "")
-                        .accessibilityIdentifier("sendAgentMessage")
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                // Attachments sit inside the field, as in Messages, so the
+                // field keeps its width.
+                if !attachments.isEmpty {
+                    AttachmentStrip(attachments: attachments, remove: removeAttachment, retry: upload)
+                        .padding(.horizontal, 6)
                 }
-                .padding(.trailing, 5)
-                .padding(.bottom, 5)
+                HStack(alignment: .bottom, spacing: 4) {
+                    TextField("给 Agent 发消息", text: $draft, axis: .vertical)
+                        .lineLimit(1...6)
+                        .font(.body)
+                        .padding(.leading, 14)
+                        .padding(.vertical, 10)
+                        .disabled(isSending)
+                        .focused($composerFocused)
+                        .accessibilityIdentifier("agentMessageField")
+                    Group {
+                        if showsStop {
+                            Button { stop() } label: {
+                                Group {
+                                    if stopping {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "stop.circle.fill")
+                                            .font(.system(size: 30))
+                                    }
+                                }
+                                .frame(width: 34, height: 34)
+                                .contentShape(Rectangle().inset(by: -5))
+                            }
+                            .disabled(stopping)
+                            .accessibilityLabel("停止 Agent")
+                            .accessibilityIdentifier("stopAgent")
+                        } else {
+                            Button { send() } label: {
+                                Group {
+                                    if isSending {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "arrow.up.circle.fill")
+                                            .font(.system(size: 30))
+                                    }
+                                }
+                                .frame(width: 34, height: 34)
+                                // A 44-point target around the smaller visible button.
+                                .contentShape(Rectangle().inset(by: -5))
+                            }
+                            .disabled(!canSend)
+                            .accessibilityLabel(queuesMessage ? "排队发送" : "发送消息")
+                            .accessibilityHint(queuesMessage ? "这一轮结束后发出" : "")
+                            .accessibilityIdentifier("sendAgentMessage")
+                        }
+                    }
+                    .padding(.trailing, 5)
+                    .padding(.bottom, 5)
+                }
             }
             .background(Color(.systemBackground), in: .rect(cornerRadius: 22, style: .continuous))
             .overlay {
@@ -397,6 +405,7 @@ struct ObserveView: View {
             client.enqueue(text, session: session.id, turn: currentSession.turn)
             AgentMessageStore.clearDraft(host: config.host, session: session.id)
             draft = ""
+            attachments = []
             return
         }
         // Marked before the task starts, so a second tap can't send it twice.
@@ -408,6 +417,8 @@ struct ObserveView: View {
                 // while sending must not make the sent text reappear as a draft.
                 AgentMessageStore.clearDraft(host: config.host, session: session.id)
                 draft = ""
+                // Their paths went with the text.
+                attachments.removeAll { $0.state != .uploading }
                 updateResponse()
             case .failed(let kind, _):
                 confirmingBlocked = kind == "blocked"
@@ -415,6 +426,83 @@ struct ObserveView: View {
                 break
             }
         }
+    }
+
+    /// One "+" for everything that goes into the message, as in Messages:
+    /// images (conversation only) and the quick phrases.
+    private var composerMenu: some View {
+        Menu {
+            if isConversation {
+                Section {
+                    Button("照片图库", systemImage: "photo.on.rectangle") { pickingPhotos = true }
+                    Button("拍照", systemImage: "camera") { takingPhoto = true }
+                        .disabled(!CameraPicker.isAvailable)
+                }
+                .disabled(attachments.count >= ImageAttachment.limit)
+            }
+            Section("填入输入框") {
+                ForEach(QuickCommand.phrases, id: \.self) { phrase in
+                    Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
+                }
+            }
+            let commands = QuickCommand.commands(for: currentSession)
+            if !commands.isEmpty {
+                Section("Claude Code 命令") {
+                    ForEach(commands, id: \.self) { command in
+                        Button(command) { draft = QuickCommand.insert(command, into: draft) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.body.weight(.semibold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .tint(.secondary)
+        .frame(width: 44, height: 44)
+        .disabled(isSending)
+        .accessibilityLabel(isConversation ? "添加图片或快捷语" : "快捷语")
+        .accessibilityIdentifier("composerMenu")
+    }
+
+    private func attach(_ image: UIImage) {
+        guard attachments.count < ImageAttachment.limit else { return }
+        let name = ImageShrinker.name(at: .now, index: attachments.count + 1)
+        Task {
+            let (jpeg, thumbnail) = await Task.detached(priority: .userInitiated) {
+                (ImageShrinker.jpeg(from: image), ImageShrinker.thumbnail(from: image))
+            }.value
+            guard let jpeg, attachments.count < ImageAttachment.limit else { return }
+            let attachment = ImageAttachment(thumbnail: thumbnail, jpeg: jpeg, name: name)
+            attachments.append(attachment)
+            upload(attachment.id)
+        }
+    }
+
+    private func upload(_ id: ImageAttachment.ID) {
+        guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
+        attachments[index].state = .uploading
+        let attachment = attachments[index]
+        Task {
+            let state: ImageAttachment.State = switch await client.put(
+                session: session.id, name: attachment.name, data: attachment.jpeg) {
+            case .done(let path): .uploaded(path: path)
+            case .failed(_, let message): .failed(message)
+            case .unknown: .failed("结果未知")
+            }
+            // Removed while it uploaded: its path stays out of the draft.
+            guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
+            attachments[index].state = state
+            if case .uploaded(let path) = state { draft = DraftPaths.insert(path, into: draft) }
+        }
+    }
+
+    private func removeAttachment(_ id: ImageAttachment.ID) {
+        guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
+        if case .uploaded(let path) = attachments[index].state { draft = DraftPaths.remove(path, from: draft) }
+        attachments.remove(at: index)
     }
 
     /// The queued text goes back ahead of whatever the draft holds now.

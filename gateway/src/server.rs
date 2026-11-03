@@ -102,6 +102,13 @@ enum AppMessage {
         id: String,
         session: String,
     },
+    /// A file for the terminal's program, such as a photo; base64 data.
+    Put {
+        id: String,
+        session: String,
+        name: String,
+        data: String,
+    },
     /// Answer what the Agent is waiting for, if it still is.
     Answer {
         id: String,
@@ -576,6 +583,17 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::Put { id, session, name, data }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        tokio::spawn(async move {
+                            let request = agent::PutRequest { id, session, name, data };
+                            let response = agent::put(&state.hc, &state.view, request).await;
+                            if let Ok(response) = serde_json::to_string(&response) {
+                                let _ = outgoing.send(response);
+                            }
+                        });
+                    }
                     Ok(AppMessage::Run { id, machine, cwd, argv, space }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -645,6 +663,9 @@ mod tests {
             if choice == "allow" && expect == "approve Bash: ls"));
         let message: AppMessage = serde_json::from_str(r#"{"type":"interrupt","id":"i1","session":"t1"}"#).unwrap();
         assert!(matches!(message, AppMessage::Interrupt { id, session } if id == "i1" && session == "t1"));
+        let message: AppMessage =
+            serde_json::from_str(r#"{"type":"put","id":"p1","session":"t1","name":"a.jpg","data":"AAAA"}"#).unwrap();
+        assert!(matches!(message, AppMessage::Put { name, data, .. } if name == "a.jpg" && data == "AAAA"));
     }
 
     #[test]

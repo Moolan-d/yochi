@@ -34,12 +34,21 @@ final class GatewayClient {
         case unknown
     }
 
+    enum PutResult {
+        /// Where the file landed, beside the terminal on its machine.
+        case done(path: String)
+        case failed(kind: String, message: String)
+        /// The upload may have arrived.
+        case unknown
+    }
+
     /// A reply to any request the app makes on this socket, matched by id.
     private enum Reply {
         case sent(turn: UInt64, status: String?, started: Bool?)
         case keysSent
         case runCreated(session: String)
         case interrupted(outcome: String)
+        case putDone(path: String)
         case failed(kind: String, message: String)
         case unknown
     }
@@ -193,7 +202,7 @@ final class GatewayClient {
         switch reply {
         case .sent(let turn, let status, let started): return .accepted(turn: turn, status: status, started: started)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .keysSent, .runCreated, .interrupted, .unknown: return .unknown
+        case .keysSent, .runCreated, .interrupted, .putDone, .unknown: return .unknown
         }
     }
 
@@ -210,7 +219,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .interrupted, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .putDone, .unknown: return .unknown
         }
     }
 
@@ -228,7 +237,7 @@ final class GatewayClient {
         switch reply {
         case .keysSent: return .pressed
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .runCreated, .interrupted, .unknown: return .unknown
+        case .sent, .runCreated, .interrupted, .putDone, .unknown: return .unknown
         }
     }
 
@@ -245,13 +254,33 @@ final class GatewayClient {
         case .interrupted(let outcome): return .pressed(outcome: outcome)
         case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .runCreated, .unknown: return .unknown
+        case .sent, .keysSent, .runCreated, .putDone, .unknown: return .unknown
         }
     }
 
     /// Starts a new terminal on the Gateway's core (or a connected machine):
     /// `argv` empty means the machine's shell. Herdr takes it into `space`, in
     /// a tab of its own, or into a new space when it is nil.
+    /// Puts a file beside the terminal for its program to read (core's
+    /// `terminal.put`); nothing is typed.
+    func put(session: String, name: String, data: Data) async -> PutResult {
+        struct Request: Encodable {
+            let type = "put"
+            let id: String
+            let session: String
+            let name: String
+            let data: String
+        }
+        let base64 = data.base64EncodedString()
+        let reply = await request { Request(id: $0, session: session, name: name, data: base64) }
+        switch reply {
+        case .putDone(let path): return .done(path: path)
+        case .failed(let kind, _) where kind == "timeout" || kind == "unknown": return .unknown
+        case .failed(let kind, let message): return .failed(kind: kind, message: message)
+        case .sent, .keysSent, .runCreated, .interrupted, .unknown: return .unknown
+        }
+    }
+
     func runSession(machine: String?, cwd: String, argv: [String], space: String?) async -> RunResult {
         struct Request: Encodable {
             let type = "run"
@@ -265,7 +294,7 @@ final class GatewayClient {
         switch reply {
         case .runCreated(let session): return .created(session: session)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)
-        case .sent, .keysSent, .interrupted, .unknown: return .unknown
+        case .sent, .keysSent, .interrupted, .putDone, .unknown: return .unknown
         }
     }
 
@@ -369,6 +398,10 @@ final class GatewayClient {
                 complete(id: id, with: .failed(kind: kind, message: message))
             case .interrupted(let id, let outcome):
                 complete(id: id, with: .interrupted(outcome: outcome))
+            case .putDone(let id, let path):
+                complete(id: id, with: .putDone(path: path))
+            case .putFailed(let id, let kind, let message):
+                complete(id: id, with: .failed(kind: kind, message: message))
             case .unknown:
                 break
             }

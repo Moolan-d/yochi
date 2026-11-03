@@ -237,7 +237,7 @@ final class CompanionUITests: XCTestCase {
         app.buttons["key-enter"].tap()
         XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 3))
 
-        app.buttons["quickCommands"].tap()
+        app.buttons["composerMenu"].tap()
         XCTAssert(app.buttons["继续"].waitForExistence(timeout: 5))
         snapshot("2 quick commands")
         app.buttons["继续"].tap()
@@ -528,6 +528,61 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(text(app, containing: "Queued from the phone").waitForExistence(timeout: 30),
                   "the queued message is not in the conversation")
         snapshot("2 sent")
+        leaveAndUnpair(app)
+    }
+
+    /// A photo from the library is put beside the terminal and named in the
+    /// draft by its path; Claude Code reads it from there.
+    @MainActor
+    func testImageSentToAgent() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        RunLoop.current.run(until: .now.addingTimeInterval(5))
+
+        // Text first: tapping a filled field puts the cursor where it lands,
+        // and typing into the middle of the path would break it.
+        let field = composer(app)
+        field.tap()
+        field.typeText("Describe this image in at most five words.")
+        app.buttons["composerMenu"].tap()
+        app.buttons["照片图库"].tap()
+        // The system picker's grid; the simulator ships a few photos.
+        let photo = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        XCTAssert(photo.waitForExistence(timeout: 30), "no photo in the library")
+        snapshot("1 library")
+        photo.tap()
+        let done = app.buttons.matching(NSPredicate(format: "label IN %@", ["完成", "添加", "Done", "Add"])).firstMatch
+        XCTAssert(done.waitForExistence(timeout: 5), "no way to confirm the picker")
+        done.tap()
+
+        let thumbnail = app.descendants(matching: .any)["attachment-1"]
+        XCTAssert(thumbnail.waitForExistence(timeout: 20), "no thumbnail")
+        let uploaded = NSPredicate(format: "value == %@", "已上传")
+        expectation(for: uploaded, evaluatedWith: thumbnail)
+        waitForExpectations(timeout: 30)
+        let draft = field.value as? String ?? ""
+        XCTAssert(draft.hasPrefix("Describe this image in at most five words. /") && draft.hasSuffix(".jpg"),
+                  "the draft is \(draft)")
+        snapshot("2 attached")
+
+        app.buttons["发送消息"].tap()
+        XCTAssert(thumbnail.waitForNonExistence(timeout: 20), "the thumbnail stayed after sending")
+        // The Agent took it as a message (not, say, a slash command it refused).
+        XCTAssert(text(app, containing: "Describe this image").waitForExistence(timeout: 30),
+                  "the message is not in the conversation")
+        XCTAssert(app.descendants(matching: .any)["stopAgent"].waitForNonExistence(timeout: 90), "the Agent kept working")
+        snapshot("3 described")
         leaveAndUnpair(app)
     }
 

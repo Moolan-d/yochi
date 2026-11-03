@@ -85,7 +85,7 @@ start_agent_session() {
 
 # TESTS="testA testB" runs a subset; testDialogFromScreen,
 # testPickerFromScreen, testPermissionModeFromScreen and
-# testMessageQueuedWhileWorking run only when named.
+# testMessageQueuedWhileWorking and testImageSentToAgent run only when named.
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -115,7 +115,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         start_picker_session
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi
-    if [ "$test" = testMessageQueuedWhileWorking ]; then
+    if [ "$test" = testMessageQueuedWhileWorking ] || [ "$test" = testImageSentToAgent ]; then
         start_agent_session
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi
