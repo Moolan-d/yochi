@@ -89,13 +89,6 @@ enum AppMessage {
         session: String,
         keys: Vec<String>,
     },
-    /// Read the screen and history above it, without attaching.
-    History {
-        id: String,
-        session: String,
-        #[serde(default = "default_history_lines")]
-        lines: usize,
-    },
     /// Answer what the Agent is waiting for, if it still is.
     Answer {
         id: String,
@@ -112,13 +105,12 @@ enum AppMessage {
         cwd: String,
         #[serde(default)]
         argv: Vec<String>,
+        /// A space from the list; absent for a new one.
+        #[serde(default)]
+        space: Option<String>,
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
-}
-
-fn default_history_lines() -> usize {
-    agent::MAX_HISTORY_LINES
 }
 
 pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
@@ -225,11 +217,6 @@ async fn upgrade(State(state): State<AppState>, headers: HeaderMap, ws: WebSocke
 #[derive(Deserialize)]
 struct ObserveQuery {
     session: String,
-    /// 1 takes the terminal over: it is resized to `cols` × `rows` while this
-    /// viewer stays attached, so a full-screen program redraws for the phone.
-    takeover: Option<u8>,
-    cols: Option<u16>,
-    rows: Option<u16>,
 }
 
 async fn observe(
@@ -241,34 +228,18 @@ async fn observe(
     let Some(device) = authorize(&headers, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(observed) = session_size(&state.view.borrow(), &query.session) else {
+    let Some(size) = session_size(&state.view.borrow(), &query.session) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let (size, takeover) = match query.takeover.unwrap_or(0) == 1 {
-        true => match (query.cols, query.rows) {
-            (Some(cols), Some(rows)) if cols > 0 && rows > 0 => ((cols, rows), true),
-            _ => return (StatusCode::BAD_REQUEST, "takeover needs cols and rows").into_response(),
-        },
-        false => (observed, false),
-    };
-    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size, takeover))
+    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size))
 }
 
 fn session_size(view: &CoreView, id: &str) -> Option<(u16, u16)> {
     view.sessions.iter().find(|s| s.id == id).map(|s| (s.cols, s.rows))
 }
 
-/// Streams one terminal. An observer only watches; a takeover viewer also
-/// sets the terminal's size, so the program redraws for the phone.
-async fn relay(
-    mut socket: WebSocket,
-    state: AppState,
-    device: String,
-    id: String,
-    (cols, rows): (u16, u16),
-    takeover: bool,
-) {
-    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, !takeover).await {
+async fn relay(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
+    let mut observer = match Observer::attach(&state.hc, &id, cols, rows).await {
         Ok(observer) => observer,
         Err(err) => {
             let reason = Value::String(format!("{err:#}"));
@@ -481,23 +452,12 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
-                    Ok(AppMessage::Run { id, machine, cwd, argv }) => {
+                    Ok(AppMessage::Run { id, machine, cwd, argv, space }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
-                            let request = run::RunRequest { id, machine, cwd, argv };
+                            let request = run::RunRequest { id, machine, cwd, argv, space };
                             let response = run::run(&state.hc, request).await;
-                            if let Ok(response) = serde_json::to_string(&response) {
-                                let _ = outgoing.send(response);
-                            }
-                        });
-                    }
-                    Ok(AppMessage::History { id, session, lines }) => {
-                        let state = state.clone();
-                        let outgoing = outgoing.clone();
-                        tokio::spawn(async move {
-                            let request = agent::HistoryRequest { id, session, lines };
-                            let response = agent::history(&state.hc, &state.view, request).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -553,8 +513,6 @@ mod tests {
         let message: AppMessage =
             serde_json::from_str(r#"{"type":"keys","id":"k1","session":"t1","keys":["down","enter"]}"#).unwrap();
         assert!(matches!(message, AppMessage::Keys { keys, .. } if keys == ["down", "enter"]));
-        let message: AppMessage = serde_json::from_str(r#"{"type":"history","id":"h1","session":"t1"}"#).unwrap();
-        assert!(matches!(message, AppMessage::History { lines, .. } if lines == agent::MAX_HISTORY_LINES));
         let message: AppMessage = serde_json::from_str(
             r#"{"type":"answer","id":"a1","session":"t1","choice":"allow","expect":"approve Bash: ls"}"#,
         )

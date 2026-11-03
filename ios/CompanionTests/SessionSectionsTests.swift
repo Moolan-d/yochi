@@ -10,7 +10,7 @@ final class SessionSectionsTests: XCTestCase {
     }
 
     private func space(_ id: String, _ name: String, machine: String? = nil, tabs: [(String, [String])]) -> Space {
-        Space(id: id, machine: machine, name: name,
+        Space(id: id, machine: machine, name: name, folder: nil,
               tabs: tabs.map { SpaceTab(id: "\(id)/\($0.0)", name: $0.0, sessions: $0.1) })
     }
 
@@ -64,5 +64,18 @@ final class SessionSectionsTests: XCTestCase {
         // Still listed in their own space too.
         XCTAssertEqual(sections[1].title, "app")
         XCTAssertEqual(sections[1].tabs[1].entries.map(\.id), ["t2"])
+    }
+
+    func testNewSessionGoesToTheSpaceHoldingItsDirectory() {
+        let spaces = ["/Users/me", "/Users/me/app/", "/Users/me/app-docs", ""].enumerated().map { index, folder in
+            Space(id: "sp\(index)", machine: nil, name: "s\(index)", folder: folder.isEmpty ? nil : folder, tabs: [])
+        }
+        XCTAssertEqual(spaceHolding("/Users/me/app", in: spaces)?.id, "sp1")
+        XCTAssertEqual(spaceHolding(" /Users/me/app/src/ ", in: spaces)?.id, "sp1")
+        XCTAssertEqual(spaceHolding("/Users/me/app-docs/a", in: spaces)?.id, "sp2")
+        XCTAssertEqual(spaceHolding("/Users/me/notes", in: spaces)?.id, "sp0")
+        XCTAssertNil(spaceHolding("/opt/x", in: spaces))
+        XCTAssertNil(spaceHolding("", in: spaces))
+        XCTAssertNil(spaceHolding("app", in: spaces))
     }
 }

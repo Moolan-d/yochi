@@ -77,11 +77,10 @@ final class CompanionUITests: XCTestCase {
     }
 
     /// A full-screen program draws with absolute positions, so reflowing it to
-    /// the phone scrambles the screen. Taking over resizes the terminal itself
-    /// for as long as the page is open, and leaving gives the desktop its size
-    /// back.
+    /// the phone scrambles the screen: it is shown as the desktop drew it, and
+    /// watching never resizes the terminal.
     @MainActor
-    func testTakeOverFullScreen() throws {
+    func testFullScreenShownAsDrawn() throws {
         let app = launchUnpaired()
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app)
@@ -89,25 +88,40 @@ final class CompanionUITests: XCTestCase {
         let session = sessionCell(app, name: env("COMPANION_ALT_SESSION_NAME"))
         XCTAssert(session.waitForExistence(timeout: 15), "no full-screen session")
         session.tap()
-        XCTAssert(text(app, containing: "查看").waitForExistence(timeout: 10))
-
-        let offer = app.buttons["takeoverButton"]
-        XCTAssert(offer.waitForExistence(timeout: 20), "no takeover offer for a full-screen program")
-        snapshot("1 full screen")
-        offer.tap()
-        let confirm = app.buttons["开始适配"]
-        XCTAssert(confirm.waitForExistence(timeout: 5), "no takeover confirmation")
-        confirm.tap()
-        XCTAssert(text(app, containing: "已适配手机宽度").waitForExistence(timeout: 20),
-                  "takeover did not start")
+        if app.buttons["终端"].waitForExistence(timeout: 3) { app.buttons["终端"].tap() }
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         RunLoop.current.run(until: .now.addingTimeInterval(2))
-        XCTAssertFalse(text(app, containing: "连接中断").exists, "takeover stream broke")
-        snapshot("2 taken over")
+        snapshot("1 as drawn")
+        // The program prints its own size whenever it changes: still the
+        // grid it had, which is also the one on screen.
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        let grid = try XCTUnwrap(titleGrid(app), "no grid in the title")
+        XCTAssertEqual(try viewportNumbers(app, terminal), [grid.rows, grid.cols],
+                       "the full-screen program was not shown at its own grid")
 
-        app.buttons["恢复桌面"].tap()
-        XCTAssert(offer.waitForExistence(timeout: 25), "did not return to the watcher view")
+        // A pinch zooms in; coming back shows the same, unresized terminal.
+        terminal.pinch(withScale: 3, velocity: 2)
+        snapshot("2 zoomed")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssert(session.waitForExistence(timeout: 10))
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached again")
+        RunLoop.current.run(until: .now.addingTimeInterval(2))
+        XCTAssertEqual(try viewportNumbers(app, terminal), [grid.rows, grid.cols],
+                       "viewing resized the terminal")
         leaveAndUnpair(app)
     }
+
+    /// The grid on screen as the title shows it (`…·46×30`).
+    @MainActor
+    private func titleGrid(_ app: XCUIApplication) -> TerminalGridValue? {
+        let label = text(app, containing: "×").label
+        guard let match = label.firstMatch(of: /(\d+)×(\d+)/),
+              let cols = Int(match.1), let rows = Int(match.2) else { return nil }
+        return TerminalGridValue(cols: cols, rows: rows)
+    }
+
+    private struct TerminalGridValue { let cols: Int; let rows: Int }
 
     /// Dragging down reveals earlier output. The history terminal printed
     /// 1…400, so the viewport starts near 400; the long-press sheet reads it.
@@ -152,40 +166,6 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(view.waitForNonExistence(timeout: 5), "selection sheet did not close")
         XCTAssertFalse(numbers.isEmpty, "no numbers in the viewport")
         return numbers
-    }
-
-    /// A full-screen program keeps its history to itself: dragging opens it
-    /// as text read through core. The pager shows 400 at the bottom; 1 is
-    /// only in its history.
-    @MainActor
-    func testFullScreenHistory() throws {
-        let app = launchUnpaired()
-        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
-        waitUntilPaired(app)
-
-        let session = sessionCell(app, name: env("COMPANION_PAGER_SESSION_NAME"))
-        XCTAssert(session.waitForExistence(timeout: 15), "no pager session")
-        session.tap()
-        if app.buttons["终端"].waitForExistence(timeout: 3) { app.buttons["终端"].tap() }
-        XCTAssert(app.buttons["terminalHistoryButton"].waitForExistence(timeout: 15), "not seen as full screen")
-        let terminal = app.descendants(matching: .any)["terminalGrid"]
-        terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-            .press(forDuration: 0.05, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)))
-
-        let history = app.textViews["terminalHistory"]
-        XCTAssert(history.waitForExistence(timeout: 20), "dragging did not open the history")
-        snapshot("1 history")
-        let lines = ((history.value as? String) ?? "").split(whereSeparator: \.isNewline).map(String.init)
-        XCTAssertEqual(lines.first, "1", "history does not reach the top")
-        XCTAssert(lines.contains("400"), "history lost the screen")
-        app.buttons["完成"].tap()
-        XCTAssert(history.waitForNonExistence(timeout: 5), "history did not close")
-
-        app.buttons["terminalHistoryButton"].tap()
-        XCTAssert(history.waitForExistence(timeout: 20), "the button did not open the history")
-        app.buttons["完成"].tap()
-        app.navigationBars.buttons.firstMatch.tap()
-        unpair(app)
     }
 
     @MainActor
@@ -360,6 +340,7 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(directory.exists, "no directory field")
         directory.tap()
         directory.typeText("/tmp/companion-ui-work")
+        XCTAssert(app.descendants(matching: .any)["newSessionSpace"].exists, "no space choice")
         snapshot("1 new session")
         app.buttons["取消"].tap()
         XCTAssert(app.buttons["新建会话"].waitForExistence(timeout: 5), "sheet did not close")

@@ -15,6 +15,8 @@ pub struct Space {
     /// The machine it lives on, null for this Mac.
     pub machine: Option<String>,
     pub name: String,
+    /// The folder Herdr starts the space's terminals in; empty if unknown.
+    pub folder: String,
     pub tabs: Vec<Tab>,
 }
 
@@ -42,6 +44,7 @@ pub fn read(document: &Value, machine: Option<&str>) -> Vec<Space> {
             id: qualify(space["id"].as_str().unwrap_or_default()),
             machine: machine.map(str::to_owned),
             name: text(&space["name"]),
+            folder: text(&space["folder"]),
             tabs: space["tabs"]
                 .as_array()
                 .into_iter()
@@ -170,6 +173,8 @@ mod tests {
         let spaces = read(&document(), Some("vps"));
         assert_eq!(spaces[0].id, "vps/sp1");
         assert_eq!(spaces[0].machine.as_deref(), Some("vps"));
+        assert_eq!(spaces[0].folder, "/opt/demo");
+        assert_eq!(spaces[1].folder, "");
         assert_eq!(spaces[0].tabs[0].sessions, ["vps/t3", "vps/t4"]);
         assert_eq!(spaces[1].tabs[0].sessions, ["vps/t5"]);
         assert!(read(&Value::Null, None).is_empty());

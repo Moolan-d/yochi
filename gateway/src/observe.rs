@@ -1,6 +1,5 @@
-//! A view of one terminal: its own framed `hc connect`, then `terminal.attach`.
-//! Observing never types into or resizes the terminal; a takeover viewer sets
-//! its size (and still never types), so a full-screen program redraws for the phone.
+//! A read-only view of one terminal: its own framed `hc connect`, then
+//! `terminal.attach` with `observe`, so it never types into or resizes the terminal.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -41,7 +40,7 @@ enum Frame {
 }
 
 impl Observer {
-    pub async fn attach(hc: &str, terminal: &str, cols: u16, rows: u16, observe: bool) -> Result<Self> {
+    pub async fn attach(hc: &str, terminal: &str, cols: u16, rows: u16) -> Result<Self> {
         let mut child = Command::new(hc)
             .arg("connect")
             .stdin(Stdio::piped())
@@ -62,9 +61,8 @@ impl Observer {
         }
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "terminal.attach", "params": {
-            // An observer's size is only bookkeeping; a takeover viewer's is the
-            // terminal's new size while it is the most recently attached viewer.
-            "terminal": terminal, "cols": cols, "rows": rows, "observe": observe, "history": HISTORY,
+            // An observer never resizes, so its own size only matters to the core's bookkeeping.
+            "terminal": terminal, "cols": cols, "rows": rows, "observe": true, "history": HISTORY,
         }});
         write_frame(&mut stdin, 0, DATA, request.to_string().as_bytes()).await?;
 

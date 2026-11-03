@@ -1,7 +1,8 @@
 //! Starts a new terminal on the core, for the phone's "new session": a chosen
 //! program (an Agent or the machine's shell) in a chosen directory, on this Mac
 //! or a connected machine. Only the Gateway's side of herdr-core is touched, so
-//! it is not a Takeover and does not resize anything.
+//! it is not a Takeover and does not resize anything. Its `herdr.space` label
+//! has the Herdr desktop app take it into a space, in a tab of its own.
 
 use crate::core::{RequestError, error_kind, request as request_core};
 use serde::Serialize;
@@ -13,6 +14,7 @@ pub const MAX_ARGV: usize = 8;
 pub const MAX_ARG_BYTES: usize = 512;
 pub const MAX_CWD_BYTES: usize = 4096;
 pub const MAX_MACHINE_BYTES: usize = 64;
+pub const MAX_SPACE_BYTES: usize = 128;
 
 pub struct RunRequest {
     pub id: String,
@@ -23,6 +25,8 @@ pub struct RunRequest {
     pub cwd: String,
     /// Program and arguments; empty for the machine's shell.
     pub argv: Vec<String>,
+    /// A space from the session list, on the same machine; None for a new one.
+    pub space: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,7 +48,14 @@ pub async fn run(hc: &str, request: RunRequest) -> Response {
     }
     let id = request.id.clone();
     let machine = machine(&request).map(str::to_owned);
-    match tokio::time::timeout(RUN_TIMEOUT, request_core(hc, "terminal.run", params(&request))).await {
+    let space = match space(&request) {
+        Some(space) => local(space, machine.as_deref()).to_owned(),
+        None => match new_space_id() {
+            Ok(id) => id,
+            Err(error) => return Response::failed(id, "unavailable", format!("{error:#}")),
+        },
+    };
+    match tokio::time::timeout(RUN_TIMEOUT, request_core(hc, "terminal.run", params(&request, &space))).await {
         Ok(Ok(reply)) => map_reply(id, machine.as_deref(), reply),
         Ok(Err(RequestError::BeforeSend(error))) => Response::failed(id, "unavailable", format!("{error:#}")),
         // The call may have started a terminal; say so rather than offer a retry.
@@ -55,6 +66,21 @@ pub async fn run(hc: &str, request: RunRequest) -> Response {
 
 fn machine(request: &RunRequest) -> Option<&str> {
     request.machine.as_deref().map(str::trim).filter(|machine| !machine.is_empty())
+}
+
+fn space(request: &RunRequest) -> Option<&str> {
+    request.space.as_deref().map(str::trim).filter(|space| !space.is_empty())
+}
+
+/// The space's id on its own machine, as its labels and layout name it.
+fn local<'a>(space: &'a str, machine: Option<&str>) -> &'a str {
+    machine.and_then(|m| space.strip_prefix(m)?.strip_prefix('/')).unwrap_or(space)
+}
+
+/// Herdr's shape of id; the app makes the space, unnamed, when it adopts the
+/// terminal, and names it after the terminal's folder.
+fn new_space_id() -> anyhow::Result<String> {
+    Ok(format!("sp{}", crate::devices::hex(&crate::devices::random_bytes::<16>()?)))
 }
 
 fn validate(request: &RunRequest) -> Result<(), String> {
@@ -70,16 +96,25 @@ fn validate(request: &RunRequest) -> Result<(), String> {
     if machine(request).is_some_and(|machine| machine.len() > MAX_MACHINE_BYTES) {
         return Err("机器名无效".into());
     }
+    if let Some(space) = space(request) {
+        // A space lives on one machine; one from another would be made anew there.
+        let here = local(space, machine(request));
+        if space.len() > MAX_SPACE_BYTES || here.contains('/') || (machine(request).is_some() && here == space) {
+            return Err("Space 不在所选机器上".into());
+        }
+    }
     Ok(())
 }
 
-fn params(request: &RunRequest) -> Value {
+fn params(request: &RunRequest, space: &str) -> Value {
     let mut params = json!({
         "argv": request.argv,
         // The Gateway is no terminal: never make it the new terminal's parent,
         // and never type news about it anywhere.
         "no_parent": true,
         "no_notify": true,
+        // No tab: Herdr opens one for it, rather than split someone's panes.
+        "labels": {"herdr.space": space},
     });
     let cwd = request.cwd.trim();
     if !cwd.is_empty() {
@@ -115,19 +150,20 @@ mod tests {
     use super::*;
 
     fn request() -> RunRequest {
-        RunRequest { id: "r1".into(), machine: None, cwd: "/Users/ryan/app".into(), argv: vec!["claude".into()] }
+        RunRequest { id: "r1".into(), machine: None, cwd: "/Users/ryan/app".into(), argv: vec!["claude".into()], space: None }
     }
 
     #[test]
     fn params_leave_the_default_directory_alone() {
         let mut request = request();
         request.cwd = "  ".into();
-        let params = params(&request);
+        let params = params(&request, "sp1");
         assert_eq!(params["argv"], json!(["claude"]));
         assert!(params.get("cwd").is_none());
         assert!(params.get("on").is_none());
         assert_eq!(params["no_parent"], json!(true));
         assert_eq!(params["no_notify"], json!(true));
+        assert_eq!(params["labels"], json!({"herdr.space": "sp1"}));
     }
 
     #[test]
@@ -136,7 +172,7 @@ mod tests {
         request.machine = Some(" vps-us ".into());
         request.cwd = " /root/app ".into();
         request.argv = Vec::new();
-        let params = params(&request);
+        let params = params(&request, "sp2");
         assert_eq!(params["cwd"], json!("/root/app"));
         assert_eq!(params["on"], json!("vps-us"));
         assert_eq!(params["argv"], json!([]));
@@ -156,6 +192,31 @@ mod tests {
         request.cwd = "/".into();
         request.machine = Some("m".repeat(MAX_MACHINE_BYTES + 1));
         assert!(validate(&request).is_err());
+    }
+
+    #[test]
+    fn space_must_be_on_the_chosen_machine() {
+        let mut request = request();
+        request.space = Some("sp1".into());
+        assert!(validate(&request).is_ok());
+        request.space = Some("vps-us/sp1".into());
+        assert!(validate(&request).is_err());
+        request.machine = Some("vps-us".into());
+        assert!(validate(&request).is_ok());
+        assert_eq!(local("vps-us/sp1", Some("vps-us")), "sp1");
+        request.space = Some("sp1".into());
+        assert!(validate(&request).is_err());
+        request.space = Some("vps-eu/sp1".into());
+        assert!(validate(&request).is_err());
+        request.space = Some(" ".into());
+        assert!(validate(&request).is_ok());
+    }
+
+    #[test]
+    fn new_space_ids_look_like_herdrs() {
+        let id = new_space_id().unwrap();
+        assert!(id.starts_with("sp") && id.len() == 34);
+        assert_ne!(id, new_space_id().unwrap());
     }
 
     #[test]

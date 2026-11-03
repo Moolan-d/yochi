@@ -68,7 +68,7 @@ struct ObserveView: View {
                     conversation.start(config, session: session.id)
                 }
             case .terminal:
-                TerminalPane(session: session.id, config: config, client: client, grid: $grid)
+                TerminalPane(session: session.id, config: config, grid: $grid)
             }
         }
         // Tapping the conversation or the terminal puts the keyboard away, as

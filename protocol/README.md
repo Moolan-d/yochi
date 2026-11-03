@@ -48,13 +48,14 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
 ```jsonc
 "spaces": [
-  {"id": "vps-us/sp1", "machine": "vps-us", "name": "infra", "tabs": [
+  {"id": "vps-us/sp1", "machine": "vps-us", "name": "infra", "folder": "/root/infra", "tabs": [
     {"id": "vps-us/tb1", "name": "1", "sessions": ["vps-us/t1"]}
   ]}
 ]
 ```
 
 - `id` 对 App 不透明。`name` 已是要显示的名字：没人命名的 Space 用 Herdr 自动起的名字，没人命名的 Tab 用位置序号。
+- `folder`：Herdr 在这个 Space 里启动终端的目录，可能为空；App 用它为新建会话预选 Space。旧版 Gateway 不发送此字段。
 - `sessions`：该 Tab 里的 live 会话 id，按分屏顺序；由 Agent 启动的子 Agent 排在后面，跟随启动它的终端。
 - 只列出含 live 会话的 Space 和 Tab。不在任何 Space 中的会话不出现在这里，App 按机器单独列出。
 - 数据来自各机器 herdr-core 中 Herdr 桌面端的布局文档，Gateway 只读不写。某台机器读不到布局（离线、没用过 Herdr 桌面端、core 不支持 `doc.get`）时，它的会话都不在 `spaces` 中。
@@ -124,8 +125,8 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.keys`�
 
 ```jsonc
 // App → Gateway；machine 为 null 表示主 Mac；cwd 留空用 core 的默认目录；
-// argv 为空时启动该机器的 shell
-{"type": "run", "id": "<客户端生成>", "machine": "vps-us", "cwd": "/root/app", "argv": ["claude"]}
+// argv 为空时启动该机器的 shell；space 取自 spaces 列表、须在同一台机器上，省略表示新 Space
+{"type": "run", "id": "<客户端生成>", "machine": "vps-us", "cwd": "/root/app", "argv": ["claude"], "space": "vps-us/sp1"}
 
 // Gateway → App
 {"type": "run_created", "id": "<客户端生成>", "session": "vps-us/t25"}
@@ -137,7 +138,8 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - `session` 已是会话列表里的 id（远端带机器前缀）；Gateway 通过 `sessions` 推送把新终端列出来，App 据此打开它。
 - `kind` 同 Agent Message，常见为 `machine_unknown`、`spawn_failed`、`name_taken`、`invalid_params`。
 - 请求写出后连接中断或超时，都返回 `unknown`：终端可能已经创建，App 提示到列表确认，不自动重试。
-- 不指定 Space/Tab：新终端不在任何 Space 中，App 按机器列出（见路线图待决问题 2）。
+- 新终端带 `herdr.space` 标签（该机器上的 Space id），不带 `herdr.tab`：Herdr 桌面端在这个 Space 里新开一个 Tab 收进它，不会拆分已有的分屏；省略 `space` 时 Gateway 生成一个新 Space id，桌面端新建 Space 并按目录自动命名。Gateway 不写布局文档。
+- 桌面端没开或连不上那台机器时，新终端暂不在任何 Space 中，App 按机器列出；桌面端之后打开时会收进去。
 - App 只提供会话列表中出现过的远端机器；Gateway 本身把 `machine` 原样交给 core。
 
 ### 对话（Conversation History）
@@ -181,9 +183,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 ### 只读查看终端（Observer）
 
-`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach，因此手机不会向终端输入。默认以 `observe` 模式 attach，不改变终端尺寸。
-
-**适配手机（尺寸接管）。** 加 `takeover=1&cols=<列>&rows=<行>` 时，改以非 observe 的方式 attach，core 会把终端 resize 到这个网格，让全屏 TUI 按手机宽度重画；缺少 `cols`/`rows` 时返回 `400`。此时手机仍不输入，只是成为「最近活跃」的尺寸来源：桌面上打开该终端的窗口在手机查看期间会跟着变窄；连接断开（离开页面）后 core 把尺寸交还桌面窗口或默认尺寸。桌面端随后操作该终端时尺寸也会被桌面取回，此时的 `size` 帧会让 App 知道画面已不匹配手机网格。
+`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并以 `observe` 模式 attach，因此手机不会向终端输入，也不会改变终端尺寸。
 
 - **文本帧**（控制）：
   ```jsonc
@@ -192,5 +192,5 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
   {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
   ```
-- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后仍会错位——App 检测到全屏界面（首屏里的 `ESC[?1049h` 等切换）时提示「适配手机」，确认后按上面的尺寸接管重新 attach。
+- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后会错位——App 检测到全屏界面（首屏里的 `ESC[?1049h` 等切换）时不重排，按 core 的网格原样显示并缩放到手机宽度，可双指放大；程序进入或退出全屏时重新 attach。
 - **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。
