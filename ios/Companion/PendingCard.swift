@@ -2,25 +2,32 @@ import SwiftUI
 
 /// What the Agent waits for, with native answers where Claude Code's dialog
 /// is predictable: approve or deny a permission, pick one option of a single
-/// question. Anything else goes to the terminal. The Gateway refuses an
+/// question. Anything else is left to the desk. The Gateway refuses an
 /// answer if the desk has answered meanwhile (ADR 0004).
 struct PendingCard: View {
     let pending: PendingQuestion
     let tool: ConversationItem?
     let answer: (String) async -> GatewayClient.KeysResult
-    let openTerminal: () -> Void
 
     @State private var answering: String?
     @State private var failure: String?
     @State private var confirmingDeny = false
     @State private var answered = 0
 
+    private var question: AgentQuestion? { Self.question(pending, tool: tool) }
+
     /// A single single-select question, which numbered keys can answer.
-    private var question: AgentQuestion? {
+    private static func question(_ pending: PendingQuestion, tool: ConversationItem?) -> AgentQuestion? {
         guard pending.kind == "question", let questions = tool?.questions, questions.count == 1,
               let question = questions.first, !question.multiSelect,
               (1...9).contains(question.options.count) else { return nil }
         return question
+    }
+
+    /// Whether the card offers answers of its own rather than only
+    /// pointing at the desk.
+    static func answers(_ pending: PendingQuestion, tool: ConversationItem?) -> Bool {
+        (pending.kind == "permission" && tool != nil) || question(pending, tool: tool) != nil
     }
 
     var body: some View {
@@ -114,7 +121,7 @@ struct PendingCard: View {
                 .accessibilityIdentifier("allowPending")
             }
             .font(.body.weight(.semibold))
-            terminalLink("其他选项（总是允许等）请在终端中选择")
+            deskNote("其他选项（总是允许等）请在电脑上选择")
         } else if let question {
             VStack(spacing: 8) {
                 ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
@@ -137,15 +144,13 @@ struct PendingCard: View {
                 }
             }
             HStack {
-                terminalLink("其他回答请在终端中输入")
+                deskNote("其他回答请在电脑上输入")
                 Spacer()
                 Button("取消提问", role: .destructive) { confirmingDeny = true }
                     .font(.footnote)
             }
         } else {
-            Button("在终端中作答", action: openTerminal)
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("answerInTerminal")
+            deskNote("请在电脑上作答")
         }
     }
 
@@ -156,10 +161,10 @@ struct PendingCard: View {
         }
     }
 
-    private func terminalLink(_ title: String) -> some View {
-        Button(title, action: openTerminal)
+    private func deskNote(_ title: String) -> some View {
+        Text(title)
             .font(.footnote)
-            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
     }
 
     private func send(_ choice: String) {
@@ -183,7 +188,7 @@ struct PendingCard: View {
                 }
             case .unknown:
                 answering = nil
-                failure = "结果未知，请看终端确认"
+                failure = "结果未知，请在电脑上确认"
             }
         }
     }

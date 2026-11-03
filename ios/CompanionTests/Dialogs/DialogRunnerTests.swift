@@ -52,7 +52,7 @@ struct DialogRunnerTests {
         let (outcome, pressed) = try await run(
             .choose(ordinal: 2), on: "claude-00-trust",
             screens: [try ScreenFixture.text("claude-02-c1-bash-blocked")])
-        #expect(outcome == .failed("终端画面和预期不一致，已停止按键，请看终端"))
+        #expect(outcome == .failed("终端画面和预期不一致，已停止按键，请在电脑上查看"))
         #expect(pressed == [["down"]])
     }
 
@@ -73,7 +73,7 @@ struct DialogRunnerTests {
     func pasteRefused() async throws {
         let (outcome, pressed) = try await run(
             .amend(ordinal: 4, note: "no"), on: "claude-02-c1-bash-blocked", screens: [])
-        #expect(outcome == .failed("这个回答要输入文字，请在终端中完成"))
+        #expect(outcome == .failed("这个回答要输入文字，请在电脑上完成"))
         #expect(pressed.isEmpty)
     }
 }

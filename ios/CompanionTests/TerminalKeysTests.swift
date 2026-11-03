@@ -28,15 +28,6 @@ final class TerminalKeysTests: XCTestCase {
         XCTAssertTrue(QuickCommand.commands(for: nil).isEmpty)
     }
 
-    func testBareSelectorCommandsSwitchToTheTerminal() {
-        XCTAssertTrue(QuickCommand.opensSelector("/model"))
-        XCTAssertTrue(QuickCommand.opensSelector("  /resume\n"))
-        // With an argument Claude Code answers directly, no selector opens.
-        XCTAssertFalse(QuickCommand.opensSelector("/model sonnet"))
-        XCTAssertFalse(QuickCommand.opensSelector("/compact"))
-        XCTAssertFalse(QuickCommand.opensSelector("看看日志"))
-    }
-
     func testKeyBarUsesCoreKeyNames() {
         XCTAssertEqual(TerminalKey.bar.map(\.id), ["up", "down", "enter", "esc", "1", "2", "3", "shift+tab"])
     }

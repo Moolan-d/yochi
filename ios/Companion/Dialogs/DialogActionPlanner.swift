@@ -17,8 +17,9 @@ enum DialogActionPlanner {
     static func plan(
         _ action: DialogAction, for dialog: BlockedDialog, toolUseID: String? = nil
     ) throws(DialogPlanError) -> DialogActionPlan {
+        if dialog.kind == .claudePicker { return try ClaudePickerPlanner(dialog: dialog).plan(action) }
         switch dialog.program {
-        case .claude: try ClaudeDialogPlanner(dialog: dialog, toolUseID: toolUseID).plan(action)
+        case .claude: return try ClaudeDialogPlanner(dialog: dialog, toolUseID: toolUseID).plan(action)
         }
     }
 
@@ -173,6 +174,8 @@ private struct ClaudeDialogPlanner {
             try approvePlan(note: note)
         case .submitSelection(let ordinals):
             try submitSelection(ordinals)
+        case .pick, .scroll:
+            throw .unsupported("Only a picker scrolls or takes a key from its footer.")
         }
     }
 
@@ -296,5 +299,65 @@ private struct ClaudeDialogPlanner {
         else { return [] }
         let next = headers.indices.contains(index + 1) ? headers[index + 1] : "Review your answers"
         return [.expect(.page(next))]
+    }
+}
+
+/// A picker moves by arrow keys only: its digits are not bound, and its
+/// numbers run past 9. Arrows go out a batch at a time, each checked by the
+/// focused row's number, which stays put as the list scrolls; Enter or the
+/// footer's letter goes out only once focus is on the row the user tapped.
+private struct ClaudePickerPlanner {
+    let dialog: BlockedDialog
+
+    /// The most keys the Gateway takes in one request.
+    static let batch = 8
+
+    func plan(_ action: DialogAction) throws(DialogPlanError) -> DialogActionPlan {
+        guard let picker = dialog.picker else { throw .unsupported("The picker's list could not be read.") }
+        switch action {
+        case .dismiss:
+            return DialogActionPlan(steps: [.keys(["esc"])], confirmation: .fingerprintChange)
+        case .choose(let ordinal):
+            return try pick(ordinal, key: "enter", picker: picker)
+        case .pick(let ordinal, let key):
+            return try pick(ordinal, key: key, picker: picker)
+        case .scroll(let forward):
+            guard let first = dialog.options.first?.number, let last = dialog.options.last?.number else {
+                throw .noFocus
+            }
+            let page = dialog.options.count
+            let target: Int
+            if forward {
+                guard picker.moreBelow else { throw .unsupported("No more options below.") }
+                target = last + min(page, picker.hiddenBelow ?? 1)
+            } else {
+                guard picker.hiddenAbove > 0 else { throw .unsupported("No more options above.") }
+                target = first - min(page, picker.hiddenAbove)
+            }
+            return DialogActionPlan(steps: try move(to: target), confirmation: .steps)
+        case .amend, .respond, .approvePlan, .submitSelection:
+            throw .unsupported("A picker only takes a choice.")
+        }
+    }
+
+    private func pick(_ ordinal: Int, key: String, picker: DialogPicker) throws(DialogPlanError) -> DialogActionPlan {
+        guard let option = dialog.option(ordinal), let number = option.number else { throw .noSuchOption(ordinal) }
+        guard key == "enter" || picker.keys.contains(where: { $0.key == key }) else {
+            throw .unsupported("The picker's footer does not bind \(key).")
+        }
+        return DialogActionPlan(steps: try move(to: number) + [.keys([key])], confirmation: .fingerprintChange)
+    }
+
+    private func move(to target: Int) throws(DialogPlanError) -> [DialogStep] {
+        guard var current = dialog.focus.focusedOrdinal.flatMap(dialog.option)?.number else { throw .noFocus }
+        var steps: [DialogStep] = []
+        while current != target {
+            let count = min(Self.batch, abs(target - current))
+            let forward = target > current
+            current += forward ? count : -count
+            steps.append(.keys(Array(repeating: forward ? "down" : "up", count: count)))
+            steps.append(.expect(.focusNumber(current)))
+        }
+        return steps
     }
 }

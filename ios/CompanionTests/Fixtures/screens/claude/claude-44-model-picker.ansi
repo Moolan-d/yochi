@@ -1,0 +1,50 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[0;38;2;177;185;249m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔[0m
+   [0;1;38;2;177;185;249mSelect model[0m
+   [0;38;2;153;153;153mSwitch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.[0m
+
+   [0;38;2;153;153;153m↑ 6.  [0mSemantic Routing                   [0;38;2;153;153;153mrouting group · via router[0m
+     [0;38;2;153;153;153m7.  [0mClaude Opus 5.5 · routing group    [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m8.  [0mClaude Sonnet 5.5 · routing group  [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m9.  [0mClaude Haiku 5.5 · routing group   [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m10. [0mKimi K3 · routing group            [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m11. [0mGPT-6 Sol · routing group          [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m12. [0mGPT-6 Luna · routing group         [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m13. [0mGPT-6.1 Sol · routing group        [0;38;2;153;153;153mvia router[0m
+     [0;38;2;153;153;153m14. [0mClaude Haiku 5.5                   [0;38;2;153;153;153mexample-claude · via router[0m
+   [0;38;2;177;185;249m❯ [0;38;2;153;153;153m15. [0;38;2;78;186;101mDeepSeek V4.1 Flash ✔       [0m       [0;38;2;153;153;153mexample-cn · via router[0m
+      [0;38;2;153;153;153m… +8 models[0m
+
+   [0;38;2;215;119;87m●[0;38;2;153;153;153m High effort (default)[0;38;2;80;80;80m ←/→ to adjust[0m
+
+   [0;38;2;153;153;153mEnter to set as default · s to use this session only · Esc to cancel[0m

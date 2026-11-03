@@ -25,7 +25,7 @@ final class CompanionUITests: XCTestCase {
         snapshot("2 sessions")
 
         session.tap()
-        XCTAssert(text(app, containing: "查看").waitForExistence(timeout: 10))
+        XCTAssert(text(app, containing: "终端 ·").waitForExistence(timeout: 10))
         // The subtitle gains the phone-sized grid once the terminal is attached.
         let gridTitle = text(app, containing: "×")
         XCTAssert(gridTitle.waitForExistence(timeout: 15), "terminal never attached")
@@ -88,7 +88,6 @@ final class CompanionUITests: XCTestCase {
         let session = sessionCell(app, name: env("COMPANION_ALT_SESSION_NAME"))
         XCTAssert(session.waitForExistence(timeout: 15), "no full-screen session")
         session.tap()
-        if app.buttons["终端"].waitForExistence(timeout: 3) { app.buttons["终端"].tap() }
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         RunLoop.current.run(until: .now.addingTimeInterval(2))
         snapshot("1 as drawn")
@@ -134,7 +133,6 @@ final class CompanionUITests: XCTestCase {
         let session = sessionCell(app, name: env("COMPANION_HISTORY_SESSION_NAME"))
         XCTAssert(session.waitForExistence(timeout: 15), "no history session")
         session.tap()
-        if app.buttons["终端"].waitForExistence(timeout: 3) { app.buttons["终端"].tap() }
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         RunLoop.current.run(until: .now.addingTimeInterval(1))
         let terminal = app.descendants(matching: .any)["terminalGrid"]
@@ -291,8 +289,8 @@ final class CompanionUITests: XCTestCase {
         let app = launchUnpaired(observing: agent)
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app, observing: true)
-        XCTAssert(app.descendants(matching: .any)["sessionMode"].waitForExistence(timeout: 15), "no conversation")
-        XCTAssert(text(app, containing: "对话").waitForExistence(timeout: 5))
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssertFalse(app.buttons["终端"].exists, "a Claude Code session still offers the terminal")
         snapshot("1 conversation")
 
         send(app, "Use the AskUserQuestion tool to ask me: Tea or Coffee? Then reply with my choice in one short sentence.")
@@ -320,10 +318,6 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(deny.waitForNonExistence(timeout: 20), "permission card stayed after denying")
         XCTAssert(text(app, containing: "已中断").waitForExistence(timeout: 20))
         snapshot("6 denied")
-
-        app.buttons["终端"].tap()
-        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
-        snapshot("7 terminal")
         leaveAndUnpair(app)
     }
 
@@ -353,6 +347,98 @@ final class CompanionUITests: XCTestCase {
         confirm(app, "退出 Claude Code")
         XCTAssert(card.waitForNonExistence(timeout: 20), "dialog card stayed")
         snapshot("2 answered")
+        leaveAndUnpair(app)
+    }
+
+    /// `/model` sent from the phone opens Claude Code's picker as a card on
+    /// the conversation page. Paging only moves the focus, and 关闭 presses
+    /// Esc, so no model is chosen and nothing is saved.
+    @MainActor
+    func testPickerFromScreen() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        // The largest text short of the accessibility sizes makes the card
+        // taller than the page, as on a phone with bigger text.
+        let app = launchUnpaired(textSize: "UICTContentSizeCategoryXXXL")
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        // Big text pushes the session further down the list.
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssertFalse(app.buttons["终端"].exists, "a Claude Code session still offers the terminal")
+        // Claude Code takes a moment to draw its prompt.
+        RunLoop.current.run(until: .now.addingTimeInterval(5))
+        send(app, "/model")
+
+        let card = app.descendants(matching: .any)["dialogCard"]
+        XCTAssert(card.waitForExistence(timeout: 30), "no picker card")
+        XCTAssert(text(app, containing: "Claude Code 在等你选择").exists)
+        XCTAssert(text(app, containing: "Select model").exists)
+        let first = app.buttons["dialogOption-1"]
+        XCTAssert(first.exists, "no options")
+        let heading = text(app, containing: "Claude Code 在等你选择")
+        XCTAssertGreaterThanOrEqual(heading.frame.minY, app.navigationBars.firstMatch.frame.maxY,
+                                    "the card runs under the navigation bar")
+        XCTAssert(app.buttons["dialogDismiss"].isHittable, "the card's footer is off screen")
+        XCTAssert(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard covers the card")
+        snapshot("1 picker")
+
+        let down = app.buttons["pickerScrollDown"]
+        if down.exists {
+            let before = first.label
+            down.tap()
+            let deadline = Date.now.addingTimeInterval(30)
+            while first.label == before, Date.now < deadline {
+                RunLoop.current.run(until: .now.addingTimeInterval(0.3))
+            }
+            XCTAssertNotEqual(first.label, before, "the list did not scroll")
+            XCTAssert(app.buttons["pickerScrollUp"].waitForExistence(timeout: 5), "no way back up")
+            snapshot("2 scrolled")
+        }
+
+        app.buttons["dialogDismiss"].tap()
+        XCTAssert(card.waitForNonExistence(timeout: 30), "picker card stayed")
+        snapshot("3 closed")
+        leaveAndUnpair(app)
+    }
+
+    /// A panel with no numbered options shows as the screen's words with
+    /// the keys its footer names; a list offers only Esc, never Enter.
+    @MainActor
+    func testNoticeFromScreen() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        // Claude Code takes a moment to draw its prompt.
+        RunLoop.current.run(until: .now.addingTimeInterval(5))
+        send(app, "/release-notes")
+
+        let card = app.descendants(matching: .any)["genericDialogCard"]
+        XCTAssert(card.waitForExistence(timeout: 30), "no card for the release notes")
+        XCTAssert(text(app, containing: "Release notes").exists)
+        XCTAssertFalse(app.buttons["genericDialogKey-enter"].exists, "a list offers Enter")
+        snapshot("1 notes")
+
+        app.buttons["genericDialogCancel"].tap()
+        app.buttons["取消（Esc）"].firstMatch.tap()
+        XCTAssert(card.waitForNonExistence(timeout: 30), "the card stayed")
+        snapshot("2 closed")
         leaveAndUnpair(app)
     }
 
@@ -407,7 +493,7 @@ final class CompanionUITests: XCTestCase {
         let app = launchUnpaired(observing: agent)
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app, observing: true)
-        XCTAssert(app.descendants(matching: .any)["sessionMode"].waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
 
         // A tall reply fills the list; the keyboard then keeps the viewport
         // short while it arrives, and the newest line must stay above it.
@@ -428,6 +514,52 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// A Claude Code session opens on its conversation alone, rows shown
+    /// with no tap or drag, and reading back offers a way to the newest
+    /// item. Reads an existing session with a transcript; nothing is sent
+    /// or pressed.
+    @MainActor
+    func testConversationScrollsToLatest() throws {
+        guard let id = ProcessInfo.processInfo.environment["COMPANION_CONVERSATION_SESSION"], !id.isEmpty else {
+            throw XCTSkip("COMPANION_CONVERSATION_SESSION is not set")
+        }
+        let app = launchUnpaired(observing: id)
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+        let conversation = app.scrollViews["conversation"]
+        XCTAssert(conversation.waitForExistence(timeout: 15), "no conversation")
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+        snapshot("1 conversation")
+        XCTAssertFalse(app.buttons["终端"].exists, "a Claude Code session still offers the terminal")
+        let shown = conversation.staticTexts.allElementsBoundByIndex.filter {
+            $0.isHittable && conversation.frame.intersects($0.frame)
+        }
+        XCTAssertFalse(shown.isEmpty, "conversation blank on opening")
+
+        // At the newest item there is no way back to it; further up there is.
+        let latest = app.buttons["scrollToLatest"]
+        XCTAssertFalse(latest.exists, "back-to-latest shown at the bottom")
+        conversation.swipeDown(velocity: .fast)
+        conversation.swipeDown(velocity: .fast)
+        XCTAssert(latest.waitForExistence(timeout: 3), "no back-to-latest after reading back")
+        snapshot("2 read back")
+        latest.tap()
+        XCTAssert(latest.waitForNonExistence(timeout: 3), "back-to-latest stayed at the bottom")
+
+        // A subagent's report, if this conversation has one, is its own row.
+        let task = app.buttons["taskRow"].firstMatch
+        if task.exists {
+            task.tap()
+            snapshot("3 task report")
+        }
+        app.navigationBars.buttons.firstMatch.tap()
+        snapshot("4 session list")
+        // A working session's symbol turns: a later frame differs.
+        RunLoop.current.run(until: .now.addingTimeInterval(0.35))
+        snapshot("5 session list later")
+        unpair(app)
+    }
+
     // MARK: - Helpers
 
     @MainActor
@@ -440,8 +572,9 @@ final class CompanionUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchUnpaired(observing id: String? = nil) -> XCUIApplication {
+    private func launchUnpaired(observing id: String? = nil, textSize: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
+        if let textSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", textSize] }
         app.launchEnvironment["COMPANION_RESET"] = "1"
         if let id { app.launchEnvironment["COMPANION_OBSERVE"] = id }
         app.launch()

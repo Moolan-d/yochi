@@ -21,6 +21,12 @@ enum DialogAction: Sendable, Hashable {
     /// Claude multi-select question: leaves exactly these answers checked,
     /// then presses the page's `Next` or `Submit` button.
     case submitSelection(Set<Int>)
+    /// A picker: moves to this option, then presses `key`, Enter or a
+    /// letter the footer names.
+    case pick(ordinal: Int, key: String)
+    /// A picker: moves focus past the rows shown, so the list scrolls to
+    /// the next or previous page.
+    case scroll(forward: Bool)
     /// Esc. Claude declines and stops the turn, and quits on the trust
     /// dialog; Codex declines an approval or interrupts the turn.
     case dismiss
@@ -42,6 +48,9 @@ enum DialogStep: Sendable, Hashable {
 enum DialogExpectation: Sendable, Hashable {
     /// The same dialog with focus on this option.
     case focus(ordinal: Int)
+    /// The same picker with focus on the option numbered this, wherever
+    /// the list has scrolled.
+    case focusNumber(Int)
     /// Claude: the same dialog, Tab having turned this option's row into an
     /// empty note field.
     case feedbackMode(ordinal: Int)
@@ -67,6 +76,9 @@ enum ConfirmationRule: Sendable, Hashable {
     /// without a matched request can end up unconfirmed until the
     /// transcript shows a waiting call resolve.
     case fingerprintChange
+    /// The plan's own checks confirm it: moving a picker's focus leaves
+    /// the picker open.
+    case steps
 }
 
 struct DialogActionPlan: Sendable, Hashable {
@@ -131,7 +143,7 @@ extension DialogExpectation {
         case .page(let page):
             return observation.result.dialog?.progress.map(DialogRowScanner.comparable)
                 == DialogRowScanner.comparable(page)
-        case .focus, .feedbackMode, .inputText, .notes, .checked:
+        case .focus, .focusNumber, .feedbackMode, .inputText, .notes, .checked:
             break
         }
         guard let dialog = observation.result.dialog, dialog.fingerprint.matches(fingerprint) else { return false }
@@ -139,6 +151,8 @@ extension DialogExpectation {
         switch self {
         case .focus(let ordinal):
             return focus.focusedOrdinal == ordinal
+        case .focusNumber(let number):
+            return focus.focusedOrdinal.flatMap(dialog.option)?.number == number
         case .feedbackMode(let ordinal):
             return focus.focusedOrdinal == ordinal && focus.feedbackOrdinal == ordinal && focus.inputText == nil
         case .inputText(let text):
@@ -171,6 +185,8 @@ extension ConfirmationRule {
             return observation.resolvedToolUseIDs.contains(id) || dialogLeft
         case .fingerprintChange:
             return dialogLeft
+        case .steps:
+            return true
         }
     }
 }

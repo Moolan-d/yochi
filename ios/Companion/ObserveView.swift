@@ -1,21 +1,19 @@
 import SwiftUI
 
-/// One session: its Agent's conversation, or its terminal in Observer mode.
-/// Agent Messages, key presses and answers never attach, so the phone never
-/// becomes the active viewer or resizes the desktop's grid.
+/// One session on one page: an Agent's conversation, or for a shell its
+/// terminal in Observer mode. Agent Messages, key presses and answers never
+/// attach, so the phone never becomes the active viewer or resizes the
+/// desktop's grid.
 struct ObserveView: View {
-    enum Mode: Hashable {
-        case conversation, terminal
-    }
-
     let session: Session
     let config: GatewayConfig
     let client: GatewayClient
 
     @State private var conversation = ConversationFeed()
     @State private var screen = ScreenFeed()
-    @State private var mode: Mode
     @State private var grid: TerminalGrid?
+    /// The page between the navigation bar and the bottom, keyboard excluded.
+    @State private var pageHeight: CGFloat = 0
     @State private var draft: String
     @State private var confirmingBlocked = false
     @State private var keys = KeyPresser()
@@ -28,7 +26,6 @@ struct ObserveView: View {
         self.config = config
         self.client = client
         _draft = State(initialValue: AgentMessageStore.draft(host: config.host, session: session.id))
-        _mode = State(initialValue: QuickCommand.isClaudeCode(session) ? .conversation : .terminal)
     }
 
     private var currentSession: Session {
@@ -55,51 +52,34 @@ struct ObserveView: View {
     /// conversation page from the screen read, not while the Agent works
     /// (the Gateway sends no screen then, so the last one is stale).
     private var screenResult: DialogParseResult {
-        guard mode == .conversation, QuickCommand.isClaudeCode(currentSession),
-              currentSession.status?.state != "working" else { return .none }
+        guard isConversation, currentSession.status?.state != "working" else { return .none }
         return screen.result
     }
 
-    /// Only Agents whose transcript the Gateway reads have a conversation.
-    /// Claude Code has none before its first message, but its dialogs show
-    /// here from the screen, so it keeps the page.
-    private var hasConversation: Bool {
-        switch conversation.phase {
-        case .unsupported: QuickCommand.isClaudeCode(currentSession)
-        case .connecting: mode == .conversation
-        default: true
-        }
+    /// Claude Code always has the conversation page, even before its first
+    /// message: its dialogs show there from the screen. Other programs have
+    /// it only once the Gateway follows a transcript for them; a shell shows
+    /// its terminal.
+    private var isConversation: Bool {
+        QuickCommand.isClaudeCode(currentSession) || conversation.phase == .following
     }
 
     var body: some View {
         Group {
-            switch mode {
-            case .conversation:
+            if isConversation {
                 ConversationPane(feed: conversation, status: currentSession.status,
                                  keyboardShown: composerFocused) {
                     conversation.start(config, session: session.id)
                 }
-            case .terminal:
+            } else {
                 TerminalPane(session: session.id, config: config, grid: $grid)
             }
         }
         // Tapping the conversation or the terminal puts the keyboard away, as
         // do dragging and the keyboard's 收起 button above it.
         .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if hasConversation {
-                Picker("显示", selection: $mode) {
-                    Text("对话").tag(Mode.conversation)
-                    Text("终端").tag(Mode.terminal)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.bar)
-                .accessibilityIdentifier("sessionMode")
-            }
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomPanel }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -108,9 +88,11 @@ struct ObserveView: View {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityHint("可查看对话或终端、批准或回答 Agent 的请求、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
+                .accessibilityHint(isConversation
+                    ? "可查看对话、批准或回答 Agent 的请求、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。"
+                    : "可查看终端、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
             }
-            if mode == .terminal {
+            if !isConversation {
                 ToolbarItem(placement: .topBarTrailing) { textSizeMenu }
             }
         }
@@ -130,9 +112,18 @@ struct ObserveView: View {
         .onChange(of: delivery) { _, delivery in
             if case .sent(let text, _, _, _) = delivery, draft == text { draft = "" }
         }
-        .onChange(of: conversation.phase) { _, phase in
-            if phase == .unsupported, !QuickCommand.isClaudeCode(currentSession) { mode = .terminal }
+        // A session can turn out to be Claude Code after it opens: one just
+        // started from the phone, or a shell that started it. The page then
+        // turns to the conversation.
+        .onChange(of: QuickCommand.isClaudeCode(currentSession)) { _, isClaudeCode in
+            guard isClaudeCode else { return }
+            screen.start(config, session: session.id)
         }
+        // A dialog card needs the room the keyboard takes. The composer can
+        // take the keyboard back once sending enables it again, which can
+        // be after the card appeared, so both moments count.
+        .onChange(of: screenResult.fingerprint) { _, _ in makeRoomForDialog() }
+        .onChange(of: isSending) { _, _ in makeRoomForDialog() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, case .failed = conversation.phase {
                 conversation.start(config, session: session.id)
@@ -148,35 +139,43 @@ struct ObserveView: View {
         }
     }
 
+    /// Disabling the composer while it sends clears the focus state but
+    /// keeps the keyboard up, so the first responder is resigned as well.
+    private func makeRoomForDialog() {
+        guard screenResult.fingerprint != nil, !isSending else { return }
+        composerFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     /// Status stays above the composer; safeAreaInset also gives the software
     /// keyboard room instead of covering the content.
     @ViewBuilder
     private var bottomPanel: some View {
         VStack(spacing: 8) {
             if let dialog = screenResult.dialog {
-                DialogCard(dialog: dialog, run: { plan, dialog in
-                    await DialogRunner(
-                        session: session.id, feed: screen,
-                        press: { keys in await client.pressKeys(session: session.id, keys: keys) },
-                        agentWorking: { currentSession.status?.state == "working" }
-                    ).run(plan, on: dialog)
-                }, openTerminal: { mode = .terminal })
+                // Under half the page keeps the card under the navigation bar and
+                // some of the conversation in view, whatever the text size.
+                DialogCard(dialog: dialog, maxBodyHeight: pageHeight > 0 ? max(120, pageHeight * 0.45) : 300,
+                           run: { plan, dialog in await dialogRunner.run(plan, on: dialog) })
                 .id(dialog.fingerprint.value)
-            } else if mode == .conversation, let pending = conversation.pending {
+            } else if isConversation, let pending = conversation.pending,
+                      screenResult.excerpt == nil || PendingCard.answers(pending, tool: conversation.pendingTool) {
+                // What the screen shows beats a card that only says to
+                // answer at the desk.
                 PendingCard(pending: pending, tool: conversation.pendingTool,
                             answer: { choice in
                                 await client.answer(session: session.id, choice: choice, expect: pending.message)
-                            },
-                            openTerminal: { mode = .terminal })
+                            })
             } else if let excerpt = screenResult.excerpt {
-                GenericDialogCard(excerpt: excerpt, openTerminal: { mode = .terminal })
+                GenericDialogCard(excerpt: excerpt, press: { await press($0, on: excerpt) })
+                    .id(excerpt.fingerprint.value)
             }
-            if mode == .terminal, let failure = keys.failure {
+            if !isConversation, let failure = keys.failure {
                 BannerLabel(text: failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
             if let delivery { DeliveryBanner(delivery: delivery) }
-            if mode == .terminal {
+            if !isConversation {
                 TerminalKeyBar(keyboardShown: composerFocused,
                                toggleKeyboard: { composerFocused.toggle() }) { key in
                     keys.press(key.id, session: session.id, client: client)
@@ -277,13 +276,28 @@ struct ObserveView: View {
 
     private var subtitle: String {
         let place = currentSession.machine ?? "本机"
-        switch mode {
-        case .conversation:
-            return "对话 · \(place)"
-        case .terminal:
-            var parts = ["查看", place]
-            if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
-            return parts.joined(separator: " · ")
+        if isConversation { return "对话 · \(place)" }
+        var parts = ["终端", place]
+        if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
+        return parts.joined(separator: " · ")
+    }
+
+    private var dialogRunner: DialogRunner {
+        DialogRunner(
+            session: session.id, feed: screen,
+            press: { keys in await client.pressKeys(session: session.id, keys: keys) },
+            agentWorking: { currentSession.status?.state == "working" })
+    }
+
+    /// Esc for a dialog the phone can't read, if the screen still shows it.
+    private func press(_ key: String, on excerpt: GenericDialogExcerpt) async -> String? {
+        guard screen.result.fingerprint?.matches(excerpt.fingerprint) == true else {
+            return "终端里的对话框已变化，请看最新内容"
+        }
+        switch await client.pressKeys(session: session.id, keys: [key]) {
+        case .pressed: return nil
+        case .failed(_, let message): return message
+        case .unknown: return "按键结果未知"
         }
     }
 
@@ -302,11 +316,6 @@ struct ObserveView: View {
                 AgentMessageStore.clearDraft(host: config.host, session: session.id)
                 draft = ""
                 updateResponse()
-                // A selector command exists only in the terminal; go there so
-                // the key bar can finish it instead of the flow dead-ending.
-                if mode == .conversation, QuickCommand.opensSelector(text) {
-                    withAnimation(.snappy) { mode = .terminal }
-                }
             case .failed(let kind, _) where kind == "timeout" || kind == "unknown":
                 client.remember(.unknown(text: text), host: config.host, session: session.id)
             case .failed(let kind, let message):

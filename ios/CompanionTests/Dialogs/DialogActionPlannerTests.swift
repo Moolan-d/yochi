@@ -313,7 +313,7 @@ struct DialogActionPlannerTests {
     }
 
     /// The key names plans may send, all of which core's `terminal.keys` takes.
-    private static let coreKeys: Set<String> = Set(["up", "down", "enter", "esc", "tab", "shift+tab"] + (1...9).map(String.init))
+    private static let coreKeys: Set<String> = Set(["up", "down", "enter", "esc", "tab", "shift+tab", "s"] + (1...9).map(String.init))
 
     @Test(
         "Plans for every captured dialog use keys the Gateway takes and check after each arrow and paste",
@@ -324,12 +324,14 @@ struct DialogActionPlannerTests {
         var actions: [DialogAction] = [
             .dismiss, .approvePlan(note: "note"),
             .submitSelection(Set(dialog.options.filter { $0.role == .answer }.map(\.ordinal))),
+            .scroll(forward: true), .scroll(forward: false),
         ]
         for option in dialog.options {
             actions += [
                 .choose(ordinal: option.ordinal), .amend(ordinal: option.ordinal, note: "note"),
                 .respond(ordinal: option.ordinal, text: "note"),
             ]
+            actions += dialog.picker?.keys.map { .pick(ordinal: option.ordinal, key: $0.key) } ?? []
         }
         var planned = 0
         for action in actions {
@@ -341,8 +343,12 @@ struct DialogActionPlannerTests {
             for (index, step) in plan.steps.enumerated() {
                 let next = plan.steps.indices.contains(index + 1) ? plan.steps[index + 1] : nil
                 switch step {
-                case .keys(["up"]), .keys(["down"]):
-                    let checksFocus = if case .expect(.focus)? = next { true } else { false }
+                case .keys(let keys) where keys.allSatisfy({ $0 == "up" || $0 == "down" }):
+                    let checksFocus =
+                        switch next {
+                        case .expect(.focus)?, .expect(.focusNumber)?: true
+                        default: false
+                        }
                     #expect(checksFocus, "\(stem) \(action): an arrow without a focus check")
                 case .paste:
                     let checksText =

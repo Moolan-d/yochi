@@ -17,6 +17,7 @@ enum ClaudeDialogParser {
     static func parse(_ screen: ANSIScreen) -> DialogParseResult {
         if ClaudeInputBox.locate(in: screen) != nil { return .none }
         if let trust = ClaudeTrustDialogReader.read(screen) { return trust }
+        if let picker = ClaudePickerReader.read(screen) { return picker }
         guard let block = ClaudeOptionBlock(screen: screen) else {
             return ClaudeLooseDialogReader.read(screen)
         }
@@ -1140,10 +1141,12 @@ private enum ClaudeLooseDialogReader {
         guard let last = rows.lastIndex(where: { !$0.isBlank }) else { return .none }
         let footer = rows[last]
         let text = footer.trimmedText
+        let hints = ClaudePickerReader.hints(in: text)
+        let escape = hints.first { $0.key.lowercased() == "esc" }
         // Footers are drawn in one color, never the default.
         let footerColors = Set(footer.visibleRuns.map(\.style.foreground))
         guard footerColors.count == 1, let footerColor = footerColors.first, footerColor != nil,
-            ["to cancel", "to confirm", "to select"].contains(where: text.contains)
+            escape != nil || ["to cancel", "to confirm", "to select"].contains(where: text.contains)
         else { return .none }
         let pointerRow = (max(0, last - 12)..<last).reversed().first { index in
             let row = rows[index]
@@ -1151,15 +1154,33 @@ private enum ClaudeLooseDialogReader {
             let trimmed = row.trimmedText
             return trimmed.hasPrefix("❯ ") && row.run(at: indent)?.style.background == nil
         }
-        guard let pointerRow else { return .none }
         let fullWidth = max(8, screen.columns - 4)
-        let top =
-            (max(0, pointerRow - 25)..<pointerRow).reversed().first {
-                DialogRowScanner.isRule(rows[$0], of: "─", minimumWidth: fullWidth)
-            } ?? max(0, pointerRow - 12)
-        return .unrecognized(
-            ClaudeExcerpt.make(
-                rows: Array(rows[top...last]), footerRows: [last], numbered: [:],
-                reason: "The dialog's options are not numbered."))
+        let top: Int
+        if let pointerRow {
+            top =
+                (max(0, pointerRow - 25)..<pointerRow).reversed().first {
+                    DialogRowScanner.isRule(rows[$0], of: "─", minimumWidth: fullWidth)
+                } ?? max(0, pointerRow - 12)
+        } else if escape != nil, let edge = (0..<last).reversed().first(where: { index in
+            // The edge can carry the effort level: `▔▔ ● high · /effort ▔`.
+            ["▔", "─"].contains { DialogRowScanner.isLabeledRule(rows[index], of: $0, minimumWidth: fullWidth) }
+        }) {
+            // A panel framed by a rule: a notice with nothing to pick, or
+            // a long list such as `/release-notes` whose pointer is far up.
+            top = edge
+        } else {
+            return .none
+        }
+        let inside = rows[top..<last]
+        let lists = pointerRow != nil
+            || inside.contains { ($0.indent ?? 0) <= 6 && $0.trimmedText.hasPrefix("❯ ") }
+        var excerpt = ClaudeExcerpt.make(
+            rows: Array(rows[top...last]), footerRows: [last], numbered: [:],
+            reason: lists ? "The dialog's options are not numbered." : "The dialog has no options.")
+        excerpt.keys = [escape].compactMap { $0 }
+        if !lists, let enter = hints.first(where: { $0.key.lowercased() == "enter" }) {
+            excerpt.keys.insert(enter, at: 0)
+        }
+        return .unrecognized(excerpt)
     }
 }

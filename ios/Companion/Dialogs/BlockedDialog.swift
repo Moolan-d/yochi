@@ -18,6 +18,9 @@ enum BlockedDialogKind: String, Sendable, Hashable, CaseIterable {
     case claudeQuestion
     case claudeQuestionReview
     case claudeWorkspaceTrust
+    /// A slash command's list, such as `/model`: pick one row with the
+    /// arrow keys and Enter, or a letter key the footer names.
+    case claudePicker
 
     var program: ChatProgram { .claude }
 }
@@ -232,12 +235,31 @@ struct BlockedDialog: Sendable, Hashable {
     /// Heeler's own line under the options, about a choice the card leaves
     /// to the terminal: Grok Build's lasting rule cut short to fit.
     var note: String? = nil
+    /// Set for a picker: what lies beyond the rows shown, and its keys.
+    var picker: DialogPicker? = nil
 
     /// The option at a 1-based ordinal.
     func option(_ ordinal: Int) -> DialogOption? {
         options.indices.contains(ordinal - 1) ? options[ordinal - 1] : nil
     }
 
+}
+
+/// A picker's list as far as the screen shows it, and what its footer
+/// binds. Options carry their own numbers, which stay put as the list
+/// scrolls; ordinals count only the rows shown.
+struct DialogPicker: Sendable, Hashable {
+    /// Options above the first one shown.
+    var hiddenAbove: Int { (firstNumber ?? 1) - 1 }
+    /// Options below the last one shown, when the list says how many
+    /// (`… +8 models`); nil with `moreBelow` when only an arrow says so.
+    let hiddenBelow: Int?
+    let moreBelow: Bool
+    /// What Enter does: `set as default`, or nil when the footer is silent.
+    let enterAction: String?
+    /// Letter keys the footer binds besides Enter and Esc.
+    let keys: [DialogKeyHint]
+    let firstNumber: Int?
 }
 
 /// A screen with something dialog-like the parsers could not name or trust.
@@ -259,8 +281,17 @@ struct GenericDialogExcerpt: Sendable, Hashable {
     /// panel without its borders, which wrap at a phone's width, and with
     /// its nerd-font glyphs mapped or dropped. `ruleLine` marks a rule.
     var displayLines: [String]? = nil
+    /// Keys the footer names that the phone offers: Esc, and Enter only on
+    /// a notice with no list, where it cannot act on a row nobody chose.
+    var keys: [DialogKeyHint] = []
 
     static let ruleLine = "───"
+}
+
+/// What a key does, as a dialog's footer words it: `s`, `use this session only`.
+struct DialogKeyHint: Sendable, Hashable {
+    let key: String
+    let action: String
 }
 
 enum DialogParseResult: Sendable, Hashable {

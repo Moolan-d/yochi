@@ -122,7 +122,7 @@ struct DialogRunner {
 
     func run(_ plan: DialogActionPlan, on dialog: BlockedDialog) async -> Outcome {
         guard !plan.steps.contains(where: { if case .paste = $0 { true } else { false } }) else {
-            return .failed("这个回答要输入文字，请在终端中完成")
+            return .failed("这个回答要输入文字，请在电脑上完成")
         }
         guard feed.result.fingerprint?.matches(dialog.fingerprint) == true else {
             return .failed("终端里的对话框已变化，请看最新内容")
@@ -143,15 +143,15 @@ struct DialogRunner {
                     default: message
                     }
                     return .failed(reason)
-                case .unknown: return .failed("按键结果未知，请看终端确认")
+                case .unknown: return .failed("按键结果未知，请在电脑上确认")
                 }
             case .expect(let expectation):
                 let met = await waitForScreen(since: since) { observation in
                     expectation.isMet(by: observation, fingerprint: dialog.fingerprint)
                 }
-                if !met { return .failed("终端画面和预期不一致，已停止按键，请看终端") }
+                if !met { return .failed("终端画面和预期不一致，已停止按键，请在电脑上查看") }
             case .paste:
-                return .failed("这个回答要输入文字，请在终端中完成")
+                return .failed("这个回答要输入文字，请在电脑上完成")
             }
         }
         let confirmed = await waitForScreen(since: since, orWorking: true) { observation in
