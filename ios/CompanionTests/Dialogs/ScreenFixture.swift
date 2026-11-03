@@ -26,7 +26,7 @@ enum ScreenFixture {
         "claude-38-c8-phone-plan-stale-call", "claude-39-c8-phone-question-titled-rule",
         "claude-40-c8-phone-review-titled-rule", "claude-41-c8-phone-question2-padded-rule",
         "claude-42-c8-phone-question-previews", "claude-43-c12-read-file", "claude-44-model-picker",
-        "claude-45-release-notes",
+        "claude-45-release-notes", "claude-46-accept-edits",
     ]
 
     static let all = claude

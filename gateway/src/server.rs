@@ -72,6 +72,8 @@ enum ServerMessage<'a> {
     Items { items: &'a [Item] },
     /// What the Agent is waiting for, or null once it isn't.
     Pending { pending: Option<&'a Pending> },
+    /// Claude Code's permission mode as of its latest message.
+    Mode { mode: &'a str },
 }
 
 #[derive(Deserialize)]
@@ -458,6 +460,7 @@ async fn follow(mut socket: WebSocket, state: AppState, device: String, id: Stri
                 Update::Conversation { supported, items } => ServerMessage::Conversation { supported: *supported, items },
                 Update::Items(items) => ServerMessage::Items { items },
                 Update::Pending(pending) => ServerMessage::Pending { pending: pending.as_ref() },
+                Update::Mode(mode) => ServerMessage::Mode { mode },
             };
             if send(&mut socket, &message).await.is_err() {
                 return;

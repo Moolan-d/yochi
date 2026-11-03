@@ -86,6 +86,8 @@ pub struct Pending {
 pub struct Conversation {
     items: Vec<Item>,
     index: HashMap<String, usize>,
+    /// Claude Code's permission mode as of its latest message.
+    mode: Option<String>,
 }
 
 impl Conversation {
@@ -111,6 +113,12 @@ impl Conversation {
             }
         }
         touched.iter().filter_map(|id| self.index.get(id).map(|&i| self.items[i].clone())).collect()
+    }
+
+    /// `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`, …: Claude
+    /// Code writes it with each message, so a switch shows after the next one.
+    pub fn mode(&self) -> Option<&str> {
+        self.mode.as_deref()
     }
 
     /// The tool call the Agent is blocked on: the last one still running.
@@ -140,6 +148,11 @@ impl Conversation {
     }
 
     fn record(&mut self, record: &Value) -> Vec<String> {
+        if matches!(record["type"].as_str(), Some("permission-mode" | "user")) && record["isSidechain"] != true {
+            if let Some(mode) = record["permissionMode"].as_str().filter(|mode| !mode.is_empty()) {
+                self.mode = Some(mode.to_owned());
+            }
+        }
         if record["isSidechain"] == true || record["isMeta"] == true || record["isVisibleInTranscriptOnly"] == true {
             return Vec::new();
         }
@@ -445,6 +458,20 @@ mod tests {
         let json = serde_json::to_string(conversation.items()).unwrap();
         assert!(!json.contains("secret plan"), "thinking stays in the Gateway");
         assert!(!json.contains("huge"));
+    }
+
+    #[test]
+    fn mode_is_the_latest_permission_mode_record() {
+        let mut conversation = Conversation::default();
+        assert_eq!(conversation.mode(), None);
+        conversation.apply([r#"{"type":"permission-mode","permissionMode":"auto","sessionId":"s"}"#]);
+        assert_eq!(conversation.mode(), Some("auto"));
+        let added = conversation.apply([
+            r#"{"type":"user","uuid":"u1","permissionMode":"plan","message":{"role":"user","content":"plan it"}}"#,
+            r#"{"type":"user","uuid":"u2","isSidechain":true,"permissionMode":"default","message":{"content":"sub"}}"#,
+        ]);
+        assert_eq!(kinds(&added), ["user"], "the mode record is not an item");
+        assert_eq!(conversation.mode(), Some("plan"), "a subagent's mode is not the Agent's");
     }
 
     #[test]

@@ -19,6 +19,12 @@ struct ObserveView: View {
     @State private var keys = KeyPresser()
     @State private var stopping = false
     @State private var stopNotice: String?
+    /// The mode a switch from the phone reached, shown until the transcript
+    /// records a newer one with the next message.
+    @State private var switchedMode: PermissionMode?
+    @State private var seenModes: Set<PermissionMode> = []
+    @State private var switchingMode = false
+    @State private var modeFailure: String?
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -48,6 +54,23 @@ struct ObserveView: View {
 
     private var canSend: Bool {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The mode line when the screen shows it (the transcript has none
+    /// before the first message); else the last switch, else the transcript.
+    private var shownMode: PermissionMode? {
+        screenMode ?? switchedMode ?? conversation.mode
+    }
+
+    /// What the mode line under Claude Code's prompt shows now.
+    private var screenMode: PermissionMode? {
+        screen.screen.flatMap(PermissionMode.read)
+    }
+
+    /// Each press is checked on the screen, which the Gateway doesn't send
+    /// while the Agent works; a dialog hides the mode line too.
+    private var canSwitchMode: Bool {
+        currentSession.status?.state != "working" && !switchingMode && screenMode != nil
     }
 
     /// With nothing to send while the Agent works, the send button stops it.
@@ -119,6 +142,13 @@ struct ObserveView: View {
         .onChange(of: currentSession.status?.state) { _, state in
             if state != "working" { stopNotice = nil }
         }
+        .onChange(of: conversation.mode) { _, mode in
+            switchedMode = nil
+            if let mode { seenModes.insert(mode) }
+        }
+        .onChange(of: screenMode) { _, mode in
+            if let mode { seenModes.insert(mode) }
+        }
         // Returning while a send was in flight restores the draft from before the
         // send; once it is accepted, this view clears it too.
         .onChange(of: delivery) { _, delivery in
@@ -186,12 +216,18 @@ struct ObserveView: View {
                 BannerLabel(text: failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
+            if let modeFailure {
+                BannerLabel(text: modeFailure, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("modeFailure")
+            }
             if let stopNotice {
                 BannerLabel(text: stopNotice, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier("stopNotice")
             }
             if let delivery { DeliveryBanner(delivery: delivery) }
+            if isConversation, let shownMode { modeChip(shownMode) }
             if !isConversation {
                 TerminalKeyBar(keyboardShown: composerFocused,
                                toggleKeyboard: { composerFocused.toggle() }) { key in
@@ -362,6 +398,55 @@ struct ObserveView: View {
             case .unknown:
                 client.remember(.unknown(text: text), host: config.host, session: session.id)
             }
+        }
+    }
+
+    /// A pop-up button: the system menu marks the current mode, and picking
+    /// another one starts the switch; the chip changes once the screen agrees.
+    private func modeChip(_ mode: PermissionMode) -> some View {
+        Menu {
+            Picker("权限模式", selection: Binding(get: { mode }, set: switchMode(to:))) {
+                ForEach(PermissionMode.targets(including: seenModes), id: \.self) { target in
+                    Label(target.title, systemImage: target.symbol).tag(target)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 4) {
+                if switchingMode {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: mode.symbol)
+                }
+                Text(mode.title)
+                Image(systemName: "chevron.up.chevron.down").imageScale(.small)
+            }
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
+        .tint(mode == .bypassPermissions ? .red : .secondary)
+        .disabled(!canSwitchMode)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityLabel("权限模式")
+        .accessibilityValue(mode.title)
+        .accessibilityHint(canSwitchMode ? "按 Shift+Tab 切换，每按一次核对终端画面" : "Agent 工作中或终端里有对话框时不能切换")
+        .accessibilityIdentifier("permissionMode")
+    }
+
+    private func switchMode(to target: PermissionMode) {
+        guard canSwitchMode, target != screenMode else { return }
+        switchingMode = true
+        modeFailure = nil
+        let switcher = PermissionModeSwitcher(
+            feed: screen,
+            press: { keys in await client.pressKeys(session: session.id, keys: keys) },
+            agentWorking: { currentSession.status?.state == "working" })
+        Task {
+            if case .failed(let reason) = await switcher.run(to: target) { modeFailure = reason }
+            // The screen says where it ended, even after a failure.
+            if let reached = screenMode { switchedMode = reached }
+            switchingMode = false
         }
     }
 

@@ -74,8 +74,8 @@ start_picker_session() {
         -- "$(command -v claude)" > /dev/null
 }
 
-# TESTS="testA testB" runs a subset; testDialogFromScreen and
-# testPickerFromScreen run only when named.
+# TESTS="testA testB" runs a subset; testDialogFromScreen,
+# testPickerFromScreen and testPermissionModeFromScreen run only when named.
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -101,7 +101,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         start_dialog_session
         extra="TEST_RUNNER_COMPANION_DIALOG_SESSION_NAME=companion-uitest-dialog"
     fi
-    if [ "$test" = testPickerFromScreen ] || [ "$test" = testNoticeFromScreen ]; then
+    if [ "$test" = testPickerFromScreen ] || [ "$test" = testNoticeFromScreen ] || [ "$test" = testPermissionModeFromScreen ]; then
         start_picker_session
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi

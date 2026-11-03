@@ -87,6 +87,9 @@ final class ConversationFeed {
     private(set) var phase: Phase = .connecting
     private(set) var items: [ConversationItem] = []
     private(set) var pending: PendingQuestion?
+    /// The permission mode as of the Agent's latest message; nil when the
+    /// transcript has none or names one the app doesn't know.
+    private(set) var mode: PermissionMode?
 
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
@@ -143,6 +146,8 @@ final class ConversationFeed {
         switch message {
         case .conversation(let supported, let items):
             self.items = items.filter { $0.kind != .other }
+            // The Gateway says the mode again after a fresh conversation.
+            mode = nil
             phase = supported ? .following : .unsupported
         case .items(let changed):
             for item in changed where item.kind != .other {
@@ -154,6 +159,8 @@ final class ConversationFeed {
             }
         case .pending(let pending):
             self.pending = pending
+        case .mode(let mode):
+            self.mode = PermissionMode(rawValue: mode)
         case .closed(let reason):
             pending = nil
             phase = .closed(reason: reason == "finished" ? "会话已结束" : reason)
@@ -167,11 +174,12 @@ enum ConversationMessage: Decodable {
     case conversation(supported: Bool, items: [ConversationItem])
     case items([ConversationItem])
     case pending(PendingQuestion?)
+    case mode(String)
     case closed(reason: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, supported, items, pending, reason
+        case type, supported, items, pending, mode, reason
     }
 
     init(from decoder: Decoder) throws {
@@ -184,6 +192,8 @@ enum ConversationMessage: Decodable {
             self = .items(try c.decode([ConversationItem].self, forKey: .items))
         case "pending":
             self = .pending(try c.decodeIfPresent(PendingQuestion.self, forKey: .pending))
+        case "mode":
+            self = .mode(try c.decode(String.self, forKey: .mode))
         case "closed":
             self = .closed(reason: (try? c.decode(String.self, forKey: .reason)) ?? "会话已结束")
         default:

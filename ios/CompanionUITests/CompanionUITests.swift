@@ -442,6 +442,44 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// The mode chip reads Claude Code's mode line and switches with
+    /// Shift+Tab. Nothing is sent, and the mode isn't saved anywhere.
+    @MainActor
+    func testPermissionModeFromScreen() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        let chip = app.buttons["permissionMode"]
+        XCTAssert(chip.waitForExistence(timeout: 30), "no mode chip")
+        let deadline = Date.now.addingTimeInterval(15)
+        while !chip.isEnabled, Date.now < deadline { RunLoop.current.run(until: .now.addingTimeInterval(0.3)) }
+        XCTAssert(chip.isEnabled, "the mode chip stays disabled")
+        let before = chip.value as? String ?? ""
+        snapshot("1 mode")
+
+        let target = before == "计划" ? "普通" : "计划"
+        chip.tap()
+        let option = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", target)).firstMatch
+        XCTAssert(option.waitForExistence(timeout: 5), "no \(target) in the menu")
+        snapshot("2 menu")
+        option.tap()
+        let switched = NSPredicate(format: "value == %@", target)
+        expectation(for: switched, evaluatedWith: chip)
+        waitForExpectations(timeout: 40)
+        XCTAssertFalse(app.descendants(matching: .any)["modeFailure"].exists, "the switch reported a failure")
+        snapshot("3 switched")
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testNewSessionSheet() throws {
         let app = launchUnpaired()

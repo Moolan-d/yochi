@@ -173,6 +173,8 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 {"type": "items", "items": [ … ]}
 // Agent 在等什么；不再等待时为 null
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
+// 权限模式，取 transcript 最近一条消息记下的；变化时、以及每次 conversation 之后发
+{"type": "mode", "mode": "acceptEdits"}
 // 会话结束或读取失败
 {"type": "closed", "reason": "finished"}
 ```
@@ -199,6 +201,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - 首次只发最近 300 条，最多回溯 transcript 的最后 2000 行。
 - `tool.state` 为 `running` / `done` / `error`；结果到达时同一 `id` 的条目被替换。
 - `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
+- `mode` 原样转发 Claude Code 的值（`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`，以后可能有新值）。transcript 只在发消息时记模式：第一条消息之前没有 `mode`，在终端里切换后要到下一条消息才更新。App 优先显示屏幕底部的模式提示，切换按「按键」逐次发 `shift+tab`（ADR 0005）。
 - Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。
 - Gateway 在有 App 订阅时才读取：Agent 工作或等待时、以及状态变化后几秒内每秒一次，其余每 4 秒。core 的 `file.read` 每次读取整个文件，超过 64 MB 的 transcript 读取失败。
 

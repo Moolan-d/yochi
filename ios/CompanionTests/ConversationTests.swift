@@ -77,6 +77,19 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(feed.phase, .closed(reason: "会话已结束"))
     }
 
+    func testModeIsTheLatestAndForgottenWithAFreshConversation() throws {
+        let feed = ConversationFeed()
+        feed.apply(try decode(#"{"type":"conversation","supported":true,"items":[]}"#))
+        XCTAssertNil(feed.mode)
+        feed.apply(try decode(#"{"type":"mode","mode":"acceptEdits"}"#))
+        XCTAssertEqual(feed.mode, .acceptEdits)
+        feed.apply(try decode(#"{"type":"mode","mode":"someNewMode"}"#))
+        XCTAssertNil(feed.mode)
+        feed.apply(try decode(#"{"type":"mode","mode":"plan"}"#))
+        feed.apply(try decode(#"{"type":"conversation","supported":true,"items":[]}"#))
+        XCTAssertNil(feed.mode)
+    }
+
     func testClaudeCodeIsRecognisedByStatusOrCommand() throws {
         func session(_ program: String, app: String?) throws -> Session {
             let status = app.map { #"{"state":"idle","app":"\#($0)"}"# } ?? "null"

@@ -15,6 +15,8 @@ pub enum Update {
     /// Items added or changed since the last update.
     Items(Vec<Item>),
     Pending(Option<Pending>),
+    /// The permission mode as of the Agent's latest message.
+    Mode(String),
 }
 
 #[derive(Default)]
@@ -24,6 +26,7 @@ pub struct Follower {
     /// What the app was last told, so ticks only send changes.
     supported: Option<bool>,
     pending: Option<Pending>,
+    mode: Option<String>,
 }
 
 impl Follower {
@@ -37,6 +40,7 @@ impl Follower {
         let Some(located) = located else {
             self.following = None;
             self.conversation = Conversation::default();
+            self.mode = None;
             if self.supported != Some(false) {
                 self.supported = Some(false);
                 updates.push(Update::Conversation { supported: false, items: Vec::new() });
@@ -71,6 +75,12 @@ impl Follower {
         } else if !changed.is_empty() {
             updates.push(Update::Items(changed));
         }
+        // A fresh conversation makes the app forget the mode; say it again.
+        let mode = self.conversation.mode().map(str::to_owned);
+        if mode.is_some() && (fresh || mode != self.mode) {
+            updates.push(Update::Mode(mode.clone().expect("some")));
+        }
+        self.mode = mode;
         self.pending_update(session, &mut updates);
         Ok(updates)
     }
