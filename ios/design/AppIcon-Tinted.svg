@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs><path id="sil" d="M 296 392
+  C 336 376 378 362 424 352
+  C 454 246 540 180 644 180
+  C 846 180 1004 382 1040 600
+  L 1040 1060 L 404 1060
+  C 384 1032 344 1006 292 994
+  C 340 966 362 926 366 884
+  C 352 740 372 606 414 506
+  C 418 476 420 448 420 424
+  C 376 418 334 408 296 392 Z"/><clipPath id="c"><use href="#sil"/></clipPath></defs>
+  <rect width="1024" height="1024" fill="#000000"/>
+  <use href="#sil" fill="#5C5C5C"/>
+  <path clip-path="url(#c)" d="M 1060 400 C 860 500 796 760 840 1060 L 1060 1060 Z" fill="#FFFFFF"/>
+  <path d="M 478 336 L 526 368 L 478 400" fill="none" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 554 400 H 594" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round"/>
+</svg>

@@ -34,6 +34,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.companion.app$(BUNDLE_ID_SUFFIX)
+        # Home-screen name; the project, bundle ID and URL scheme stay "companion".
+        INFOPLIST_KEY_CFBundleDisplayName: Collie
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
