@@ -52,6 +52,15 @@ struct ObserveView: View {
         return false
     }
 
+    private var queued: QueuedMessage? {
+        client.queuedMessage(session: session.id)
+    }
+
+    /// While the Agent works a message waits on the phone for the turn to end.
+    private var queuesMessage: Bool {
+        currentSession.status?.state == "working"
+    }
+
     private var canSend: Bool {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -227,6 +236,12 @@ struct ObserveView: View {
                     .accessibilityIdentifier("stopNotice")
             }
             if let delivery { DeliveryBanner(delivery: delivery) }
+            if let queued {
+                QueuedBanner(message: queued,
+                             release: queued.release(state: currentSession.status?.state, turn: currentSession.turn),
+                             send: { client.sendQueued(session: session.id) },
+                             withdraw: withdrawQueued)
+            }
             if isConversation, let shownMode { modeChip(shownMode) }
             if !isConversation {
                 TerminalKeyBar(keyboardShown: composerFocused,
@@ -308,7 +323,8 @@ struct ObserveView: View {
                             .contentShape(Rectangle().inset(by: -5))
                         }
                         .disabled(!canSend)
-                        .accessibilityLabel("发送消息")
+                        .accessibilityLabel(queuesMessage ? "排队发送" : "发送消息")
+                        .accessibilityHint(queuesMessage ? "这一轮结束后发出" : "")
                         .accessibilityIdentifier("sendAgentMessage")
                     }
                 }
@@ -377,28 +393,34 @@ struct ObserveView: View {
     private func send(force: Bool = false) {
         guard canSend else { return }
         let text = draft
+        if queuesMessage {
+            client.enqueue(text, session: session.id, turn: currentSession.turn)
+            AgentMessageStore.clearDraft(host: config.host, session: session.id)
+            draft = ""
+            return
+        }
+        // Marked before the task starts, so a second tap can't send it twice.
         client.remember(.sending(text: text), host: config.host, session: session.id)
         Task {
-            let result = await client.sendMessage(session: session.id, text: text, force: force)
-            switch result {
-            case .accepted(let turn, let status, let started):
-                client.remember(.sent(text: text, turn: turn, status: status, started: started),
-                                host: config.host, session: session.id)
+            switch await client.submit(text, host: config.host, session: session.id, force: force) {
+            case .accepted:
                 // Clear the persisted draft before any view teardown: leaving
                 // while sending must not make the sent text reappear as a draft.
                 AgentMessageStore.clearDraft(host: config.host, session: session.id)
                 draft = ""
                 updateResponse()
-            case .failed(let kind, _) where kind == "timeout" || kind == "unknown":
-                client.remember(.unknown(text: text), host: config.host, session: session.id)
-            case .failed(let kind, let message):
-                client.remember(.failed(text: text, kind: kind, message: message),
-                                host: config.host, session: session.id)
+            case .failed(let kind, _):
                 confirmingBlocked = kind == "blocked"
             case .unknown:
-                client.remember(.unknown(text: text), host: config.host, session: session.id)
+                break
             }
         }
+    }
+
+    /// The queued text goes back ahead of whatever the draft holds now.
+    private func withdrawQueued() {
+        guard let text = client.withdrawQueued(session: session.id) else { return }
+        draft = draft.isEmpty ? text : text + "\n\n" + draft
     }
 
     /// A pop-up button: the system menu marks the current mode, and picking
@@ -466,6 +488,51 @@ struct ObserveView: View {
         guard let delivery, case .sent(let text, let sentTurn, let status, _) = delivery,
               currentSession.turn > sentTurn else { return }
         client.remember(.turnCompleted(text: text, status: status), host: config.host, session: session.id)
+    }
+}
+
+private struct QueuedBanner: View {
+    let message: QueuedMessage
+    let release: QueuedMessage.Release
+    let send: () -> Void
+    let withdraw: () -> Void
+
+    private var title: String {
+        if let failure = message.failure { return "没有发出：\(failure)" }
+        return release == .ask ? "这一轮早已结束，要现在发吗？" : "排队中 · 这一轮结束后发出"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(message.text)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } icon: {
+                Image(systemName: message.failure == nil ? "clock" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(message.failure == nil ? Color.secondary : Color.red)
+            }
+            .font(.footnote)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("queuedMessage")
+            if release == .ask {
+                Button("发送", action: send)
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("sendQueued")
+            }
+            Button("撤回", action: withdraw)
+                .buttonStyle(.bordered)
+                .accessibilityHint("放回输入框")
+                .accessibilityIdentifier("withdrawQueued")
+        }
+        .controlSize(.small)
+        .buttonBorderShape(.capsule)
+        .frame(minHeight: 44)
+        .padding(.horizontal, 4)
     }
 }
 

@@ -62,6 +62,10 @@ final class GatewayClient {
     /// Latest Delivery per host + session; memory only, so leaving and returning
     /// to a terminal keeps its status without restoring stale drafts.
     private(set) var deliveries: [String: AgentDelivery] = [:]
+    /// Messages waiting for their session's turn to end, by host + session.
+    private(set) var queued: [String: QueuedMessage] = AgentMessageStore.allQueued()
+    /// The Gateway this client follows, which queued messages belong to.
+    private var host: String?
 
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
@@ -83,8 +87,86 @@ final class GatewayClient {
         deliveries[AgentMessageStore.key(host: host, session: session)] = delivery
     }
 
+    func queuedMessage(session: String) -> QueuedMessage? {
+        host.flatMap { queued[AgentMessageStore.key(host: $0, session: session)] }
+    }
+
+    /// Holds `text` until the turn in progress ends; a second message joins
+    /// the first after a blank line.
+    func enqueue(_ text: String, session: String, turn: UInt64) {
+        guard let host else { return }
+        let key = AgentMessageStore.key(host: host, session: session)
+        var message = queued[key] ?? QueuedMessage(text: "", turn: turn)
+        message.text = message.text.isEmpty ? text : message.text + "\n\n" + text
+        message.failure = nil
+        setQueued(message, key: key)
+    }
+
+    /// Takes the queued message back; its text is returned to the draft.
+    func withdrawQueued(session: String) -> String? {
+        guard let host else { return nil }
+        let key = AgentMessageStore.key(host: host, session: session)
+        let text = queued[key]?.text
+        setQueued(nil, key: key)
+        return text
+    }
+
+    /// Sends the queued message now, as the user decided.
+    func sendQueued(session: String) {
+        guard let host, let text = withdrawQueued(session: session) else { return }
+        Task { await submitQueued(text, host: host, session: session) }
+    }
+
+    /// Sends one Agent Message and records its Delivery.
+    @discardableResult
+    func submit(_ text: String, host: String, session: String, force: Bool = false) async -> AgentMessageResult {
+        remember(.sending(text: text), host: host, session: session)
+        let result = await sendMessage(session: session, text: text, force: force)
+        switch result {
+        case .accepted(let turn, let status, let started):
+            remember(.sent(text: text, turn: turn, status: status, started: started), host: host, session: session)
+        case .failed(let kind, _) where kind == "timeout" || kind == "unknown":
+            remember(.unknown(text: text), host: host, session: session)
+        case .failed(let kind, let message):
+            remember(.failed(text: text, kind: kind, message: message), host: host, session: session)
+        case .unknown:
+            remember(.unknown(text: text), host: host, session: session)
+        }
+        return result
+    }
+
+    private func setQueued(_ message: QueuedMessage?, key: String) {
+        queued[key] = message
+        AgentMessageStore.saveQueued(message, key: key)
+    }
+
+    /// Sends what waited for a turn that has now ended; runs on every session list.
+    private func releaseQueued() {
+        guard let host else { return }
+        for session in sessions {
+            let key = AgentMessageStore.key(host: host, session: session.id)
+            guard let message = queued[key],
+                  message.release(state: session.status?.state, turn: session.turn) == .send else { continue }
+            setQueued(nil, key: key)
+            Task { await submitQueued(message.text, host: host, session: session.id) }
+        }
+    }
+
+    /// A refused message goes back in the queue, marked, so its text isn't
+    /// lost; one that may have arrived is not queued again.
+    private func submitQueued(_ text: String, host: String, session: String) async {
+        guard case .failed(let kind, let message) = await submit(text, host: host, session: session),
+              kind != "timeout", kind != "unknown" else { return }
+        let key = AgentMessageStore.key(host: host, session: session)
+        var queued = self.queued[key] ?? QueuedMessage(text: "", turn: sessions.first { $0.id == session }?.turn ?? 0)
+        queued.text = queued.text.isEmpty ? text : text + "\n\n" + queued.text
+        queued.failure = AgentDelivery.failed(text: text, kind: kind, message: message).state
+        setQueued(queued, key: key)
+    }
+
     func connect(_ config: GatewayConfig) {
         disconnect()
+        host = config.host
         loop = Task { await run(config) }
     }
 
@@ -274,6 +356,7 @@ final class GatewayClient {
                 coreConnected = connected
                 self.sessions = sessions
                 self.spaces = spaces
+                releaseQueued()
             case .sent(let id, let turn, let status, let started):
                 complete(id: id, with: .sent(turn: turn, status: status, started: started))
             case .sendFailed(let id, let kind, let message), .keysFailed(let id, let kind, let message):

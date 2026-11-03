@@ -26,7 +26,8 @@ struct SessionListView: View {
                         }
                         ForEach(tab.entries) { entry in
                             NavigationLink(value: entry.session) {
-                                SessionRow(session: entry.session, place: entry.place)
+                                SessionRow(session: entry.session, place: entry.place,
+                                           queued: client.queuedMessage(session: entry.session.id) != nil)
                             }
                         }
                     }
@@ -127,6 +128,8 @@ private struct TabHeader: View {
 private struct SessionRow: View {
     let session: Session
     let place: String?
+    /// A message waits on this iPhone for the turn to end.
+    let queued: Bool
 
     /// Status leads the row in a slot of its own, so it lines up across rows
     /// and stays clear of the list's disclosure chevron at the end.
@@ -149,6 +152,11 @@ private struct SessionRow: View {
             Text(session.title)
                 .font(.headline)
                 .lineLimit(1)
+            if queued {
+                Label("排队中", systemImage: "clock")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             if let place {
                 Text(place)
                     .font(.subheadline)

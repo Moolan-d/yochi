@@ -19,15 +19,66 @@ enum AgentMessageStore {
         UserDefaults.standard.removeObject(forKey: "agent-message.draft.\(key(host: host, session: session))")
     }
 
+    /// Every queued message kept on this iPhone, by `key(host:session:)`.
+    static func allQueued() -> [String: QueuedMessage] {
+        let defaults = UserDefaults.standard
+        var queued: [String: QueuedMessage] = [:]
+        for (key, value) in defaults.dictionaryRepresentation() where key.hasPrefix(queuedPrefix) {
+            guard let data = value as? Data, let message = try? JSONDecoder().decode(QueuedMessage.self, from: data) else {
+                continue
+            }
+            queued[String(key.dropFirst(queuedPrefix.count))] = message
+        }
+        return queued
+    }
+
+    static func saveQueued(_ message: QueuedMessage?, key: String) {
+        if let message, let data = try? JSONEncoder().encode(message) {
+            UserDefaults.standard.set(data, forKey: queuedPrefix + key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: queuedPrefix + key)
+        }
+    }
+
+    private static let queuedPrefix = "agent-message.queued."
+
     #if DEBUG
     /// UI tests start from nothing; several of them share one test session.
     static func clearAllDrafts() {
         let defaults = UserDefaults.standard
-        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("agent-message.draft.") {
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix("agent-message.draft.") || key.hasPrefix(queuedPrefix) {
             defaults.removeObject(forKey: key)
         }
     }
     #endif
+}
+
+/// An Agent Message held on this iPhone while the Agent works, sent once the
+/// turn ends. One per session; kept like the draft, so leaving the page or
+/// the app doesn't lose it.
+struct QueuedMessage: Codable, Equatable {
+    var text: String
+    /// The last completed turn when it was queued: the turn it waits for
+    /// ends as `turn + 1`.
+    let turn: UInt64
+    /// Why sending it didn't go through; it then waits for the user.
+    var failure: String?
+
+    enum Release: Equatable {
+        case wait
+        case send
+        /// More turns ended than the one it waited for (work went on at the
+        /// desktop), or sending failed: the user decides.
+        case ask
+    }
+
+    /// What to do with it now. A turn that ends waiting on the user (blocked)
+    /// keeps it queued until the dialog is handled.
+    func release(state: String?, turn now: UInt64) -> Release {
+        if failure != nil || now > turn + 1 { return .ask }
+        return state == "idle" || state == "done" ? .send : .wait
+    }
 }
 
 /// The result of one submitted Agent Message, from local draft to a completed turn.

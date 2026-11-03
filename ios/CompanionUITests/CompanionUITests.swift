@@ -480,6 +480,57 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// A message sent while Claude Code works waits on the phone, can be
+    /// taken back into the draft, and goes out once the turn ends. The turn
+    /// only sleeps, in a folder under build/.
+    @MainActor
+    func testMessageQueuedWhileWorking() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_PICKER_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_PICKER_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Claude Code session")
+        session.tap()
+        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        // Claude Code takes a moment to draw its prompt.
+        RunLoop.current.run(until: .now.addingTimeInterval(5))
+        send(app, "In the foreground, not in the background, run the shell command `python3 -c 'import time; time.sleep(40)'`, then reply with just: done")
+        XCTAssert(app.buttons["stopAgent"].waitForExistence(timeout: 30), "the Agent never started working")
+
+        let field = composer(app)
+        field.tap()
+        field.typeText("Queued from the phone")
+        let queue = app.buttons["排队发送"]
+        XCTAssert(queue.exists, "sending while working doesn't queue")
+        queue.tap()
+        let banner = app.descendants(matching: .any)["queuedMessage"]
+        XCTAssert(banner.waitForExistence(timeout: 5), "no queued message")
+        XCTAssert(banner.label.contains("排队中"), "the queued message reads \(banner.label)")
+        snapshot("1 queued")
+
+        app.buttons["withdrawQueued"].tap()
+        XCTAssert(banner.waitForNonExistence(timeout: 5), "withdrawing left it queued")
+        XCTAssertEqual(field.value as? String, "Queued from the phone", "the text did not return to the draft")
+        if app.buttons["排队发送"].exists {
+            app.buttons["排队发送"].tap()
+            XCTAssert(banner.waitForExistence(timeout: 5), "no queued message after queuing again")
+            XCTAssert(banner.waitForNonExistence(timeout: 120), "the queued message was never sent")
+        } else {
+            // The turn ended while withdrawing; the plain send still works.
+            app.buttons["发送消息"].tap()
+        }
+        XCTAssert(text(app, containing: "Queued from the phone").waitForExistence(timeout: 30),
+                  "the queued message is not in the conversation")
+        snapshot("2 sent")
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testNewSessionSheet() throws {
         let app = launchUnpaired()
