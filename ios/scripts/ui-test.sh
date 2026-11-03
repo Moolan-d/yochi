@@ -102,7 +102,7 @@ start_changes_repo() {
 # testPickerFromScreen, testPermissionModeFromScreen and
 # testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
 # testChangesPage run only when named.
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory}; do
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done

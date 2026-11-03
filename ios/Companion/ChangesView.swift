@@ -271,7 +271,7 @@ struct DiffView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(diff.hunks) { hunk in
                 HStack(spacing: 6) {
-                    Text("@@ 第 \(hunk.line) 行").fontWeight(.semibold)
+                    Text("@@ 第 \(hunk.line) 行").fontWeight(.semibold).fixedSize()
                     Text(hunk.context).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .font(.system(.footnote, design: .monospaced))
@@ -296,9 +296,11 @@ private struct DiffLineRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
+            // Never wrapped; wider than the estimate at the largest text sizes.
             Text(String(line.number))
                 .foregroundStyle(.secondary)
-                .frame(width: numberWidth, alignment: .trailing)
+                .fixedSize()
+                .frame(minWidth: numberWidth, alignment: .trailing)
             Text(sign)
                 .foregroundStyle(signColor)
             VStack(alignment: .leading, spacing: 0) {

@@ -265,7 +265,13 @@ struct ObserveView: View {
                              send: { client.sendQueued(session: session.id) },
                              withdraw: withdrawQueued)
             }
-            if isConversation, let shownMode { modeChip(shownMode) }
+            if isConversation, shownMode != nil || conversation.todoProgress != nil {
+                HStack(spacing: 10) {
+                    if let shownMode { modeChip(shownMode).layoutPriority(1) }
+                    if let progress = conversation.todoProgress { TodoProgressLine(progress: progress) }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
             if !slashMatches.isEmpty {
                 SlashSuggestions(commands: slashMatches, pick: pickCommand)
             }
@@ -584,7 +590,6 @@ struct ObserveView: View {
         .controlSize(.small)
         .tint(mode == .bypassPermissions ? .red : .secondary)
         .disabled(!canSwitchMode)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .accessibilityLabel("权限模式")
         .accessibilityValue(mode.title)
         .accessibilityHint(canSwitchMode ? "按 Shift+Tab 切换，每按一次核对终端画面" : "Agent 工作中或终端里有对话框时不能切换")

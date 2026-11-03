@@ -6,7 +6,9 @@ struct ConversationItem: Decodable, Identifiable, Equatable {
     enum Kind: String, Decodable {
         /// task: a subagent or background task reporting back; `summary`,
         /// `state` and its report in `text`.
-        case user, agent, tool, command, notice, task, other
+        /// todos: the Agent's to-do list at that point, in `todos`.
+        /// peer: a message to or from another Agent; `direction`, `name`, `text`.
+        case user, agent, tool, command, notice, task, todos, peer, other
     }
 
     enum ToolState: String, Decodable {
@@ -25,9 +27,15 @@ struct ConversationItem: Decodable, Identifiable, Equatable {
     let questions: [AgentQuestion]?
     /// Question text → the chosen label, once answered.
     let answers: [String: String]?
+    /// Edit, MultiEdit and Write, once done: what changed.
+    let edit: EditInfo?
+    /// Agent: the subtask it runs.
+    let agent: Subtask?
+    let todos: [TodoEntry]?
+    let direction: PeerDirection?
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, text, name, summary, state, output, questions, answers
+        case id, kind, text, name, summary, state, output, questions, answers, edit, agent, todos = "items", direction
     }
 
     init(from decoder: Decoder) throws {
@@ -42,7 +50,168 @@ struct ConversationItem: Decodable, Identifiable, Equatable {
         output = try c.decodeIfPresent(String.self, forKey: .output)
         questions = try? c.decodeIfPresent([AgentQuestion].self, forKey: .questions)
         answers = try? c.decodeIfPresent([String: String].self, forKey: .answers)
+        edit = try? c.decodeIfPresent(EditInfo.self, forKey: .edit)
+        agent = try? c.decodeIfPresent(Subtask.self, forKey: .agent)
+        todos = try? c.decodeIfPresent([TodoEntry].self, forKey: .todos)
+        direction = try? c.decodeIfPresent(PeerDirection.self, forKey: .direction)
     }
+}
+
+/// What an Edit or Write changed, as hunks of a unified diff.
+struct EditInfo: Decodable, Equatable {
+    let path: String
+    let added: Int
+    let deleted: Int
+    let patch: String
+    /// Write made a new file; the patch is its text.
+    let created: Bool
+    /// The Gateway kept only the start of the diff.
+    let truncated: Bool
+
+    var name: String { path.split(separator: "/").last.map(String.init) ?? path }
+
+    var directory: String {
+        guard let slash = path.lastIndex(of: "/"), slash != path.startIndex else { return "/" }
+        return String(path[..<slash])
+    }
+
+    /// 「编辑 A.swift」 or 「新建 A.swift，12 行」.
+    var title: String { created ? "新建 \(name)，\(added) 行" : "编辑 \(name)" }
+
+    var accessibilityLabel: String {
+        if created { return "新建 \(name)，\(added) 行，在 \(directory)" }
+        return "编辑 \(name)，增加 \(added) 行，删除 \(deleted) 行，在 \(directory)"
+    }
+
+    private enum CodingKeys: String, CodingKey { case path, added, deleted, patch, created, truncated }
+
+    init(path: String, added: Int, deleted: Int, patch: String, created: Bool = false, truncated: Bool = false) {
+        self.path = path
+        self.added = added
+        self.deleted = deleted
+        self.patch = patch
+        self.created = created
+        self.truncated = truncated
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        added = try c.decodeIfPresent(Int.self, forKey: .added) ?? 0
+        deleted = try c.decodeIfPresent(Int.self, forKey: .deleted) ?? 0
+        patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
+        created = try c.decodeIfPresent(Bool.self, forKey: .created) ?? false
+        truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+    }
+}
+
+/// A subtask the Agent started with its Agent tool.
+struct Subtask: Decodable, Equatable {
+    let name: String
+    /// The subagent type, such as Explore.
+    let type: String?
+    /// By the Mac's clock, from the transcript.
+    let startedMs: Int64?
+    let durationMs: Int64?
+    /// Runs on after the call returns; a later report ends it.
+    let background: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case name, type, startedMs = "started_ms", durationMs = "duration_ms", background
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        type = try c.decodeIfPresent(String.self, forKey: .type)
+        startedMs = try c.decodeIfPresent(Int64.self, forKey: .startedMs)
+        durationMs = try c.decodeIfPresent(Int64.self, forKey: .durationMs)
+        background = try c.decodeIfPresent(Bool.self, forKey: .background) ?? false
+    }
+
+    /// 「运行中 12s」, 「后台 · 12s」, 「用时 2m 30s」; nil when there is nothing to time.
+    func timing(state: ConversationItem.ToolState?, now: Date) -> String? {
+        switch state {
+        case .running, nil:
+            guard let startedMs else { return background ? "后台" : "运行中" }
+            let elapsed = Elapsed.text(milliseconds: Int64(now.timeIntervalSince1970 * 1000) - startedMs)
+            return background ? "后台 · \(elapsed)" : "运行中 \(elapsed)"
+        case .done:
+            return durationMs.map { "用时 \(Elapsed.text(milliseconds: $0))" }
+        case .error:
+            return "失败"
+        }
+    }
+}
+
+/// Elapsed time as the app writes it: 12s, 2m 30s, 1h 5m. Negative (a
+/// clock ahead of the Mac's) counts as zero.
+enum Elapsed {
+    static func text(milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds / 1000)
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
+        return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
+    }
+
+    /// The same, for VoiceOver: 12 秒, 2 分 30 秒.
+    static func spoken(milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds / 1000)
+        if seconds < 60 { return "\(seconds) 秒" }
+        if seconds < 3600 { return "\(seconds / 60) 分 \(seconds % 60) 秒" }
+        return "\(seconds / 3600) 小时 \(seconds % 3600 / 60) 分"
+    }
+}
+
+struct TodoEntry: Decodable, Equatable {
+    enum Status: String, Decodable {
+        case pending, inProgress = "in_progress", completed
+    }
+
+    let text: String
+    /// What the Agent is doing while it is in progress.
+    let active: String?
+    let status: Status
+
+    private enum CodingKeys: String, CodingKey { case text, active, status }
+
+    init(text: String, active: String? = nil, status: Status) {
+        self.text = text
+        self.active = active
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        active = try c.decodeIfPresent(String.self, forKey: .active)
+        status = (try? c.decode(Status.self, forKey: .status)) ?? .pending
+    }
+}
+
+/// The latest to-do list's progress, for the line above the composer:
+/// 「正在：修复水印（3/7）」. Nil when nothing is in progress.
+struct TodoProgress: Equatable {
+    let doing: String
+    let done: Int
+    let total: Int
+
+    init?(items: [ConversationItem]) {
+        guard let list = items.last(where: { $0.kind == .todos })?.todos,
+              let current = list.first(where: { $0.status == .inProgress }) else { return nil }
+        doing = current.active.flatMap { $0.isEmpty ? nil : $0 } ?? current.text
+        done = list.count { $0.status == .completed }
+        total = list.count
+    }
+
+    /// An `activeForm` that already says 正在 isn't said twice.
+    private var line: String { doing.hasPrefix("正在") ? doing : "正在：\(doing)" }
+    var text: String { "\(line)（\(done)/\(total)）" }
+    var accessibilityLabel: String { "\(line)，已完成 \(done) 项，共 \(total) 项" }
+}
+
+enum PeerDirection: String, Decodable {
+    case sent, received
 }
 
 /// One question of Claude Code's AskUserQuestion.
@@ -93,6 +262,8 @@ final class ConversationFeed {
 
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
+
+    var todoProgress: TodoProgress? { TodoProgress(items: items) }
 
     /// The tool call a pending question is about, when the transcript shows it.
     var pendingTool: ConversationItem? {

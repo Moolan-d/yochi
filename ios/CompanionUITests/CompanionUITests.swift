@@ -586,6 +586,54 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// Edit, to-do, subtask and peer cards in the DEBUG sample conversation,
+    /// at the default text size and an accessibility one.
+    @MainActor
+    func testConversationCards() throws {
+        for size in [nil, "UICTContentSizeCategoryAccessibilityL"] {
+            let app = XCUIApplication()
+            if let size { app.launchArguments += ["-UIPreferredContentSizeCategoryName", size] }
+            app.launchEnvironment["COMPANION_SAMPLE_CONVERSATION"] = "1"
+            app.launch()
+            let suffix = size == nil ? "" : "-large"
+
+            let progress = app.descendants(matching: .any)["todoProgress"]
+            XCTAssertTrue(progress.waitForExistence(timeout: 10))
+            XCTAssertEqual(progress.label, "正在查路线图，已完成 2 项，共 3 项")
+            let lists = app.buttons.matching(identifier: "todosRow")
+            XCTAssertEqual(lists.count, 2)
+            XCTAssertEqual(lists.element(boundBy: 1).value as? String, "已展开")
+            XCTAssertEqual(lists.element(boundBy: 0).value as? String, "已收起")
+            XCTAssertTrue(app.staticTexts["查路线图"].exists || app.otherElements["查路线图，进行中"].exists
+                          || app.descendants(matching: .any)["查路线图，进行中"].exists)
+            snapshot("cards-bottom\(suffix)")
+
+            let subtask = app.descendants(matching: .any).matching(identifier: "subtaskRow").firstMatch
+            scrollUntilHittable(subtask, in: app)
+            XCTAssertEqual(subtask.label, "子任务 查路线图剩余项，运行中")
+            let peer = app.buttons.matching(identifier: "peerRow").element(boundBy: 1)
+            XCTAssertEqual(peer.label, "来自 web-session：要，网页版下周一起改。先把 iOS 的提交了。")
+
+            let edit = app.buttons.matching(identifier: "editRow").firstMatch
+            scrollUntilHittable(edit, in: app)
+            XCTAssertTrue(edit.label.hasPrefix("编辑 SessionListView.swift，增加 3 行，删除 1 行，在 /Users/me/app/ios/Companion"))
+            edit.tap()
+            let added = app.descendants(matching: .any)["第 43 行，增加：            } description: {"]
+            XCTAssertTrue(added.waitForExistence(timeout: 5), "the edit's diff did not open")
+            snapshot("cards-edit\(suffix)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    private func scrollUntilHittable(_ element: XCUIElement, in app: XCUIApplication) {
+        let list = app.scrollViews["conversation"]
+        for _ in 0..<10 where !(element.exists && element.isHittable) {
+            list.swipeDown()
+        }
+        XCTAssertTrue(element.isHittable, "\(element) is not on screen")
+    }
+
     /// The Changes page of a session whose directory has a modified and a new
     /// file, one file's diff, and 「让 Agent 提交」 filling the draft.
     @MainActor

@@ -58,8 +58,9 @@ struct ConversationPane: View {
     private var list: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
+                let latestTodos = feed.items.last { $0.kind == .todos }?.id
                 ForEach(feed.items) { item in
-                    ConversationRow(item: item)
+                    ConversationRow(item: item, latestTodos: item.id == latestTodos)
                 }
                 if working {
                     Label {
@@ -156,6 +157,8 @@ struct ConversationPane: View {
 
 struct ConversationRow: View {
     let item: ConversationItem
+    /// The newest to-do list opens; earlier ones fold.
+    var latestTodos = false
 
     var body: some View {
         switch item.kind {
@@ -175,7 +178,17 @@ struct ConversationRow: View {
             MarkdownText(text: item.text ?? "")
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
-            ToolRow(item: item)
+            if let edit = item.edit {
+                EditRow(item: item, edit: edit)
+            } else if let subtask = item.agent {
+                SubtaskRow(item: item, subtask: subtask)
+            } else {
+                ToolRow(item: item)
+            }
+        case .todos:
+            TodosRow(item: item, latest: latestTodos)
+        case .peer:
+            PeerRow(item: item)
         case .command:
             CommandRow(item: item)
         case .task:
