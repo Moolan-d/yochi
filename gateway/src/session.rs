@@ -14,13 +14,16 @@ pub struct Session {
     pub program: Option<String>,
     pub cwd: String,
     pub status: Option<Status>,
+    /// When the status word last changed, in ms since the epoch by the Mac's clock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_ms: Option<u64>,
     /// The last completed Agent turn, or zero when none has been reported.
     pub turn: u64,
     /// The terminal's grid; the size an observer must render to.
     pub cols: u16,
     pub rows: u16,
     /// The terminal that started this one (a sub-agent's Agent), if any.
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     /// Herdr's `where` label, `<space> / <tab>`, used to name spaces.
     #[serde(skip)]
@@ -80,6 +83,7 @@ impl Session {
             program,
             cwd,
             status,
+            status_ms: record["status_ms"].as_u64(),
             turn: record["turn"].as_u64().unwrap_or(0),
             cols: size("cols", 80),
             rows: size("rows", 24),
@@ -104,7 +108,7 @@ mod tests {
     fn remote_live_terminal() {
         let record = json!({
             "address": "vps-us/t1", "state": "live", "name": null, "title": "",
-            "cwd": "/root", "cols": 200, "rows": 50, "turn": 4,
+            "cwd": "/root", "cols": 200, "rows": 50, "turn": 4, "status_ms": 1762156800000_u64, "parent": "vps-us/t0",
             "foreground": {"name": "2.1.316", "argv": ["claude", "--resume"], "pid": 42, "cwd": "/root/app"},
             "status": {"state": "blocked", "app": "claude", "kind": "permission", "msg": "Run ls?"},
         });
@@ -116,6 +120,9 @@ mod tests {
         assert_eq!(session.cwd, "/root/app");
         assert_eq!((session.cols, session.rows), (200, 50));
         assert_eq!(session.turn, 4);
+        assert_eq!(session.status_ms, Some(1_762_156_800_000));
+        let json = serde_json::to_value(&session).unwrap();
+        assert_eq!((json["status_ms"].as_u64(), json["parent"].as_str()), (Some(1_762_156_800_000), Some("vps-us/t0")));
         let status = session.status.unwrap();
         assert_eq!(status.state, "blocked");
         assert_eq!(status.kind.as_deref(), Some("permission"));

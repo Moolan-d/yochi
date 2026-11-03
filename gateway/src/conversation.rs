@@ -10,6 +10,9 @@ use std::collections::HashMap;
 const MAX_TEXT: usize = 32 * 1024;
 const MAX_OUTPUT: usize = 2000;
 const MAX_OUTPUT_LINES: usize = 40;
+/// An edit's diff on the phone; the Changes page has the whole file.
+const MAX_PATCH_LINES: usize = 200;
+const MAX_PATCH_BYTES: usize = 16 * 1024;
 /// Items a phone gets when it starts following.
 pub const FIRST_ITEMS: usize = 300;
 
@@ -33,6 +36,12 @@ pub enum Item {
         questions: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         answers: Option<Value>,
+        /// Edit, MultiEdit and Write: what changed, once done.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        edit: Option<Edit>,
+        /// Agent (formerly Task): the subtask it runs.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        agent: Option<Subagent>,
     },
     /// A slash command run in Claude Code, with what it printed.
     Command { id: String, name: String, output: Option<String> },
@@ -48,6 +57,67 @@ pub enum Item {
         #[serde(skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },
+    /// The Agent's to-do list as of these TaskCreate, TaskUpdate or TodoWrite
+    /// calls; back-to-back updates share one item.
+    Todos { id: String, items: Vec<Todo> },
+    /// A message between Agents: one this Agent sent with SendMessage, or one
+    /// another Agent sent it. Never what the user typed.
+    Peer {
+        id: String,
+        direction: Direction,
+        /// The other Agent: a subtask's or session's name; None when unknown.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        text: String,
+        state: ToolState,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Edit {
+    pub path: String,
+    pub added: u64,
+    pub deleted: u64,
+    /// Unified diff hunks (`@@ -a,b +c,d @@` and their lines), no file headers.
+    pub patch: String,
+    /// Write made a new file; the patch is its text.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub created: bool,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Subagent {
+    pub name: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// When the Agent called it, by the transcript's clock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Runs on after the call returns; a task notification ends it.
+    pub background: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Todo {
+    /// TaskCreate's task id, which TaskUpdate names.
+    #[serde(skip)]
+    key: String,
+    pub text: String,
+    /// The `activeForm`: what the Agent is doing while it is in progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
+    /// pending, in_progress or completed.
+    pub status: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    Sent,
+    Received,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -66,7 +136,9 @@ impl Item {
             | Self::Tool { id, .. }
             | Self::Command { id, .. }
             | Self::Notice { id, .. }
-            | Self::Task { id, .. } => id,
+            | Self::Task { id, .. }
+            | Self::Todos { id, .. }
+            | Self::Peer { id, .. } => id,
         }
     }
 }
@@ -88,6 +160,13 @@ pub struct Conversation {
     index: HashMap<String, usize>,
     /// Claude Code's permission mode as of its latest message.
     mode: Option<String>,
+    todos: Vec<Todo>,
+    /// TaskCreate and TaskUpdate calls awaiting their results, by tool call.
+    todo_calls: HashMap<String, (String, Value)>,
+    /// Subtask names by agentId, so a SendMessage to one names it.
+    subagents: HashMap<String, String>,
+    /// Agents that sent messages here, by their `uds:` address.
+    peers: HashMap<String, String>,
 }
 
 impl Conversation {
@@ -153,10 +232,14 @@ impl Conversation {
                 self.mode = Some(mode.to_owned());
             }
         }
+        let uuid = record["uuid"].as_str().unwrap_or_default();
+        // Filed as a meta user message, but the Agent acts on it.
+        if record["type"] == "user" && record["isSidechain"] != true && record["origin"]["kind"] == "peer" {
+            return self.peer_message(uuid, record).into_iter().collect();
+        }
         if record["isSidechain"] == true || record["isMeta"] == true || record["isVisibleInTranscriptOnly"] == true {
             return Vec::new();
         }
-        let uuid = record["uuid"].as_str().unwrap_or_default();
         match record["type"].as_str() {
             Some("user") => self.user(uuid, record),
             Some("assistant") => self.assistant(uuid, record),
@@ -167,11 +250,12 @@ impl Conversation {
 
     fn user(&mut self, uuid: &str, record: &Value) -> Vec<String> {
         let content = &record["message"]["content"];
+        let at = record["timestamp"].as_str().and_then(epoch_ms);
         let notification =
             record["origin"]["kind"] == "task-notification" || record["turnOrigin"] == "task_notification";
         if let Some(text) = content.as_str() {
             if notification || text.trim_start().starts_with("<task-notification>") {
-                return self.task(uuid, text).into_iter().collect();
+                return self.task(uuid, text, at);
             }
             return self.user_text(uuid, text).into_iter().collect();
         }
@@ -188,7 +272,7 @@ impl Conversation {
             }
         }
         if notification || text.trim_start().starts_with("<task-notification>") {
-            touched.extend(self.task(uuid, &text));
+            touched.extend(self.task(uuid, &text, at));
         } else {
             touched.extend(self.user_text(uuid, &text));
         }
@@ -217,12 +301,14 @@ impl Conversation {
     }
 
     /// A `<task-notification>`: its summary on the collapsed line, the report
-    /// behind it. One without the tags still never shows as the user's.
-    fn task(&mut self, uuid: &str, text: &str) -> Option<String> {
+    /// behind it. One without the tags still never shows as the user's. A
+    /// background subtask's call it names ends here.
+    fn task(&mut self, uuid: &str, text: &str, at: Option<u64>) -> Vec<String> {
         let text = text.trim();
         if text.is_empty() {
-            return None;
+            return Vec::new();
         }
+        let mut touched = Vec::new();
         let state = match tag(text, "status") {
             Some("failed" | "killed" | "error") => ToolState::Error,
             _ => ToolState::Done,
@@ -232,7 +318,98 @@ impl Conversation {
             None => ("任务通知".to_owned(), Some(text)),
         };
         let report = report.filter(|report| !report.is_empty()).map(|report| clip(report, MAX_TEXT));
-        Some(self.upsert(Item::Task { id: uuid.into(), summary: clip(&summary, MAX_OUTPUT), state, text: report }))
+        if let Some(call) = tag(text, "tool-use-id").and_then(|id| self.index.get(id)).map(|&i| self.items[i].clone()) {
+            if let Item::Tool { state: ToolState::Running, agent: Some(mut agent), .. } = call.clone() {
+                agent.duration_ms = agent.started_ms.zip(at).map(|(start, end)| end.saturating_sub(start));
+                if let Item::Tool { id, name, summary, output, questions, answers, edit, .. } = call {
+                    touched.push(self.upsert(Item::Tool {
+                        id, name, summary, state, output, questions, answers, edit, agent: Some(agent),
+                    }));
+                }
+            }
+        }
+        touched.push(self.upsert(Item::Task { id: uuid.into(), summary: clip(&summary, MAX_OUTPUT), state, text: report }));
+        touched
+    }
+
+    /// A message another Agent sent this one.
+    fn peer_message(&mut self, uuid: &str, record: &Value) -> Option<String> {
+        let origin = &record["origin"];
+        let name = origin["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
+        if let (Some(from), Some(name)) = (origin["from"].as_str(), &name) {
+            self.peers.insert(from.to_owned(), name.clone());
+        }
+        let text = origin["body"].as_str().or_else(|| record["message"]["content"].as_str())?.trim();
+        if text.is_empty() {
+            return None;
+        }
+        Some(self.upsert(Item::Peer {
+            id: uuid.into(),
+            direction: Direction::Received,
+            name,
+            text: clip(text, MAX_TEXT),
+            state: ToolState::Done,
+        }))
+    }
+
+    /// Who a SendMessage goes to: a subtask by its name, an Agent that wrote
+    /// here by the name it gave, a session by its own name.
+    fn recipient(&self, to: &str) -> Option<String> {
+        if let Some(name) = self.subagents.get(to) {
+            return Some(name.clone());
+        }
+        if to.starts_with("uds:") {
+            return self.peers.get(to).cloned();
+        }
+        Some(to.to_owned()).filter(|to| !to.is_empty())
+    }
+
+    /// TaskCreate and TaskUpdate change the list once they succeed; TodoWrite
+    /// carries the whole list in its call.
+    fn todo_result(&mut self, id: &str, name: &str, input: &Value, block: &Value, structured: &Value) -> Option<String> {
+        if block["is_error"] == true {
+            return None;
+        }
+        let field = |key: &str| input[key].as_str().filter(|text| !text.is_empty()).map(str::to_owned);
+        let key = |value: &Value| value.as_str().map(str::to_owned).or_else(|| value.as_u64().map(|n| n.to_string()));
+        if name == "TaskCreate" {
+            self.todos.push(Todo {
+                key: key(&structured["task"]["id"]).unwrap_or_else(|| id.to_owned()),
+                text: field("subject").unwrap_or_default(),
+                active: field("activeForm"),
+                status: "pending".into(),
+            });
+        } else {
+            let target = key(&input["taskId"])?;
+            let i = self.todos.iter().position(|todo| todo.key == target)?;
+            match field("status").as_deref() {
+                Some("deleted") => {
+                    self.todos.remove(i);
+                }
+                status => {
+                    let todo = &mut self.todos[i];
+                    if let Some(status) = status {
+                        todo.status = status.to_owned();
+                    }
+                    if let Some(text) = field("subject") {
+                        todo.text = text;
+                    }
+                    if let Some(active) = field("activeForm") {
+                        todo.active = Some(active);
+                    }
+                }
+            }
+        }
+        Some(self.show_todos(id))
+    }
+
+    /// The list as it is now, in the last item when that is already the list.
+    fn show_todos(&mut self, id: &str) -> String {
+        let id = match self.items.last() {
+            Some(Item::Todos { id, .. }) => id.clone(),
+            _ => id.to_owned(),
+        };
+        self.upsert(Item::Todos { id, items: self.todos.clone() })
     }
 
     /// A local command's output belongs to the command just before it.
@@ -247,12 +424,35 @@ impl Conversation {
 
     fn tool_result(&mut self, block: &Value, structured: &Value) -> Option<String> {
         let id = block["tool_use_id"].as_str()?;
+        if let Some((name, input)) = self.todo_calls.remove(id) {
+            return self.todo_result(id, &name, &input, block, structured);
+        }
         let &i = self.index.get(id)?;
-        let Item::Tool { name, summary, questions, .. } = self.items[i].clone() else { return None };
-        let state = if block["is_error"] == true { ToolState::Error } else { ToolState::Done };
+        let failed = block["is_error"] == true;
+        let (name, summary, questions, mut agent) = match self.items[i].clone() {
+            Item::Tool { name, summary, questions, agent, .. } => (name, summary, questions, agent),
+            Item::Peer { id, direction, name, text, .. } => {
+                let state = if failed || structured["success"] == false { ToolState::Error } else { ToolState::Done };
+                return Some(self.upsert(Item::Peer { id, direction, name, text, state }));
+            }
+            _ => return None,
+        };
+        let mut state = if failed { ToolState::Error } else { ToolState::Done };
         let output = result_text(&block["content"]).map(|text| clip_output(&text));
         let answers = structured.get("answers").filter(|answers| answers.is_object()).cloned();
-        Some(self.upsert(Item::Tool { id: id.into(), name, summary, state, output, questions, answers }))
+        let edit = (!failed && matches!(name.as_str(), "Edit" | "MultiEdit" | "Write")).then(|| edit(structured)).flatten();
+        if let Some(agent) = agent.as_mut().filter(|_| !failed) {
+            if let Some(agent_id) = structured["agentId"].as_str() {
+                self.subagents.insert(agent_id.to_owned(), agent.name.clone());
+            }
+            if structured["status"] == "async_launched" {
+                agent.background = true;
+                state = ToolState::Running;
+            } else {
+                agent.duration_ms = structured["totalDurationMs"].as_u64();
+            }
+        }
+        Some(self.upsert(Item::Tool { id: id.into(), name, summary, state, output, questions, answers, edit, agent }))
     }
 
     fn assistant(&mut self, uuid: &str, record: &Value) -> Vec<String> {
@@ -277,7 +477,38 @@ impl Conversation {
                     let Some(id) = block["id"].as_str() else { continue };
                     let name = block["name"].as_str().unwrap_or("tool").to_owned();
                     let input = &block["input"];
+                    match name.as_str() {
+                        "TaskCreate" | "TaskUpdate" => {
+                            self.todo_calls.insert(id.into(), (name, input.clone()));
+                            continue;
+                        }
+                        "TodoWrite" => {
+                            self.todos = todo_list(input);
+                            touched.push(self.show_todos(id));
+                            continue;
+                        }
+                        "SendMessage" => {
+                            let to = input["to"].as_str().unwrap_or_default();
+                            let text = input["message"].as_str().map(str::to_owned).unwrap_or_else(|| input["message"].to_string());
+                            touched.push(self.upsert(Item::Peer {
+                                id: id.into(),
+                                direction: Direction::Sent,
+                                name: self.recipient(to),
+                                text: clip(text.trim(), MAX_TEXT),
+                                state: ToolState::Running,
+                            }));
+                            continue;
+                        }
+                        _ => {}
+                    }
                     let questions = (name == "AskUserQuestion").then(|| questions(input));
+                    let agent = matches!(name.as_str(), "Agent" | "Task").then(|| Subagent {
+                        name: summary(&name, input),
+                        kind: input["subagent_type"].as_str().map(str::to_owned),
+                        started_ms: record["timestamp"].as_str().and_then(epoch_ms),
+                        duration_ms: None,
+                        background: input["run_in_background"] == true,
+                    });
                     touched.push(self.upsert(Item::Tool {
                         id: id.into(),
                         summary: summary(&name, input),
@@ -286,6 +517,8 @@ impl Conversation {
                         output: None,
                         questions,
                         answers: None,
+                        edit: None,
+                        agent,
                     }));
                 }
                 _ => {}
@@ -324,6 +557,99 @@ fn summary(name: &str, input: &Value) -> String {
     .or_else(|| input.as_object().and_then(|input| input.values().find_map(Value::as_str)).map(str::to_owned))
     .unwrap_or_default();
     clip(text.trim(), 500)
+}
+
+/// TodoWrite's whole list.
+fn todo_list(input: &Value) -> Vec<Todo> {
+    input["todos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(n, todo)| Todo {
+            key: n.to_string(),
+            text: todo["content"].as_str().unwrap_or_default().to_owned(),
+            active: todo["activeForm"].as_str().filter(|text| !text.is_empty()).map(str::to_owned),
+            status: todo["status"].as_str().unwrap_or("pending").to_owned(),
+        })
+        .collect()
+}
+
+/// What an Edit or Write changed, from its structured result: the hunks
+/// Claude Code computed, or a new file's text.
+fn edit(structured: &Value) -> Option<Edit> {
+    let path = structured["filePath"].as_str()?.to_owned();
+    let mut patch = Patch::default();
+    let created = structured["type"] == "create";
+    if created {
+        let content = structured["content"].as_str().unwrap_or_default();
+        let lines: Vec<&str> = content.lines().collect();
+        if !lines.is_empty() {
+            patch.line(&format!("@@ -0,0 +1,{} @@", lines.len()));
+        }
+        for line in lines {
+            patch.added += 1;
+            patch.line(&format!("+{line}"));
+        }
+    } else {
+        for hunk in structured["structuredPatch"].as_array()? {
+            let number = |key: &str| hunk[key].as_u64().unwrap_or(0);
+            patch.line(&format!(
+                "@@ -{},{} +{},{} @@",
+                number("oldStart"), number("oldLines"), number("newStart"), number("newLines")
+            ));
+            for line in hunk["lines"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                match line.chars().next() {
+                    Some('+') => patch.added += 1,
+                    Some('-') => patch.deleted += 1,
+                    _ => {}
+                }
+                patch.line(line);
+            }
+        }
+    }
+    Some(Edit { path, added: patch.added, deleted: patch.deleted, patch: patch.text, created, truncated: patch.truncated })
+}
+
+/// A diff built up to the phone's limit; counts keep going past it.
+#[derive(Default)]
+struct Patch {
+    text: String,
+    lines: usize,
+    added: u64,
+    deleted: u64,
+    truncated: bool,
+}
+
+impl Patch {
+    fn line(&mut self, line: &str) {
+        if self.truncated || self.lines >= MAX_PATCH_LINES || self.text.len() + line.len() + 1 > MAX_PATCH_BYTES {
+            self.truncated = true;
+            return;
+        }
+        self.text.push_str(line);
+        self.text.push('\n');
+        self.lines += 1;
+    }
+}
+
+/// `2026-11-03T08:26:52.583Z` as milliseconds since the epoch.
+fn epoch_ms(timestamp: &str) -> Option<u64> {
+    let (date, time) = timestamp.split_once('T')?;
+    let mut date = date.splitn(3, '-').map(str::parse::<i64>);
+    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    let time = time.strip_suffix('Z')?;
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
+    let mut clock = clock.splitn(3, ':').map(str::parse::<i64>);
+    let (hour, minute, second) = (clock.next()?.ok()?, clock.next()?.ok()?, clock.next()?.ok()?);
+    let millis = format!("{:0<3}", fraction.get(..3).unwrap_or(fraction)).parse::<i64>().ok()?;
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    u64::try_from(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis).ok()
 }
 
 /// AskUserQuestion's questions with only what the app shows.
@@ -438,6 +764,8 @@ mod tests {
                 Item::Command { .. } => "command",
                 Item::Notice { .. } => "notice",
                 Item::Task { .. } => "task",
+                Item::Todos { .. } => "todos",
+                Item::Peer { .. } => "peer",
             })
             .collect()
     }
@@ -550,5 +878,152 @@ mod tests {
         assert!(output.starts_with("1\n2\n"));
         assert!(output.ends_with("（另有 60 行）"));
         assert_eq!(clip("界界", 4), "界…");
+    }
+
+    #[test]
+    fn edits_carry_their_diff() {
+        let lines = [
+            r#"{"type":"assistant","uuid":"a1","message":{"id":"m1","content":[{"type":"tool_use","id":"toolu_1","name":"Edit","input":{"file_path":"/x/A.swift","old_string":"a","new_string":"b"}},{"type":"tool_use","id":"toolu_2","name":"Write","input":{"file_path":"/x/new.md","content":"one\ntwo\n"}},{"type":"tool_use","id":"toolu_3","name":"Edit","input":{"file_path":"/x/B.swift"}}]}}"#,
+            r#"{"type":"user","uuid":"u1","toolUseResult":{"filePath":"/x/A.swift","structuredPatch":[{"oldStart":3,"oldLines":3,"newStart":3,"newLines":4,"lines":[" keep","-old","+new","+more"," keep"]}]},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}"#,
+            r#"{"type":"user","uuid":"u2","toolUseResult":{"type":"create","filePath":"/x/new.md","content":"one\ntwo\n"},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"ok"}]}}"#,
+            r#"{"type":"user","uuid":"u3","toolUseResult":"Error: string not found","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_3","content":"not found","is_error":true}]}}"#,
+        ];
+        let mut conversation = Conversation::default();
+        conversation.apply(lines);
+        let items = conversation.items();
+        let Item::Tool { edit: Some(edit), state: ToolState::Done, .. } = &items[0] else { panic!("{:?}", items[0]) };
+        assert_eq!((edit.path.as_str(), edit.added, edit.deleted, edit.created), ("/x/A.swift", 2, 1, false));
+        assert_eq!(edit.patch, "@@ -3,3 +3,4 @@\n keep\n-old\n+new\n+more\n keep\n");
+        let Item::Tool { edit: Some(created), .. } = &items[1] else { panic!() };
+        assert_eq!((created.added, created.created), (2, true));
+        assert_eq!(created.patch, "@@ -0,0 +1,2 @@\n+one\n+two\n");
+        assert!(matches!(&items[2], Item::Tool { edit: None, state: ToolState::Error, .. }));
+        let json = serde_json::to_value(&items[1]).unwrap();
+        assert_eq!(json["edit"]["created"], true);
+        assert!(serde_json::to_value(&items[0]).unwrap()["edit"].get("created").is_none());
+
+        let long: Vec<String> = (0..300).map(|n| format!("\"+{n}\"")).collect();
+        let record = format!(r#"{{"filePath":"/x/C","structuredPatch":[{{"oldStart":0,"oldLines":0,"newStart":1,"newLines":300,"lines":[{}]}}]}}"#, long.join(","));
+        let cut = super::edit(&serde_json::from_str(&record).unwrap()).unwrap();
+        assert!(cut.truncated);
+        assert_eq!(cut.added, 300, "counts go past the limit");
+        assert_eq!(cut.patch.lines().count(), MAX_PATCH_LINES);
+    }
+
+    fn todo_texts(item: &Item) -> Vec<String> {
+        let Item::Todos { items, .. } = item else { panic!("{item:?}") };
+        items.iter().map(|todo| format!("{} {}", todo.status, todo.text)).collect()
+    }
+
+    #[test]
+    fn task_tools_become_one_checklist() {
+        let call = |n: u32, name: &str, input: &str| {
+            format!(r#"{{"type":"assistant","uuid":"a{n}","message":{{"id":"m{n}","content":[{{"type":"tool_use","id":"toolu_{n}","name":"{name}","input":{input}}}]}}}}"#)
+        };
+        let result = |n: u32, structured: &str| {
+            format!(r#"{{"type":"user","uuid":"u{n}","toolUseResult":{structured},"message":{{"content":[{{"type":"tool_result","tool_use_id":"toolu_{n}","content":"ok"}}]}}}}"#)
+        };
+        let lines = [
+            call(1, "TaskCreate", r#"{"subject":"读代码","activeForm":"读代码中"}"#),
+            result(1, r#"{"task":{"id":"1","subject":"读代码"}}"#),
+            call(2, "TaskCreate", r#"{"subject":"写测试","description":"x"}"#),
+            result(2, r#"{"task":{"id":"2","subject":"写测试"}}"#),
+            call(3, "TaskUpdate", r#"{"taskId":"1","status":"in_progress"}"#),
+            result(3, r#"{"success":true,"taskId":"1"}"#),
+            r#"{"type":"assistant","uuid":"a4","message":{"id":"m4","content":[{"type":"text","text":"开始"}]}}"#.to_owned(),
+            call(5, "TaskUpdate", r#"{"taskId":"1","status":"completed"}"#),
+            result(5, r#"{"success":true}"#),
+            call(6, "TaskUpdate", r#"{"taskId":"2","status":"deleted"}"#),
+            result(6, r#"{"success":true}"#),
+            call(7, "TaskUpdate", r#"{"taskId":"9","status":"completed"}"#),
+            result(7, r#"{"success":false}"#),
+        ];
+        let mut conversation = Conversation::default();
+        conversation.apply(lines.iter().map(String::as_str));
+        let items = conversation.items();
+        assert_eq!(kinds(items), ["todos", "agent", "todos"]);
+        assert_eq!(items[0].id(), "toolu_1", "back-to-back updates share the first one's item");
+        assert_eq!(todo_texts(&items[0]), ["in_progress 读代码", "pending 写测试"]);
+        assert_eq!(todo_texts(&items[2]), ["completed 读代码"]);
+        let json = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(json["items"][0], serde_json::json!({"text": "读代码", "active": "读代码中", "status": "in_progress"}));
+
+        let mut old = Conversation::default();
+        old.apply([call(1, "TodoWrite", r#"{"todos":[{"content":"A","status":"completed","activeForm":"Aing"},{"content":"B","status":"in_progress","activeForm":"Bing"}]}"#)].iter().map(String::as_str));
+        assert_eq!(todo_texts(&old.items()[0]), ["completed A", "in_progress B"]);
+    }
+
+    #[test]
+    fn subtasks_are_timed_and_background_ones_end_with_their_notification() {
+        let lines = [
+            r#"{"type":"assistant","uuid":"a1","timestamp":"2026-11-03T08:26:52.583Z","message":{"id":"m1","content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"description":"Find items","subagent_type":"Explore","prompt":"p"}},{"type":"tool_use","id":"toolu_2","name":"Agent","input":{"description":"Watch CI","prompt":"p","run_in_background":true}}]}}"#,
+            r#"{"type":"user","uuid":"u1","toolUseResult":{"status":"completed","agentId":"ag1","totalDurationMs":12000,"content":[]},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"}]}}"#,
+            r#"{"type":"user","uuid":"u2","toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"ag2"},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"launched"}]}}"#,
+        ];
+        let mut conversation = Conversation::default();
+        conversation.apply(lines);
+        let agent = |item: &Item| match item {
+            Item::Tool { agent: Some(agent), state, .. } => (agent.clone(), *state),
+            other => panic!("{other:?}"),
+        };
+        let (sync, state) = agent(&conversation.items()[0]);
+        assert_eq!((sync.name.as_str(), sync.kind.as_deref(), sync.duration_ms, state), ("Find items", Some("Explore"), Some(12000), ToolState::Done));
+        assert_eq!(sync.started_ms, Some(1_793_694_412_583));
+        let (background, state) = agent(&conversation.items()[1]);
+        assert!(background.background && background.duration_ms.is_none());
+        assert_eq!(state, ToolState::Running);
+
+        let touched = conversation.apply([
+            r#"{"type":"user","uuid":"u3","timestamp":"2026-11-03T08:28:52.583Z","origin":{"kind":"task-notification"},"message":{"content":"<task-notification>\n<task-id>ag2</task-id>\n<tool-use-id>toolu_2</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Watch CI\" finished</summary>\n</task-notification>"}}"#,
+        ]);
+        assert_eq!(kinds(&touched), ["tool", "task"]);
+        let (background, state) = agent(&conversation.items()[1]);
+        assert_eq!((background.duration_ms, state), (Some(120_000), ToolState::Done));
+    }
+
+    #[test]
+    fn messages_between_agents_name_the_other_one() {
+        let send = |n: u32, to: &str| {
+            format!(r#"{{"type":"assistant","uuid":"a{n}","message":{{"id":"m{n}","content":[{{"type":"tool_use","id":"toolu_{n}","name":"SendMessage","input":{{"to":"{to}","message":"hi {n}","summary":"s"}}}}]}}}}"#)
+        };
+        let lines = [
+            send(1, "uds:/tmp/cc-socks/1.sock"),
+            r#"{"type":"user","uuid":"u1","isMeta":true,"origin":{"kind":"peer","from":"uds:/tmp/cc-socks/1.sock","name":"static-workorder","body":"已改好"},"message":{"content":"<cross-session-message>已改好</cross-session-message> Reply with SendMessage"}}"#.to_owned(),
+            send(2, "uds:/tmp/cc-socks/1.sock"),
+            r#"{"type":"assistant","uuid":"a3","message":{"id":"m3","content":[{"type":"tool_use","id":"toolu_3","name":"Agent","input":{"description":"Find items","prompt":"p","run_in_background":true}}]}}"#.to_owned(),
+            r#"{"type":"user","uuid":"u3","toolUseResult":{"status":"async_launched","agentId":"ag1"},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_3","content":"ok"}]}}"#.to_owned(),
+            send(4, "ag1"),
+            send(5, "web-session"),
+            r#"{"type":"user","uuid":"u5","toolUseResult":{"success":false},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_5","content":"no such agent","is_error":true}]}}"#.to_owned(),
+        ];
+        let mut conversation = Conversation::default();
+        conversation.apply(lines.iter().map(String::as_str));
+        let peers: Vec<_> = conversation
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                Item::Peer { direction, name, text, state, .. } => Some((*direction, name.clone(), text.clone(), *state)),
+                _ => None,
+            })
+            .collect();
+        let name = |name: &str| Some(name.to_owned());
+        assert_eq!(peers, [
+            (Direction::Sent, None, "hi 1".into(), ToolState::Running),
+            (Direction::Received, name("static-workorder"), "已改好".into(), ToolState::Done),
+            (Direction::Sent, name("static-workorder"), "hi 2".into(), ToolState::Running),
+            (Direction::Sent, name("Find items"), "hi 4".into(), ToolState::Running),
+            (Direction::Sent, name("web-session"), "hi 5".into(), ToolState::Error),
+        ]);
+        let json = serde_json::to_value(&conversation.items()[1]).unwrap();
+        assert_eq!((json["kind"].as_str(), json["direction"].as_str()), (Some("peer"), Some("received")));
+        assert!(!serde_json::to_string(conversation.items()).unwrap().contains("Reply with SendMessage"));
+    }
+
+    #[test]
+    fn transcript_timestamps_read_as_epoch_ms() {
+        assert_eq!(epoch_ms("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(epoch_ms("2000-03-01T00:00:01.5Z"), Some(951_868_801_500));
+        assert_eq!(epoch_ms("2026-11-03T08:26:52.583Z"), Some(1_793_694_412_583));
+        assert_eq!(epoch_ms("yesterday"), None);
     }
 }

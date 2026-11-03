@@ -33,13 +33,15 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 // 随后立即发送，并在会话列表变化时整表重发
 {"type": "sessions", "core": "my-mac", "connected": true, "sessions": [
   {"id": "vps-us/t1", "machine": "vps-us", "title": "claude", "program": "claude",
-   "cwd": "/root/app", "turn": 7,
+   "cwd": "/root/app", "turn": 7, "status_ms": 1762156800000, "parent": "vps-us/t0",
    "status": {"state": "blocked", "app": "claude", "message": "Run ls?", "kind": "permission"}}
 ]}
 ```
 
 - `id`：core 的地址，对 App 不透明。`machine`：远端机器名，主 Mac 本机为 `null`。
 - `status`：Agent 自报状态，`state` 为 idle / working / done / blocked / error；未上报时为 `null`。
+- `status_ms`：状态上次变化的时刻（Mac 的时钟，毫秒）；App 据此显示「工作中 · 12s」。没有时省略。
+- `parent`：启动它的终端（子 Agent 的父 Agent）；没有时省略。
 - `turn`：core 记录的最后已完成 Agent 轮次；没有该字段时 Gateway 返回 `0`。它会在状态离开 `working` 时增加。
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
 - 只包含 live 会话，finished 的不返回。
@@ -56,7 +58,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
 - `id` 对 App 不透明。`name` 已是要显示的名字：没人命名的 Space 用 Herdr 自动起的名字，没人命名的 Tab 用位置序号。
 - `folder`：Herdr 在这个 Space 里启动终端的目录，可能为空；App 用它为新建会话预选 Space。旧版 Gateway 不发送此字段。
-- `sessions`：该 Tab 里的 live 会话 id，按分屏顺序；由 Agent 启动的子 Agent 排在后面，跟随启动它的终端。
+- `sessions`：该 Tab 里的 live 会话 id，按分屏顺序；由 Agent 启动的子 Agent 不在布局里，紧跟在启动它的终端（和它之前的子 Agent）后面。
 - 只列出含 live 会话的 Space 和 Tab。不在任何 Space 中的会话不出现在这里，App 按机器单独列出。
 - 数据来自各机器 herdr-core 中 Herdr 桌面端的布局文档，Gateway 只读不写。某台机器读不到布局（离线、没用过 Herdr 桌面端、core 不支持 `doc.get`）时，它的会话都不在 `spaces` 中。
 
@@ -244,6 +246,13 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 {"kind": "agent", "id": "…", "text": "Markdown 正文"}
 {"kind": "tool", "id": "toolu_01…", "name": "Bash", "summary": "date > stamp.txt",
  "state": "running", "output": "前 40 行、2000 字节以内"}
+// Edit、MultiEdit、Write 成功后带 edit：patch 是统一 diff 的块（无文件头），最多 200 行、16 KB
+{"kind": "tool", "id": "toolu_03…", "name": "Edit", "summary": "/x/A.swift", "state": "done",
+ "edit": {"path": "/x/A.swift", "added": 2, "deleted": 1, "patch": "@@ -3,3 +3,4 @@\n keep\n-old\n…", "truncated": false}}
+// Write 新建文件时 "created": true，patch 是全文的 + 行
+// Agent（旧名 Task）带 agent；后台的结果回来后仍是 running，task-notification 到达时变成 done / error
+{"kind": "tool", "id": "toolu_04…", "name": "Agent", "summary": "Find roadmap items", "state": "running",
+ "agent": {"name": "Find roadmap items", "type": "Explore", "started_ms": 1762156800000, "background": true}}
 {"kind": "tool", "id": "toolu_02…", "name": "AskUserQuestion", "summary": "Cats or Dogs?", "state": "done",
  "questions": [{"question": "Cats or Dogs?", "header": "Pet", "multi_select": false,
                 "options": [{"label": "Cats", "description": "…"}, {"label": "Dogs", "description": "…"}]}],
@@ -253,11 +262,19 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 // 子代理或后台任务的完成汇报：Claude Code 把它记成一条 user 消息，但不是用户输入的
 {"kind": "task", "id": "…", "summary": "Agent \"Find roadmap items\" finished", "state": "done",
  "text": "子代理的汇报（Markdown，后台命令没有）"}
+// 待办清单：TaskCreate、TaskUpdate、TodoWrite 不再是工具条目，换成那一刻的整张清单
+{"kind": "todos", "id": "toolu_05…", "items": [{"text": "修复水印", "active": "修复水印中", "status": "in_progress"}]}
+// Agent 之间的消息：发出的（SendMessage）和其他 Agent 发来的；name 查不到时省略
+{"kind": "peer", "id": "…", "direction": "received", "name": "static-workorder-2a", "text": "已改好…", "state": "done"}
 ```
 
 - 只发显示所需的字段；thinking、用量、请求记录和附件不离开 Gateway。图片显示为「［图片］」。
 - 首次只发最近 300 条，最多回溯 transcript 的最后 2000 行。
 - `tool.state` 为 `running` / `done` / `error`；结果到达时同一 `id` 的条目被替换。
+- `agent.started_ms` 取 transcript 记录的时刻；同步的子任务跑完时有 `duration_ms`，后台的在通知到达时补上。
+- `todos.items[].status` 为 `pending` / `in_progress` / `completed`，删掉的项不再出现。中间没有别的条目的连续几次更新替换同一个条目，否则新起一个条目。
+- `peer.direction` 为 `sent` / `received`。发出的 `state` 先是 `running`，结果到达后为 `done` 或 `error`。`name` 对子任务是它的描述，对 `uds:` 地址是从该地址收到过的消息里对方报的名字。
+- 旧 App 不认识 `todos`、`peer` 条目，跳过；新字段忽略。
 - `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
 - `mode` 原样转发 Claude Code 的值（`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`，以后可能有新值）。transcript 只在发消息时记模式：第一条消息之前没有 `mode`，在终端里切换后要到下一条消息才更新。App 优先显示屏幕底部的模式提示，切换按「按键」逐次发 `shift+tab`（ADR 0005）。
 - Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。

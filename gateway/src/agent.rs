@@ -317,6 +317,7 @@ mod tests {
                 program: Some("claude".into()),
                 cwd: "/".into(),
                 status: None,
+                status_ms: None,
                 cols: 80,
                 rows: 24,
                 turn: 0,

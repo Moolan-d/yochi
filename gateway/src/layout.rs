@@ -88,20 +88,34 @@ pub fn arrange(spaces: Vec<Space>, sessions: &[Session]) -> Vec<Space> {
             }
         }
     }
-    // Sub-agents aren't in the layout; they belong where their parent is.
-    for session in sessions {
-        if tab_of.contains_key(&session.id) {
+    // Sub-agents aren't in the layout; they belong right after the terminal
+    // that started them and its earlier sub-agents. Parents go first.
+    let ancestors = |id: &str| {
+        let mut chain = Vec::new();
+        let mut parent = live.get(id).and_then(|s| s.parent.as_deref());
+        while let Some(id) = parent.filter(|_| chain.len() < 32) {
+            chain.push(id);
+            parent = live.get(id).and_then(|s| s.parent.as_deref());
+        }
+        chain
+    };
+    let mut children: Vec<&Session> = sessions.iter().filter(|s| !tab_of.contains_key(&s.id)).collect();
+    children.sort_by_key(|s| ancestors(&s.id).len());
+    for session in children {
+        let Some((anchor, s, t)) = ancestors(&session.id)
+            .into_iter()
+            .find_map(|id| tab_of.get(id).map(|&(s, t)| (id, s, t)))
+        else {
             continue;
+        };
+        let tab = &mut spaces[s].tabs[t].sessions;
+        let Some(mut at) = tab.iter().position(|id| id == anchor) else { continue };
+        at += 1;
+        while at < tab.len() && ancestors(&tab[at]).contains(&anchor) {
+            at += 1;
         }
-        let mut parent = session.parent.as_deref();
-        for _ in 0..32 {
-            let Some(id) = parent else { break };
-            if let Some(&(s, t)) = tab_of.get(id) {
-                spaces[s].tabs[t].sessions.push(session.id.clone());
-                break;
-            }
-            parent = live.get(id).and_then(|p| p.parent.as_deref());
-        }
+        tab.insert(at, session.id.clone());
+        tab_of.insert(session.id.clone(), (s, t));
     }
 
     for space in &mut spaces {
@@ -200,6 +214,20 @@ mod tests {
         assert_eq!(spaces[1].name, "infra");
         // t6 is in no space; the app lists it apart.
         assert!(spaces.iter().flat_map(|s| &s.tabs).all(|t| !t.sessions.contains(&"t6".to_owned())));
+    }
+
+    #[test]
+    fn sub_agents_follow_the_terminal_that_started_them() {
+        let sessions = [
+            session("t3", None, None),
+            session("t4", None, None),
+            // A grandchild listed before its parent, and a second child.
+            session("t8", Some("t7"), None),
+            session("t7", Some("t3"), None),
+            session("t10", Some("t3"), None),
+        ];
+        let spaces = arrange(read(&document(), None), &sessions);
+        assert_eq!(spaces[0].tabs[0].sessions, ["t3", "t7", "t8", "t10", "t4"]);
     }
 
     #[test]
