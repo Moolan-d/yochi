@@ -31,7 +31,7 @@ struct ConversationPane: View {
     @ViewBuilder
     private var placeholder: some View {
         switch feed.phase {
-        case .connecting, .unsupported:
+        case .connecting:
             ProgressView("正在读取对话…")
         case .failed(let reason):
             ContentUnavailableView {
@@ -43,7 +43,8 @@ struct ConversationPane: View {
             }
         case .closed(let reason):
             ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
-        case .following:
+        case .following, .unsupported:
+            // Unsupported shows only for Claude Code before its transcript exists.
             ContentUnavailableView {
                 Label("还没有对话", systemImage: "bubble.left.and.bubble.right")
             } description: {

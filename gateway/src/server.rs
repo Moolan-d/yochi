@@ -7,6 +7,8 @@
 //!   terminal bytes as binary messages.
 //! - `/v0/conversation?session=<id>` follows the conversation of the Agent in
 //!   one terminal, read from its transcript.
+//! - `/v0/screen?session=<id>` sends one terminal's screen as styled text while
+//!   its Agent isn't working, for the app to find dialogs in (ADR 0005).
 //!
 //! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
 
@@ -17,8 +19,9 @@ use crate::devices::{Device, Store};
 use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::layout::Space;
-use crate::observe::{Observer, Output};
+use crate::observe::{self, Observer, Output};
 use crate::run;
+use crate::screen::Screen;
 use crate::session::Session;
 use anyhow::{Context as _, Result};
 use axum::Router;
@@ -56,6 +59,9 @@ enum ServerMessage<'a> {
     Size { cols: u16, rows: u16 },
     /// The stream ended; `reason` as the core gave it, or why attaching failed.
     Closed { reason: &'a Value },
+    /// The screen as styled rows (CRLF between rows, SGR only); the cursor
+    /// is `[row, column]`, null while hidden.
+    Screen { cols: u16, rows: u16, text: &'a str, cursor: Option<(u16, u16)> },
     /// Pairing succeeded; the token is this device's from now on.
     Paired { device: &'a str, token: &'a str },
     /// Wrong or expired pairing code.
@@ -127,6 +133,7 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
         .route("/v0/ws", get(upgrade))
         .route("/v0/observe", get(observe))
         .route("/v0/conversation", get(conversation))
+        .route("/v0/screen", get(screen))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(listen)
         .await
@@ -239,7 +246,7 @@ fn session_size(view: &CoreView, id: &str) -> Option<(u16, u16)> {
 }
 
 async fn relay(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
-    let mut observer = match Observer::attach(&state.hc, &id, cols, rows).await {
+    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, observe::HISTORY).await {
         Ok(observer) => observer,
         Err(err) => {
             let reason = Value::String(format!("{err:#}"));
@@ -281,6 +288,104 @@ async fn relay(mut socket: WebSocket, state: AppState, device: String, id: Strin
                     size = current;
                     if send(&mut socket, &ServerMessage::Size { cols: size.0, rows: size.1 }).await.is_err() { break }
                 }
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            },
+            () = unpaired(&mut devices, &device) => break,
+        }
+    }
+    observer.detach().await;
+}
+
+async fn screen(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ObserveQuery>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(size) = session_size(&state.view.borrow(), &query.session) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    ws.on_upgrade(move |socket| watch_screen(socket, state, device, query.session, size))
+}
+
+/// Whether the Agent in the terminal is working; its screen then only shows
+/// progress, so it isn't sent.
+fn working(view: &CoreView, id: &str) -> bool {
+    view.sessions.iter().find(|s| s.id == id).and_then(|s| s.status.as_ref()).is_some_and(|s| s.state == "working")
+}
+
+/// Keeps the terminal's screen from a read-only attach and sends it once it
+/// has been still for a moment, unless it is what was sent last.
+async fn watch_screen(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
+    const SETTLE: Duration = Duration::from_millis(150);
+    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, 0).await {
+        Ok(observer) => observer,
+        Err(err) => {
+            let reason = Value::String(format!("{err:#}"));
+            let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
+            return;
+        }
+    };
+    let grid = |record: &Value, key: &str, default: u16| {
+        record[key].as_u64().and_then(|n| u16::try_from(n).ok()).unwrap_or(default)
+    };
+    let mut size = (grid(&observer.terminal, "cols", cols), grid(&observer.terminal, "rows", rows));
+    let mut screen = Screen::new(size.0, size.1);
+    let mut view = state.view.clone();
+    view.mark_unchanged();
+    let mut busy = working(&view.borrow(), &id);
+    let mut devices = state.devices.subscribe();
+    let mut sent = String::new();
+    // When the screen last changed; None once it has been sent or found unchanged.
+    let mut changed_at: Option<Instant> = Some(Instant::now());
+    loop {
+        let settle = async {
+            match changed_at {
+                Some(at) if !busy => tokio::time::sleep_until((at + SETTLE).into()).await,
+                _ => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            output = observer.next() => match output {
+                Some(Output::Data(bytes)) => {
+                    screen.process(&bytes);
+                    changed_at = Some(Instant::now());
+                    if observer.consumed(bytes.len()).await.is_err() { break }
+                }
+                Some(Output::Closed(reason)) => {
+                    let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
+                    return;
+                }
+                None => return,
+            },
+            () = settle => {
+                changed_at = None;
+                let text = screen.render();
+                if text != sent {
+                    let message = ServerMessage::Screen { cols: size.0, rows: size.1, text: &text, cursor: screen.cursor() };
+                    if send(&mut socket, &message).await.is_err() { break }
+                    sent = text;
+                }
+            },
+            changed = view.changed() => {
+                if changed.is_err() { break }
+                let view = view.borrow_and_update();
+                if let Some(current) = session_size(&view, &id) && current != size {
+                    size = current;
+                    screen.resize(size.0, size.1);
+                    changed_at = Some(Instant::now());
+                }
+                let now = working(&view, &id);
+                if busy && !now {
+                    changed_at = Some(Instant::now());
+                }
+                busy = now;
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,

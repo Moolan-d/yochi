@@ -13,8 +13,8 @@ const DATA: u8 = 0;
 const CREDIT: u8 = 1;
 const CLOSE: u8 = 2;
 const HEADER: usize = 9;
-/// Scrollback the first paint carries, so the app can scroll back a little.
-const HISTORY: u32 = 1000;
+/// Scrollback the terminal page's first paint carries, so it can scroll back a little.
+pub const HISTORY: u32 = 1000;
 
 pub enum Output {
     /// The terminal's bytes: first paint, then the program's raw output.
@@ -40,7 +40,7 @@ enum Frame {
 }
 
 impl Observer {
-    pub async fn attach(hc: &str, terminal: &str, cols: u16, rows: u16) -> Result<Self> {
+    pub async fn attach(hc: &str, terminal: &str, cols: u16, rows: u16, history: u32) -> Result<Self> {
         let mut child = Command::new(hc)
             .arg("connect")
             .stdin(Stdio::piped())
@@ -62,7 +62,7 @@ impl Observer {
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "terminal.attach", "params": {
             // An observer never resizes, so its own size only matters to the core's bookkeeping.
-            "terminal": terminal, "cols": cols, "rows": rows, "observe": true, "history": HISTORY,
+            "terminal": terminal, "cols": cols, "rows": rows, "observe": true, "history": history,
         }});
         write_frame(&mut stdin, 0, DATA, request.to_string().as_bytes()).await?;
 

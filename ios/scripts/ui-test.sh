@@ -27,7 +27,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; rm -rf "$state"' EXIT
+trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -59,7 +59,15 @@ start_history_session() {
         -- /bin/sh -c 'seq 1 400; exec /bin/cat' > /dev/null
 }
 
-# TESTS="testA testB" runs a subset.
+# Claude Code in a new, empty folder, for the dialog test: it opens on the
+# folder trust dialog, which the test declines, so nothing is saved.
+start_dialog_session() {
+    dialog_dir=$(mktemp -d)
+    hc run --bg --rm --no-parent --no-notify --name companion-uitest-dialog --cwd "$dialog_dir" --json \
+        -- "$(command -v claude)" > /dev/null
+}
+
+# TESTS="testA testB" runs a subset; testDialogFromScreen runs only when named.
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -77,6 +85,10 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         [ -n "${HISTORY_SESSION_NAME:-}" ] || start_history_session
         extra="TEST_RUNNER_COMPANION_HISTORY_SESSION_NAME=${HISTORY_SESSION_NAME:-companion-uitest-history}"
     fi
+    if [ "$test" = testDialogFromScreen ]; then
+        start_dialog_session
+        extra="TEST_RUNNER_COMPANION_DIALOG_SESSION_NAME=companion-uitest-dialog"
+    fi
     env $extra \
         TEST_RUNNER_COMPANION_HOST="$COMPANION_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
         TEST_RUNNER_COMPANION_SESSION="$test_session" \
@@ -85,6 +97,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         -only-testing:"CompanionUITests/CompanionUITests/$test" \
         -resultBundlePath "$RESULTS/$test.xcresult" || failed=1
     hc kill companion-uitest-history >/dev/null 2>&1 || true
+    hc kill companion-uitest-dialog >/dev/null 2>&1 || true
     if [ -n "${alt_session:-}" ]; then
         hc kill companion-uitest-alt >/dev/null 2>&1 || true
         alt_session=

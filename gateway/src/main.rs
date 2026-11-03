@@ -7,6 +7,7 @@ mod herdr;
 mod layout;
 mod observe;
 mod run;
+mod screen;
 mod server;
 mod service;
 mod session;

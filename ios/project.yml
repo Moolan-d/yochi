@@ -44,7 +44,13 @@ targets:
   CompanionTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [CompanionTests]
+    sources:
+      - path: CompanionTests
+        excludes: [Fixtures]
+      # A folder reference keeps the captures' directory layout in the bundle.
+      - path: CompanionTests/Fixtures
+        type: folder
+        buildPhase: resources
     configFiles:
       Debug: Signing.xcconfig
       Release: Signing.xcconfig

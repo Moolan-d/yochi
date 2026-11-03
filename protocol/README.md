@@ -194,3 +194,17 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
   ```
 - **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后会错位——App 检测到全屏界面（首屏里的 `ESC[?1049h` 等切换）时不重排，按 core 的网格原样显示并缩放到手机宽度，可双指放大；程序进入或退出全屏时重新 attach。
 - **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。
+
+### 读屏（Screen）
+
+`ws://<host>:7420/v0/screen?session=<id>`，认证同上；会话不存在时返回 `404`。供对话页识别 Claude Code 的对话框（ADR 0005）：Gateway 以 `observe` 模式 attach（不要历史），用 `vt100` 维护屏幕，只发文本帧：
+
+```jsonc
+// 屏幕安静 150 ms 后发；内容没变不发；Agent Status 为 working 时不发
+{"type": "screen", "cols": 200, "rows": 50, "text": "…", "cursor": [49, 2]}
+{"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
+```
+
+- `text`：可见的 `rows` 行，行间 `\r\n`；每次样式变化写一个从复位开始的 SGR（`ESC[0;…m`，只含粗体、暗色、斜体、反色和前景/背景色），行尾无背景的空白去掉。
+- `cursor`：`[行, 列]`，从 0 开始；光标隐藏时为 `null`。
+- 终端尺寸变化时按新尺寸重建屏幕。对话框的识别和作答按键都在 App 里，作答仍走「按键」消息。

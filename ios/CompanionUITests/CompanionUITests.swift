@@ -327,6 +327,35 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
+    /// A Claude Code folder trust dialog, read from the screen, answered from
+    /// the conversation page. "No, exit" so no setting is saved; Claude Code
+    /// exits and its test terminal goes with it.
+    @MainActor
+    func testDialogFromScreen() throws {
+        guard let name = ProcessInfo.processInfo.environment["COMPANION_DIALOG_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("COMPANION_DIALOG_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        XCTAssert(session.waitForExistence(timeout: 15), "no Claude Code session")
+        session.tap()
+        let card = app.descendants(matching: .any)["dialogCard"]
+        XCTAssert(card.waitForExistence(timeout: 20), "no dialog card")
+        XCTAssert(text(app, containing: "是否信任这个文件夹").exists)
+        snapshot("1 trust dialog")
+
+        let exit = app.buttons["dialogOption-1"]
+        XCTAssert(exit.label.contains("No"), "option 1 is \(exit.label)")
+        exit.tap()
+        confirm(app, "退出 Claude Code")
+        XCTAssert(card.waitForNonExistence(timeout: 20), "dialog card stayed")
+        snapshot("2 answered")
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testNewSessionSheet() throws {
         let app = launchUnpaired()

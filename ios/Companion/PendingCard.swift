@@ -192,7 +192,7 @@ struct PendingCard: View {
 /// A filled choice that reads as tappable on the card; the system bordered
 /// style's fill is nearly invisible on a white card. One style for every
 /// choice keeps 拒绝 and 批准 the same height.
-private struct ChoiceStyle: ButtonStyle {
+struct ChoiceStyle: ButtonStyle {
     enum Role { case normal, destructive, prominent }
     var role = Role.normal
     @Environment(\.isEnabled) private var isEnabled

@@ -13,6 +13,7 @@ struct ObserveView: View {
     let client: GatewayClient
 
     @State private var conversation = ConversationFeed()
+    @State private var screen = ScreenFeed()
     @State private var mode: Mode
     @State private var grid: TerminalGrid?
     @State private var draft: String
@@ -50,10 +51,21 @@ struct ObserveView: View {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Claude Code draws some dialogs only on screen; they show on the
+    /// conversation page from the screen read, not while the Agent works
+    /// (the Gateway sends no screen then, so the last one is stale).
+    private var screenResult: DialogParseResult {
+        guard mode == .conversation, QuickCommand.isClaudeCode(currentSession),
+              currentSession.status?.state != "working" else { return .none }
+        return screen.result
+    }
+
     /// Only Agents whose transcript the Gateway reads have a conversation.
+    /// Claude Code has none before its first message, but its dialogs show
+    /// here from the screen, so it keeps the page.
     private var hasConversation: Bool {
         switch conversation.phase {
-        case .unsupported: false
+        case .unsupported: QuickCommand.isClaudeCode(currentSession)
         case .connecting: mode == .conversation
         default: true
         }
@@ -119,15 +131,21 @@ struct ObserveView: View {
             if case .sent(let text, _, _, _) = delivery, draft == text { draft = "" }
         }
         .onChange(of: conversation.phase) { _, phase in
-            if phase == .unsupported { mode = .terminal }
+            if phase == .unsupported, !QuickCommand.isClaudeCode(currentSession) { mode = .terminal }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, case .failed = conversation.phase {
                 conversation.start(config, session: session.id)
             }
         }
-        .task { conversation.start(config, session: session.id) }
-        .onDisappear { conversation.stop() }
+        .task {
+            conversation.start(config, session: session.id)
+            if QuickCommand.isClaudeCode(session) { screen.start(config, session: session.id) }
+        }
+        .onDisappear {
+            conversation.stop()
+            screen.stop()
+        }
     }
 
     /// Status stays above the composer; safeAreaInset also gives the software
@@ -135,12 +153,23 @@ struct ObserveView: View {
     @ViewBuilder
     private var bottomPanel: some View {
         VStack(spacing: 8) {
-            if mode == .conversation, let pending = conversation.pending {
+            if let dialog = screenResult.dialog {
+                DialogCard(dialog: dialog, run: { plan, dialog in
+                    await DialogRunner(
+                        session: session.id, feed: screen,
+                        press: { keys in await client.pressKeys(session: session.id, keys: keys) },
+                        agentWorking: { currentSession.status?.state == "working" }
+                    ).run(plan, on: dialog)
+                }, openTerminal: { mode = .terminal })
+                .id(dialog.fingerprint.value)
+            } else if mode == .conversation, let pending = conversation.pending {
                 PendingCard(pending: pending, tool: conversation.pendingTool,
                             answer: { choice in
                                 await client.answer(session: session.id, choice: choice, expect: pending.message)
                             },
                             openTerminal: { mode = .terminal })
+            } else if let excerpt = screenResult.excerpt {
+                GenericDialogCard(excerpt: excerpt, openTerminal: { mode = .terminal })
             }
             if mode == .terminal, let failure = keys.failure {
                 BannerLabel(text: failure, systemImage: "exclamationmark.triangle.fill")
