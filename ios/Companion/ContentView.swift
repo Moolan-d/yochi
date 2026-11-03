@@ -26,7 +26,7 @@ struct ContentView: View {
                                     newSession: { showingNewSession = true })
                         .navigationTitle("Agent")
                         .navigationDestination(for: Session.self) { session in
-                            ObserveView(session: session, config: config, client: client)
+                            ObserveView(session: session, config: config, client: client) { path.append($0) }
                         }
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {

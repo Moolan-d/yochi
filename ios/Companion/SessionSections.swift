@@ -85,6 +85,14 @@ func isUnseen(_ session: Session, seen: UInt64?) -> Bool {
     session.status?.state == "done" && session.turn > max(session.seen ?? 0, seen ?? 0)
 }
 
+/// The other terminals in the session's Herdr tab, in pane order; none when
+/// it is in no tab.
+func tabMates(of id: String, sessions: [Session], spaces: [Space]) -> [Session] {
+    guard let tab = spaces.lazy.flatMap(\.tabs).first(where: { $0.sessions.contains(id) }) else { return [] }
+    let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return tab.sessions.filter { $0 != id }.compactMap { byID[$0] }
+}
+
 /// Herdr numbers the tabs nobody named; those numbers say nothing on a row.
 func namedTab(_ name: String) -> String? {
     let name = name.trimmingCharacters(in: .whitespaces)
@@ -129,11 +137,7 @@ func childrenAfterParents(_ sessions: [Session]) -> [Session] {
 // MARK: - What a row says
 
 extension HomeRow {
-    /// The folder's own name, `~` and `/` as they are.
-    var folder: String {
-        let parts = session.cwd.split(separator: "/")
-        return parts.last.map(String.init) ?? (session.cwd.isEmpty ? "" : "/")
-    }
+    var folder: String { session.folder }
 
     /// The Agent's own title (Claude Code's session title); a generic one
     /// gives way to the tab's name, then the folder's.

@@ -158,6 +158,14 @@ final class SessionSectionsTests: XCTestCase {
         XCTAssertFalse(found.matches("nothing"))
     }
 
+    func testTabMatesAreTheOtherTerminalsInItsTab() throws {
+        let sessions = [try agent("t1"), try session("t2"), try session("t3"), try session("t4")]
+        let spaces = [space("sp1", "app", tabs: [("1", ["t2", "t1", "t9", "t3"]), ("2", ["t4"])])]
+        XCTAssertEqual(tabMates(of: "t1", sessions: sessions, spaces: spaces).map(\.id), ["t2", "t3"], "gone ones drop out")
+        XCTAssertEqual(tabMates(of: "t4", sessions: sessions, spaces: spaces), [])
+        XCTAssertEqual(tabMates(of: "t5", sessions: sessions, spaces: spaces), [], "in no tab")
+    }
+
     func testAgo() {
         XCTAssertEqual(Ago.text(milliseconds: 30_000), "刚刚")
         XCTAssertEqual(Ago.text(milliseconds: 600_000), "10 分钟前")

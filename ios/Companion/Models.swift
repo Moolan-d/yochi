@@ -47,6 +47,12 @@ struct Session: Decodable, Identifiable, Hashable {
         todo = try? c.decodeIfPresent(TodoNow.self, forKey: .todo)
     }
 
+    /// The folder's own name, `~` and `/` as they are.
+    var folder: String {
+        let parts = cwd.split(separator: "/")
+        return parts.last.map(String.init) ?? (cwd.isEmpty ? "" : "/")
+    }
+
     /// An Agent reports a status; a plain terminal (zsh, a dev server) doesn't.
     var isAgent: Bool { status != nil }
 

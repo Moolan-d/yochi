@@ -871,6 +871,34 @@ final class CompanionUITests: XCTestCase {
     /// with no tap or drag, and reading back offers a way to the newest
     /// item. Reads an existing session with a transcript; nothing is sent
     /// or pressed.
+    /// The menu of the other terminals in an existing session's Herdr tab,
+    /// and opening one read-only: COMPANION_TAB_SESSION=<id> of a session
+    /// whose tab holds more than it.
+    @MainActor
+    func testTabMenu() throws {
+        guard let id = ProcessInfo.processInfo.environment["COMPANION_TAB_SESSION"], !id.isEmpty else {
+            throw XCTSkip("COMPANION_TAB_SESSION is not set")
+        }
+        let app = launchUnpaired(observing: id)
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+        let menu = app.buttons["tabMenu"]
+        XCTAssert(menu.waitForExistence(timeout: 15), "no menu of the tab's terminals")
+        XCTAssertEqual(menu.label, "同一个 Tab 的终端")
+        menu.tap()
+        let first = app.collectionViews.buttons.firstMatch
+        XCTAssert(first.waitForExistence(timeout: 5), "the menu is empty")
+        snapshot("1 tab menu")
+        let title = first.label.components(separatedBy: ",").first ?? first.label
+        first.tap()
+        XCTAssert(app.navigationBars.staticTexts[title].waitForExistence(timeout: 10)
+                  || text(app, containing: title).waitForExistence(timeout: 5), "\(title) did not open")
+        snapshot("2 opened")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssert(menu.waitForExistence(timeout: 10), "did not come back to the first session")
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testConversationScrollsToLatest() throws {
         guard let id = ProcessInfo.processInfo.environment["COMPANION_CONVERSATION_SESSION"], !id.isEmpty else {

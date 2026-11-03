@@ -104,7 +104,7 @@ start_changes_repo() {
 # TESTS="testA testB" runs a subset; testDialogFromScreen,
 # testPickerFromScreen, testPermissionModeFromScreen and
 # testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
-# testChangesPage run only when named.
+# testChangesPage run only when named, as does testTabMenu.
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testHomeSample}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -121,6 +121,10 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         # HISTORY_SESSION_NAME points it at an existing session instead, read-only.
         [ -n "${HISTORY_SESSION_NAME:-}" ] || start_history_session
         extra="TEST_RUNNER_COMPANION_HISTORY_SESSION_NAME=${HISTORY_SESSION_NAME:-companion-uitest-history}"
+    fi
+    if [ "$test" = testTabMenu ]; then
+        # An existing session whose Herdr tab holds more, opened read only: TAB_SESSION=<id>.
+        extra="TEST_RUNNER_COMPANION_TAB_SESSION=${TAB_SESSION:-}"
     fi
     if [ "$test" = testConversationScrollsToLatest ]; then
         # An existing session with a transcript, read only: CONVERSATION_SESSION=<id>.

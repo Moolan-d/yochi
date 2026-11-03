@@ -9,6 +9,8 @@ struct ObserveView: View {
     let session: Session
     let config: GatewayConfig
     let client: GatewayClient
+    /// Opens another session on top of this one.
+    var open: (Session) -> Void
 
     @State private var conversation = ConversationFeed()
     @State private var screen = ScreenFeed()
@@ -39,10 +41,11 @@ struct ObserveView: View {
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    init(session: Session, config: GatewayConfig, client: GatewayClient) {
+    init(session: Session, config: GatewayConfig, client: GatewayClient, open: @escaping (Session) -> Void) {
         self.session = session
         self.config = config
         self.client = client
+        self.open = open
         _draft = State(initialValue: AgentMessageStore.draft(host: config.host, session: session.id))
     }
 
@@ -526,9 +529,31 @@ struct ObserveView: View {
                 : "可查看终端、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
+            tabMenu
             Button("改动", systemImage: "arrow.triangle.pull") { showingChanges = true }
                 .accessibilityIdentifier("changesButton")
             if !isConversation { textSizeMenu }
+        }
+    }
+
+    /// The dev server or shell beside the Agent in its Herdr tab, one tap
+    /// away; hidden when the tab holds nothing else.
+    @ViewBuilder private var tabMenu: some View {
+        let mates = tabMates(of: session.id, sessions: client.sessions, spaces: client.spaces)
+        if !mates.isEmpty {
+            Menu("同一个 Tab 的终端", systemImage: "rectangle.split.2x1") {
+                Section("同一个 Tab") {
+                    ForEach(mates) { mate in
+                        Button {
+                            open(mate)
+                        } label: {
+                            Label(mate.title, systemImage: mate.isAgent ? "sparkles" : "terminal")
+                            Text([mate.program, mate.folder].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                        }
+                    }
+                }
+            }
+            .accessibilityIdentifier("tabMenu")
         }
     }
 
