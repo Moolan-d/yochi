@@ -136,7 +136,7 @@ struct NewSessionView: View {
                     }
                 }
             }
-            .navigationTitle("新建会话")
+            .navigationTitle("新建")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

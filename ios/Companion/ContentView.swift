@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var config = GatewayConfig.load()
     @State private var client = GatewayClient()
+    @State private var seen = SeenTurns()
     @State private var showingSettings = false
     @State private var showingNewSession = false
     @State private var path: [Session] = []
@@ -21,13 +22,15 @@ struct ContentView: View {
         NavigationStack(path: $path) {
             Group {
                 if let config {
-                    SessionListView(client: client, retry: { client.connect(config) }, reenter: forget)
+                    SessionListView(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
+                                    newSession: { showingNewSession = true })
+                        .navigationTitle("Agent")
                         .navigationDestination(for: Session.self) { session in
                             ObserveView(session: session, config: config, client: client)
                         }
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {
-                                Button("新建会话", systemImage: "plus") { showingNewSession = true }
+                                Button("新建", systemImage: "plus") { showingNewSession = true }
                                     .disabled(client.phase != .connected)
                                 Button("设置", systemImage: "gearshape") { showingSettings = true }
                             }
@@ -49,9 +52,9 @@ struct ContentView: View {
                         invite = nil
                         self.config = config
                     }
+                    .navigationTitle("Companion")
                 }
             }
-            .navigationTitle("Companion")
         }
         .onOpenURL { url in
             guard let opened = PairingInvite(url: url) else { return }
@@ -102,7 +105,10 @@ struct ContentView: View {
         #endif
         .onChange(of: client.sessions) { _, sessions in
             openPending(sessions)
+            recordSeen()
+            if client.phase == .connected && client.coreConnected { seen.keep(only: sessions) }
         }
+        .onChange(of: path) { recordSeen() }
         .onChange(of: scenePhase) { _, phase in
             guard let config else { return }
             switch phase {
@@ -118,6 +124,13 @@ struct ContentView: View {
         guard let opening, let session = (sessions ?? client.sessions).first(where: { $0.id == opening }) else { return }
         self.opening = nil
         path = [session]
+    }
+
+    /// An open conversation shows its newest turn, so that turn is seen.
+    private func recordSeen() {
+        for opened in path {
+            if let session = client.sessions.first(where: { $0.id == opened.id }) { seen.record(session) }
+        }
     }
 
     private func forget() {

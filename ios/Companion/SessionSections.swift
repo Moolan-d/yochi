@@ -1,10 +1,22 @@
 import Foundation
 
-/// One section of the session list.
-struct SessionSection: Identifiable, Equatable {
+/// One row of the home page: an Agent, or a plain terminal folded at the
+/// bottom of its space.
+struct HomeRow: Identifiable, Equatable {
+    let session: Session
+    /// The space it lives in; nil outside Herdr's spaces.
+    let space: String?
+    /// The tab's name when someone named it; numbered tabs have none.
+    let tab: String?
+    /// Finished a turn neither Herdr's desktop nor this iPhone has shown.
+    let unseen: Bool
+
+    var id: String { session.id }
+}
+
+/// A Herdr space, or the sessions of one machine in no space.
+struct HomeGroup: Identifiable, Equatable {
     enum Kind: Equatable {
-        /// Agents waiting for the user to approve, answer or log in, from every space.
-        case needsMe
         case space
         /// Sessions in no Herdr space, for one machine.
         case others
@@ -15,70 +27,85 @@ struct SessionSection: Identifiable, Equatable {
     let title: String
     /// A remote machine's name; nil for the Gateway's own Mac.
     let machine: String?
-    let tabs: [SessionTabGroup]
+    /// Pinned ones first, each followed by the child Agents it started.
+    let agents: [HomeRow]
+    /// Shells, dev servers and the like, folded under the Agents.
+    let terminals: [HomeRow]
 }
 
-struct SessionTabGroup: Identifiable, Equatable {
-    let id: String
-    /// Nil when the section has only this tab: its rows go straight under the header.
-    let title: String?
-    let entries: [SessionEntry]
+struct Home: Equatable {
+    /// Waiting on the user first, then finished and not looked at yet; they
+    /// stay in their own group too.
+    let needsYou: [HomeRow]
+    let groups: [HomeGroup]
 }
 
-struct SessionEntry: Identifiable, Equatable {
-    let session: Session
-    /// Where the session lives, for rows shown outside their space.
-    let place: String?
-
-    var id: String { session.id }
-}
-
-/// Agents waiting on the user first, then Herdr's spaces and their tabs, then
-/// sessions in no space by machine. Without spaces (an older Gateway, or no
-/// Herdr layout) every machine's sessions form one section, as before.
-func sessionSections(sessions: [Session], spaces: [Space]) -> [SessionSection] {
+/// The home page: Agents by Herdr space, then by machine for sessions in no
+/// space. Without spaces (an older Gateway, or no Herdr layout) every
+/// machine's sessions form one group. `seen` holds the turn this iPhone last
+/// showed for each session.
+func makeHome(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:]) -> Home {
     let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    var placed: [String: String] = [:]
-    var sections: [SessionSection] = []
+    let row = { (session: Session, space: String?, tab: String?) in
+        HomeRow(session: session, space: space, tab: tab, unseen: isUnseen(session, seen: seen[session.id]))
+    }
+    var placed = Set<String>()
+    var groups: [HomeGroup] = []
 
     for space in spaces {
-        let tabs = space.tabs.compactMap { tab -> SessionTabGroup? in
-            let entries = tab.sessions.compactMap { byID[$0] }.map { SessionEntry(session: $0, place: nil) }
-            guard !entries.isEmpty else { return nil }
-            for entry in entries where placed[entry.id] == nil {
-                placed[entry.id] = space.tabs.count > 1 ? "\(space.name) · \(tab.name)" : space.name
-            }
-            return SessionTabGroup(id: tab.id, title: space.tabs.count > 1 ? tab.name : nil, entries: entries)
+        let rows = space.tabs.flatMap { tab in
+            tab.sessions.compactMap { byID[$0] }
+                .filter { placed.insert($0.id).inserted }
+                .map { row($0, space.name, namedTab(tab.name)) }
         }
-        guard !tabs.isEmpty else { continue }
-        sections.append(SessionSection(id: space.id, kind: .space, title: space.name, machine: space.machine, tabs: tabs))
+        guard !rows.isEmpty else { continue }
+        groups.append(HomeGroup(
+            id: space.id, kind: .space, title: space.name, machine: space.machine,
+            agents: pinnedFirst(rows.filter(\.session.isAgent)), terminals: rows.filter { !$0.session.isAgent }))
     }
 
-    let others = Dictionary(grouping: sessions.filter { placed[$0.id] == nil }, by: \.machine)
+    let others = Dictionary(grouping: sessions.filter { !placed.contains($0.id) }, by: \.machine)
         .sorted { ($0.key ?? "") < ($1.key ?? "") }
     for (machine, group) in others {
-        let entries = childrenAfterParents(group).map { SessionEntry(session: $0, place: nil) }
-        sections.append(SessionSection(
+        let rows = childrenAfterParents(group).map { row($0, nil, nil) }
+        groups.append(HomeGroup(
             id: "others/\(machine ?? "")", kind: .others,
             title: spaces.isEmpty ? (machine ?? "本机") : "其他终端",
             machine: spaces.isEmpty ? nil : machine,
-            tabs: [SessionTabGroup(id: "others/\(machine ?? "")", title: nil, entries: entries)]))
+            agents: pinnedFirst(rows.filter(\.session.isAgent)), terminals: rows.filter { !$0.session.isAgent }))
     }
 
     // In list order, so it matches what the user sees below.
-    var seen = Set<String>()
-    let waiting = sections.flatMap { $0.tabs.flatMap(\.entries) }
-        .filter { $0.session.status?.state == "blocked" && seen.insert($0.id).inserted }
-        .map { entry in
-            let machine = entry.session.machine.map { "\($0) · " } ?? ""
-            return SessionEntry(session: entry.session, place: placed[entry.id].map { machine + $0 } ?? entry.session.machine)
+    let agents = groups.flatMap(\.agents)
+    let needsYou = agents.filter { $0.session.status?.state == "blocked" } + agents.filter(\.unseen)
+    return Home(needsYou: needsYou, groups: groups)
+}
+
+func isUnseen(_ session: Session, seen: UInt64?) -> Bool {
+    session.status?.state == "done" && session.turn > max(session.seen ?? 0, seen ?? 0)
+}
+
+/// Herdr numbers the tabs nobody named; those numbers say nothing on a row.
+func namedTab(_ name: String) -> String? {
+    let name = name.trimmingCharacters(in: .whitespaces)
+    return name.isEmpty || name.allSatisfy(\.isNumber) ? nil : name
+}
+
+/// Pinned Agents move to the top, each with the child Agents it started;
+/// otherwise the order stays.
+private func pinnedFirst(_ rows: [HomeRow]) -> [HomeRow] {
+    let byID = Dictionary(rows.map { ($0.id, $0.session) }, uniquingKeysWith: { first, _ in first })
+    func root(_ session: Session) -> Session {
+        var current = session
+        var steps = 0
+        while let parent = current.parent.flatMap({ byID[$0] }), steps < 32 {
+            current = parent
+            steps += 1
         }
-    if !waiting.isEmpty {
-        sections.insert(SessionSection(
-            id: "needs-me", kind: .needsMe, title: "需要处理", machine: nil,
-            tabs: [SessionTabGroup(id: "needs-me", title: nil, entries: waiting)]), at: 0)
+        return current
     }
-    return sections
+    let pinned = rows.filter { root($0.session).pinned }
+    return pinned + rows.filter { !root($0.session).pinned }
 }
 
 /// Each child Agent right after the terminal that started it and that
@@ -97,4 +124,128 @@ func childrenAfterParents(_ sessions: [Session]) -> [Session] {
     // A loop of parents has no root; keep those where they were.
     sessions.forEach(add)
     return ordered
+}
+
+// MARK: - What a row says
+
+extension HomeRow {
+    /// The folder's own name, `~` and `/` as they are.
+    var folder: String {
+        let parts = session.cwd.split(separator: "/")
+        return parts.last.map(String.init) ?? (session.cwd.isEmpty ? "" : "/")
+    }
+
+    /// The Agent's own title (Claude Code's session title); a generic one
+    /// gives way to the tab's name, then the folder's.
+    var title: String {
+        let title = session.title.trimmingCharacters(in: .whitespaces)
+        guard session.isAgent else { return title.isEmpty ? (session.program ?? folder) : title }
+        let generic = title.isEmpty || title == session.id || title == session.program
+            || ["claude", "claude code"].contains(title.lowercased())
+            || title.range(of: #"^\d+(\.\d+)+$"#, options: .regularExpression) != nil
+        return generic ? (tab ?? folder) : title
+    }
+
+    /// The third line: repository · worktree · tab; the folder when it is no
+    /// repository. In 需要你 the space comes first, since the row is away from it.
+    func place(awayFromSpace: Bool) -> String {
+        let machine = awayFromSpace ? session.machine : nil
+        let space = awayFromSpace ? space : nil
+        let parts: [String?] = [machine, space, session.repo?.name ?? folder, session.repo?.worktree, tab]
+        // A space named after its repository says it once.
+        let words = parts.compactMap { $0 }.filter { !$0.isEmpty }
+        return words.enumerated().filter { $0.offset == 0 || words[$0.offset - 1] != $0.element }
+            .map(\.element).joined(separator: " · ")
+    }
+
+    /// The second line: what the Agent needs or does now; nil when it rests.
+    func activity(at now: Date) -> String? {
+        guard let status = session.status else { return nil }
+        let since = session.statusMs.map { Int64(now.timeIntervalSince1970 * 1000) - $0 }
+        let text: String? = switch status.state {
+        case "blocked":
+            status.message ?? "等你处理"
+        case "working":
+            [session.todo.map { TodoProgress($0).text } ?? "工作中", since.map { Elapsed.text(milliseconds: $0) }]
+                .compactMap { $0 }.joined(separator: " · ")
+        case "done":
+            since.map { "完成 · \(Ago.text(milliseconds: $0))" } ?? "完成"
+        case "error":
+            status.message.map { "出错：\($0)" } ?? "出错"
+        default:
+            nil
+        }
+        guard session.parent != nil else { return text }
+        return ["子 Agent", text].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The status in a word, for VoiceOver and the collapsed space.
+    var stateWord: String? {
+        switch session.status?.state {
+        case "blocked": "等你处理"
+        case "working": "工作中"
+        case "done": unseen ? "完成，未看过" : "已完成"
+        case "error": "出错"
+        case "idle": "空闲"
+        default: nil
+        }
+    }
+
+    /// Read once, not every second.
+    func accessibilityLabel(awayFromSpace: Bool = false) -> String {
+        // The ticking time stays out; the state word says enough.
+        let activity: String? = switch session.status?.state {
+        case "working": session.todo.map { TodoProgress($0).accessibilityLabel }
+        case "blocked", "error": session.status?.message
+        default: nil
+        }
+        return [pinnedWord, title, session.parent != nil ? "子 Agent" : nil, stateWord, activity, place(awayFromSpace: awayFromSpace)]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，")
+    }
+
+    private var pinnedWord: String? { session.pinned ? "已置顶" : nil }
+
+    /// Search by what the row shows and where it lives.
+    func matches(_ query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return true }
+        return [title, session.title, session.repo?.name, session.repo?.worktree, tab, space, folder, session.machine]
+            .compactMap { $0 }
+            .contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+}
+
+extension HomeGroup {
+    /// The most pressing state among its Agents: waiting > working > unseen.
+    var summary: HomeSummary? {
+        if agents.contains(where: { $0.session.status?.state == "blocked" }) { return .blocked }
+        if agents.contains(where: { $0.session.status?.state == "working" }) { return .working }
+        if agents.contains(where: \.unseen) { return .unseen }
+        return nil
+    }
+}
+
+enum HomeSummary: Equatable {
+    case blocked, working, unseen
+
+    var word: String {
+        switch self {
+        case .blocked: "有 Agent 等你处理"
+        case .working: "有 Agent 在工作"
+        case .unseen: "有未看过的完成"
+        }
+    }
+}
+
+/// How long ago, in the words of a list: 刚刚, 3 分钟前, 2 小时前, 4 天前.
+enum Ago {
+    static func text(milliseconds: Int64) -> String {
+        let seconds = max(milliseconds, 0) / 1000
+        switch seconds {
+        case ..<60: return "刚刚"
+        case ..<3600: return "\(seconds / 60) 分钟前"
+        case ..<86400: return "\(seconds / 3600) 小时前"
+        default: return "\(seconds / 86400) 天前"
+        }
+    }
 }

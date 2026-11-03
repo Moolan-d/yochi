@@ -204,6 +204,13 @@ struct TodoProgress: Equatable {
         total = list.count
     }
 
+    /// What the Gateway read for the home page.
+    init(_ todo: TodoNow) {
+        doing = todo.text
+        done = todo.done
+        total = todo.total
+    }
+
     /// An `activeForm` that already says 正在 isn't said twice.
     private var line: String { doing.hasPrefix("正在") ? doing : "正在：\(doing)" }
     var text: String { "\(line)（\(done)/\(total)）" }

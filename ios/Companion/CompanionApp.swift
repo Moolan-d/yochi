@@ -7,6 +7,8 @@ struct CompanionApp: App {
             #if DEBUG
             if SampleConversationView.requested {
                 SampleConversationView()
+            } else if SampleHomeView.requested {
+                SampleHomeView()
             } else {
                 ContentView()
             }

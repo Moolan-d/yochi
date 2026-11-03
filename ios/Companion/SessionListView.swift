@@ -2,37 +2,22 @@ import SwiftUI
 
 struct SessionListView: View {
     let client: GatewayClient
+    let seen: SeenTurns
     var retry: () -> Void
     var reenter: () -> Void
-
-    private var sections: [SessionSection] {
-        sessionSections(sessions: client.sessions, spaces: client.spaces)
-    }
+    var newSession: () -> Void
 
     var body: some View {
-        List {
+        HomeList(
+            home: makeHome(sessions: client.sessions, spaces: client.spaces, seen: seen.turns),
+            queued: { client.queuedMessage(session: $0) != nil },
+            newSession: client.phase == .connected ? newSession : nil
+        ) {
             // Sessions shown while disconnected are stale; say so above them.
             if client.phase != .connected && !client.sessions.isEmpty {
                 Section {
                     Label(client.statusText, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                }
-            }
-            ForEach(sections) { section in
-                Section {
-                    ForEach(section.tabs) { tab in
-                        if let title = tab.title {
-                            TabHeader(title: title)
-                        }
-                        ForEach(tab.entries) { entry in
-                            NavigationLink(value: entry.session) {
-                                SessionRow(session: entry.session, place: entry.place,
-                                           queued: client.queuedMessage(session: entry.session.id) != nil)
-                            }
-                        }
-                    }
-                } header: {
-                    SectionHeader(section: section)
                 }
             }
         }
@@ -70,10 +55,14 @@ struct SessionListView: View {
                 systemImage: "bolt.horizontal.circle",
                 description: Text("Gateway 已连接，但主 Mac 上的 herdr-core 没有响应。"))
         case .connected:
-            ContentUnavailableView(
-                "没有运行中的会话",
-                systemImage: "terminal",
-                description: Text("点右上角的 + 新建会话，或让 Agent 在 Herdr 中开始运行。"))
+            ContentUnavailableView {
+                Label("没有运行中的 Agent", systemImage: "terminal")
+            } description: {
+                Text("新建一个，或在 Herdr 中让 Agent 开始运行。")
+            } actions: {
+                Button("新建", action: newSession)
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 }
@@ -90,151 +79,401 @@ extension GatewayClient {
     }
 }
 
-private struct SectionHeader: View {
-    let section: SessionSection
+/// The turn this iPhone last showed for each session, kept on the phone:
+/// opening a finished Agent's conversation takes it out of 需要你.
+@MainActor @Observable
+final class SeenTurns {
+    private static let key = "seenTurns"
+    private(set) var turns: [String: UInt64]
+
+    init() {
+        let stored = UserDefaults.standard.dictionary(forKey: Self.key) as? [String: Int] ?? [:]
+        turns = stored.mapValues { UInt64(max($0, 0)) }
+    }
+
+    func record(_ session: Session) {
+        guard session.turn > turns[session.id] ?? 0 else { return }
+        turns[session.id] = session.turn
+        save()
+    }
+
+    /// Ended terminals' ids go, so the store doesn't grow forever.
+    func keep(only sessions: [Session]) {
+        let ids = Set(sessions.map(\.id))
+        guard turns.keys.contains(where: { !ids.contains($0) }) else { return }
+        turns = turns.filter { ids.contains($0.key) }
+        save()
+    }
+
+    private func save() {
+        UserDefaults.standard.set(turns.mapValues { Int(clamping: $0) }, forKey: Self.key)
+    }
+}
+
+/// The home page's list: 需要你, then each space with its Agents and its
+/// terminals folded, or a flat list of matches while searching.
+struct HomeList<Banner: View>: View {
+    let home: Home
+    /// A message waits on this iPhone for the session's turn to end.
+    let queued: (String) -> Bool
+    /// Offered when nothing matches a search; nil while it can't be used.
+    let newSession: (() -> Void)?
+    @ViewBuilder var banner: Banner
+
+    @State private var query = ""
+    /// Spaces the user folded, by id, kept on this iPhone.
+    @AppStorage("collapsedSpaces") private var collapsedIDs = ""
+    /// Groups whose terminals are shown; folded again on the next launch.
+    @State private var openTerminals: Set<String> = []
+
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private var matches: [HomeRow] {
+        home.groups.flatMap { $0.agents + $0.terminals }.filter { $0.matches(query) }
+    }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if section.kind == .needsMe {
-                Label(section.title, systemImage: "hand.raised.fill")
-                    .foregroundStyle(.orange)
+        List {
+            banner
+            if searching {
+                Section {
+                    ForEach(matches) { row in
+                        link(row, awayFromSpace: true)
+                    }
+                }
             } else {
-                Text(section.title)
-            }
-            if let machine = section.machine {
-                Text(machine)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .textCase(nil)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// A tab's name above its sessions, for spaces with more than one tab. Status
-/// lives on the rows only: every row is always listed, so a roll-up would repeat it.
-private struct TabHeader: View {
-    let title: String
-
-    var body: some View {
-        Label(title, systemImage: "rectangle.split.2x1")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
-private struct SessionRow: View {
-    let session: Session
-    let place: String?
-    /// A message waits on this iPhone for the turn to end.
-    let queued: Bool
-
-    /// Status leads the row in a slot of its own, so it lines up across rows
-    /// and stays clear of the list's disclosure chevron at the end.
-    @ScaledMetric(relativeTo: .headline) private var statusWidth: CGFloat = 22
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            if session.parent != nil {
-                // One level in, under the Agent that started it.
-                Label("子 Agent", systemImage: "arrow.turn.down.right")
-                    .labelStyle(.iconOnly)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Group {
-                if let status = session.status { StatusBadge(state: status.state) } else { Text(" ") }
-            }
-            .font(.headline)
-            .frame(width: statusWidth, alignment: .center)
-            details
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(session.title)
-                .font(.headline)
-                .lineLimit(1)
-            if session.working(at: .now) != nil {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(session.working(at: context.date) ?? "")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                if !home.needsYou.isEmpty {
+                    Section {
+                        ForEach(home.needsYou) { row in
+                            link(row, awayFromSpace: true)
+                        }
+                    } header: {
+                        Label("需要你", systemImage: "hand.raised.fill")
+                            .font(.headline)
+                            .foregroundStyle(.orange)
+                            .textCase(nil)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                }
+                ForEach(home.groups) { group in
+                    section(group)
                 }
             }
-            if queued {
-                Label("排队中", systemImage: "clock")
-                    .font(.subheadline)
+        }
+        .searchable(text: $query, prompt: "搜索 Agent、仓库、Space")
+        .overlay {
+            if searching && matches.isEmpty {
+                ContentUnavailableView {
+                    Label("没有匹配「\(query)」的 Agent", systemImage: "magnifyingglass")
+                } description: {
+                    Text("换个词试试，或新建一个。")
+                } actions: {
+                    if let newSession {
+                        Button("新建", action: newSession)
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ group: HomeGroup) -> some View {
+        let collapsed = isCollapsed(group)
+        Section {
+            if !collapsed {
+                ForEach(group.agents) { row in
+                    link(row, awayFromSpace: false)
+                }
+                if !group.terminals.isEmpty {
+                    terminalsToggle(group)
+                    if openTerminals.contains(group.id) {
+                        ForEach(group.terminals) { row in
+                            link(row, awayFromSpace: false)
+                        }
+                    }
+                }
+            }
+        } header: {
+            GroupHeader(group: group, collapsed: collapsed) { toggleCollapsed(group) }
+        }
+    }
+
+    private func link(_ row: HomeRow, awayFromSpace: Bool) -> some View {
+        NavigationLink(value: row.session) {
+            if row.session.isAgent {
+                AgentRow(row: row, awayFromSpace: awayFromSpace, queued: queued(row.id))
+            } else {
+                TerminalRow(row: row, awayFromSpace: awayFromSpace)
+            }
+        }
+    }
+
+    private func terminalsToggle(_ group: HomeGroup) -> some View {
+        let open = openTerminals.contains(group.id)
+        return Button {
+            withAnimation {
+                if open { openTerminals.remove(group.id) } else { openTerminals.insert(group.id) }
+            }
+        } label: {
+            HStack {
+                Label(group.agents.isEmpty ? "\(group.terminals.count) 个终端" : "另有 \(group.terminals.count) 个终端",
+                      systemImage: "terminal")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(.secondary)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityValue(open ? "已展开" : "已收起")
+        .accessibilityIdentifier("terminalsToggle")
+    }
+
+    private var collapsed: Set<String> {
+        Set(collapsedIDs.split(separator: "\n").map(String.init))
+    }
+
+    private func isCollapsed(_ group: HomeGroup) -> Bool { collapsed.contains(group.id) }
+
+    private func toggleCollapsed(_ group: HomeGroup) {
+        var ids = collapsed
+        if ids.contains(group.id) { ids.remove(group.id) } else { ids.insert(group.id) }
+        withAnimation { collapsedIDs = ids.sorted().joined(separator: "\n") }
+    }
+}
+
+/// A space's name, its machine when remote, and the chevron that folds it;
+/// folded, it says how many Agents it holds and the most pressing state.
+private struct GroupHeader: View {
+    let group: HomeGroup
+    let collapsed: Bool
+    var toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(group.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                if let machine = group.machine {
+                    Label(machine, systemImage: "server.rack")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if collapsed {
+                    if let summary = group.summary {
+                        Image(systemName: summary.symbol)
+                            .foregroundStyle(summary.color)
+                            .accessibilityHidden(true)
+                    }
+                    Text("\(group.agents.count) 个 Agent")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? -90 : 0))
+                    .accessibilityHidden(true)
             }
-            if let place {
-                Text(place)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Text([session.program, session.cwd].compactMap { $0 }.joined(separator: " · "))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let message = session.status?.message {
-                Text(message)
-                    .font(.subheadline)
-                    .lineLimit(2)
-            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .textCase(nil)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([group.title, group.machine].compactMap { $0 }.joined(separator: "，"))
+        .accessibilityValue(collapsed
+            ? (["已收起", "\(group.agents.count) 个 Agent", group.summary?.word].compactMap { $0 }.joined(separator: "，"))
+            : "已展开")
+        .accessibilityHint(collapsed ? "展开这个 Space" : "收起这个 Space")
+        .accessibilityAddTraits([.isHeader, .isButton])
+        .accessibilityIdentifier("groupHeader")
+    }
+}
+
+extension HomeSummary {
+    var symbol: String {
+        switch self {
+        case .blocked: "hand.raised.fill"
+        case .working: "circle.dotted"
+        case .unseen: "circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .blocked: .orange
+        case .working, .unseen: .blue
         }
     }
 }
 
-/// The program's own status as a symbol; each state has its own shape so it never
-/// relies on color alone, and the localized word is its VoiceOver label.
-private struct StatusBadge: View {
-    let state: String
+private struct AgentRow: View {
+    let row: HomeRow
+    /// In 需要你 and search results, away from its space: the third line
+    /// starts with the machine and the space, and children aren't indented.
+    let awayFromSpace: Bool
+    let queued: Bool
+
+    @ScaledMetric(relativeTo: .headline) private var indent: CGFloat = 22
+    /// Large text wraps instead of cutting the title and the place short.
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var session: Session { row.session }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AgentMark(session: session, unseen: row.unseen)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    if session.pinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(row.title)
+                        .font(.headline)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                }
+                activity
+                if queued {
+                    Label("排队中", systemImage: "clock")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                let place = row.place(awayFromSpace: awayFromSpace)
+                if !place.isEmpty {
+                    Text(place)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+        .padding(.leading, session.parent != nil && !awayFromSpace ? indent : 0)
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([row.accessibilityLabel(awayFromSpace: awayFromSpace), queued ? "有排队中的消息" : nil].compactMap { $0 }.joined(separator: "，"))
+    }
+
+    @ViewBuilder
+    private var activity: some View {
+        let style: AnyShapeStyle = switch session.status?.state {
+        case "blocked": AnyShapeStyle(.orange)
+        case "error": AnyShapeStyle(.red)
+        default: AnyShapeStyle(.secondary)
+        }
+        if session.status?.state == "working" || session.status?.state == "done" {
+            // The time since moves on its own.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let text = row.activity(at: context.date) {
+                    Text(text)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(style)
+                        .lineLimit(1)
+                }
+            }
+        } else if let text = row.activity(at: .now) {
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(style)
+                .lineLimit(2)
+        }
+    }
+}
+
+/// The program's mark in a circle, ringed by its state: orange waiting on
+/// the user, a turning blue arc working, blue finished and not seen, red on
+/// error. The row's words carry the state too, so color is never alone.
+private struct AgentMark: View {
+    let session: Session
+    let unseen: Bool
+
+    @ScaledMetric(relativeTo: .headline) private var size: CGFloat = 34
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Label(title, systemImage: symbol)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(color)
-            .labelStyle(.iconOnly)
-            // Working keeps turning, so it reads as live at a glance.
-            .symbolEffect(.rotate, options: .repeat(.continuous), isActive: state == "working" && !reduceMotion)
+        ZStack {
+            Circle().fill(.quaternary)
+            glyph
+                .font(.system(size: size * 0.45, weight: .semibold))
+                .foregroundStyle(.primary)
+            ring
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 
-    private var title: String {
-        switch state {
-        case "working": "工作中"
-        case "blocked": "等待处理"
-        case "error": "出错"
-        case "done": "已完成"
-        case "idle": "空闲"
-        default: state
+    @ViewBuilder
+    private var glyph: some View {
+        switch session.program?.lowercased() {
+        case "claude": Image(systemName: "asterisk")
+        case "pi": Text(verbatim: "π")
+        default: Image(systemName: "cpu")
         }
     }
 
-    private var symbol: String {
-        switch state {
-        case "working": "arrow.triangle.2.circlepath"
-        case "blocked": "hand.raised.fill"
-        case "error": "exclamationmark.triangle.fill"
-        case "done": "checkmark.circle.fill"
-        case "idle": "moon.zzz"
-        default: "circle"
+    @ViewBuilder
+    private var ring: some View {
+        let width = max(2, size / 14)
+        switch session.status?.state {
+        case "blocked":
+            Circle().strokeBorder(.orange, lineWidth: width)
+        case "error":
+            Circle().strokeBorder(.red, lineWidth: width)
+        case "working":
+            let arc = Circle().inset(by: width / 2).trim(from: 0, to: 0.3)
+                .stroke(.blue, style: StrokeStyle(lineWidth: width, lineCap: .round))
+            if reduceMotion {
+                arc.rotationEffect(.degrees(-90))
+            } else {
+                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+                    let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+                    arc.rotationEffect(.degrees(turn * 360))
+                }
+            }
+        case "done" where unseen:
+            Circle().strokeBorder(.blue, lineWidth: width)
+        default:
+            EmptyView()
         }
     }
+}
 
-    private var color: Color {
-        switch state {
-        case "working": .blue
-        case "blocked": .orange
-        case "error": .red
-        case "done": .green
-        default: .secondary
+/// A shell or dev server: its name, then the program and where it runs.
+private struct TerminalRow: View {
+    let row: HomeRow
+    let awayFromSpace: Bool
+
+    @ScaledMetric(relativeTo: .headline) private var size: CGFloat = 34
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "terminal")
+                .font(.system(size: size * 0.42))
+                .foregroundStyle(.secondary)
+                .frame(width: size, height: size)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.title)
+                    .font(.body)
+                    .lineLimit(1)
+                Text([row.session.program, row.place(awayFromSpace: awayFromSpace)]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
+        .accessibilityElement(children: .combine)
     }
 }

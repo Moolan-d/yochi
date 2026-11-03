@@ -27,7 +27,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-child >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -105,7 +105,7 @@ start_changes_repo() {
 # testPickerFromScreen, testPermissionModeFromScreen and
 # testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
 # testChangesPage run only when named.
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testChildAgentRow}; do
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testHomeSample}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
@@ -125,9 +125,6 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     if [ "$test" = testConversationScrollsToLatest ]; then
         # An existing session with a transcript, read only: CONVERSATION_SESSION=<id>.
         extra="TEST_RUNNER_COMPANION_CONVERSATION_SESSION=${CONVERSATION_SESSION:-}"
-    fi
-    if [ "$test" = testChildAgentRow ]; then
-        hc run --bg --rm --parent "$test_session" --no-notify --name companion-uitest-child --json -- /bin/cat > /dev/null
     fi
     if [ "$test" = testDialogFromScreen ]; then
         start_dialog_session
@@ -152,7 +149,6 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     hc kill companion-uitest-history >/dev/null 2>&1 || true
     hc kill companion-uitest-dialog >/dev/null 2>&1 || true
     hc kill companion-uitest-picker >/dev/null 2>&1 || true
-    hc kill companion-uitest-child >/dev/null 2>&1 || true
     if [ -n "${alt_session:-}" ]; then
         hc kill companion-uitest-alt >/dev/null 2>&1 || true
         alt_session=

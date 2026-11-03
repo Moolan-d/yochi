@@ -19,6 +19,8 @@ final class CompanionUITests: XCTestCase {
 
         pair(app, host: nil, code: env("COMPANION_CODE"))
         waitUntilPaired(app)
+        XCTAssert(app.cells.firstMatch.waitForExistence(timeout: 15), "no home page")
+        snapshot("2 home")
         // The echo terminal: an Agent's session would open its conversation instead.
         let session = testSession(app)
         XCTAssert(session.waitForExistence(timeout: 15), "no sessions after pairing")
@@ -62,6 +64,7 @@ final class CompanionUITests: XCTestCase {
 
         app.navigationBars.buttons.firstMatch.tap()
 
+        endSearch(app)
         app.buttons["设置"].tap()
         XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5))
         snapshot("4 settings")
@@ -587,20 +590,68 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
-    /// A child Agent's row sits under the terminal that started it, one level in.
+    /// The DEBUG sample home: 需要你 first, a pinned Agent with its child, a
+    /// remote space that folds, terminals that unfold, and a search with no
+    /// match offering 新建, at the default text size and an accessibility one.
     @MainActor
-    func testChildAgentRow() throws {
-        let app = launchUnpaired()
-        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
-        waitUntilPaired(app)
-        let child = sessionCell(app, name: "companion-uitest-child")
-        XCTAssert(child.waitForExistence(timeout: 15), "no child session")
-        XCTAssert(child.label.hasPrefix("子 Agent"), "the child row reads \(child.label)")
-        let rows = app.cells.buttons.allElementsBoundByIndex.map(\.label)
-        let parent = try XCTUnwrap(rows.firstIndex { $0.contains("companion-uitest") && !$0.contains("companion-uitest-") })
-        XCTAssertEqual(rows.firstIndex { $0.contains("companion-uitest-child") }, parent + 1, "\(rows)")
-        snapshot("child row")
-        unpair(app)
+    func testHomeSample() throws {
+        for size in [nil, "UICTContentSizeCategoryAccessibilityL"] {
+            let app = XCUIApplication()
+            if let size { app.launchArguments += ["-UIPreferredContentSizeCategoryName", size] }
+            app.launchEnvironment["COMPANION_SAMPLE_HOME"] = "1"
+            app.launch()
+            let suffix = size == nil ? "" : "-large"
+
+            let blocked = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "服务助手页面自动断联后重连卡住")).firstMatch
+            XCTAssert(blocked.waitForExistence(timeout: 10), "no blocked Agent")
+            XCTAssertEqual(blocked.label, "服务助手页面自动断联后重连卡住，等你处理，要运行 npm test，允许吗？，小程序 · wx-mini · fix-reconnect")
+            if size == nil {
+                // Larger text pushes these below the fold, where the list hasn't made them yet.
+                let rows = app.cells.buttons.allElementsBoundByIndex.map(\.label)
+                let unseen = try XCTUnwrap(rows.firstIndex { $0.hasPrefix("整理日志轮转，完成，未看过，vps · 运维") }, "\(rows)")
+                XCTAssertGreaterThan(unseen, try XCTUnwrap(rows.firstIndex { $0.hasPrefix("补单元测试，完成，未看过") }), "\(rows)")
+            }
+            snapshot("home-top\(suffix)")
+
+            let pinned = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "已置顶，主页改版，工作中，正在写主页列表")).firstMatch
+            scrollUntilHittable(pinned, in: app, up: true)
+            let child = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "查路线图剩余项，子 Agent，工作中")).firstMatch
+            XCTAssert(child.exists, "no child Agent")
+            // The indent is checked on the screenshot: the row is one element.
+            XCTAssertLessThan(pinned.frame.minY, child.frame.minY, "the child is not under its parent")
+
+            let terminals = app.buttons.matching(NSPredicate(format: "label == %@", "另有 1 个终端")).firstMatch
+            scrollUntilHittable(terminals, in: app, up: true)
+            XCTAssertEqual(terminals.value as? String, "已收起")
+            terminals.tap()
+            XCTAssertEqual(terminals.value as? String, "已展开")
+            XCTAssert(app.cells.buttons.containing(.staticText, identifier: "zsh").firstMatch.waitForExistence(timeout: 5), "terminals did not unfold")
+            snapshot("home-terminals\(suffix)")
+            terminals.tap()
+
+            let remote = app.buttons.matching(identifier: "groupHeader").matching(NSPredicate(format: "label == %@", "运维，vps")).firstMatch
+            scrollUntilHittable(remote, in: app, up: true)
+            XCTAssertEqual(remote.value as? String, "已展开")
+            remote.tap()
+            XCTAssertEqual(remote.value as? String, "已收起，2 个 Agent，有未看过的完成")
+            XCTAssertFalse(app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "升级 Caddy 配置")).firstMatch.exists)
+            snapshot("home-collapsed\(suffix)")
+            remote.tap()
+            XCTAssertEqual(remote.value as? String, "已展开")
+
+            for _ in 0..<4 where !app.searchFields.firstMatch.isHittable { app.swipeDown() }
+            let search = app.searchFields.firstMatch
+            XCTAssert(search.isHittable, "no search field")
+            search.tap()
+            search.typeText("运维")
+            XCTAssert(app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "升级 Caddy 配置")).firstMatch
+                .waitForExistence(timeout: 5), "search by space found nothing")
+            search.typeText("没有的东西")
+            XCTAssert(app.staticTexts["没有匹配「运维没有的东西」的 Agent"].waitForExistence(timeout: 5), "no empty search result")
+            XCTAssert(app.buttons["新建"].exists, "no 新建 for an empty search")
+            snapshot("home-search-empty\(suffix)")
+            app.terminate()
+        }
     }
 
     /// Edit, to-do, subtask and peer cards in the DEBUG sample conversation,
@@ -643,10 +694,10 @@ final class CompanionUITests: XCTestCase {
     }
 
     @MainActor
-    private func scrollUntilHittable(_ element: XCUIElement, in app: XCUIApplication) {
+    private func scrollUntilHittable(_ element: XCUIElement, in app: XCUIApplication, up: Bool = false) {
         let list = app.scrollViews["conversation"]
         for _ in 0..<10 where !(element.exists && element.isHittable) {
-            list.swipeDown()
+            if up { app.swipeUp() } else { list.swipeDown() }
         }
         XCTAssertTrue(element.isHittable, "\(element) is not on screen")
     }
@@ -750,8 +801,8 @@ final class CompanionUITests: XCTestCase {
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app)
 
-        app.buttons["新建会话"].tap()
-        XCTAssert(app.navigationBars["新建会话"].waitForExistence(timeout: 5), "no new session sheet")
+        app.buttons["新建"].tap()
+        XCTAssert(app.navigationBars["新建"].waitForExistence(timeout: 5), "no new session sheet")
         XCTAssert(app.buttons["Claude Code"].exists, "no program choice")
         let directory = app.textFields["newSessionDirectory"]
         XCTAssert(directory.exists, "no directory field")
@@ -760,7 +811,7 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(app.descendants(matching: .any)["newSessionSpace"].exists, "no space choice")
         snapshot("1 new session")
         app.buttons["取消"].tap()
-        XCTAssert(app.buttons["新建会话"].waitForExistence(timeout: 5), "sheet did not close")
+        XCTAssert(app.buttons["新建"].waitForExistence(timeout: 5), "sheet did not close")
         unpair(app)
     }
 
@@ -775,8 +826,8 @@ final class CompanionUITests: XCTestCase {
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app)
 
-        app.buttons["新建会话"].tap()
-        XCTAssert(app.navigationBars["新建会话"].waitForExistence(timeout: 5), "no new session sheet")
+        app.buttons["新建"].tap()
+        XCTAssert(app.navigationBars["新建"].waitForExistence(timeout: 5), "no new session sheet")
         app.buttons["终端"].tap()
         app.buttons["createSession"].tap()
         // The app opens the new terminal once the session list carries it.
@@ -934,14 +985,24 @@ final class CompanionUITests: XCTestCase {
         sessionCell(app, name: "companion-uitest")
     }
 
-    /// A session is titled with the name it was started under. The list is
-    /// lazy and the Mac's own sessions can push it below the fold, so this
-    /// scrolls until the row is on screen.
+    /// A session is titled with the name it was started under. An Agent's
+    /// row reads as one label (pinned first, then the title); a terminal's
+    /// keeps its texts. Terminals are folded and the Mac's own sessions can
+    /// push the row far down, so this searches for it: matches list flat.
     @MainActor
     private func sessionCell(_ app: XCUIApplication, name: String) -> XCUIElement {
-        let cell = app.cells.buttons.containing(.staticText, identifier: name).firstMatch
+        let cell = app.cells.buttons.matching(NSPredicate(
+            format: "label == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label CONTAINS %@",
+            name, "\(name)，", "\(name), ", "置顶，\(name)，")).firstMatch
         guard app.cells.firstMatch.waitForExistence(timeout: 15) else { return cell }
-        for _ in 0..<8 where !(cell.exists && cell.isHittable) { app.swipeUp() }
+        let search = app.searchFields.firstMatch
+        for _ in 0..<4 where !search.isHittable { app.swipeDown() }
+        guard search.isHittable, (search.value as? String) != name else { return cell }
+        search.tap()
+        if let current = search.value as? String, !current.isEmpty, current != search.placeholderValue {
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        }
+        search.typeText(name)
         return cell
     }
 
@@ -951,8 +1012,15 @@ final class CompanionUITests: XCTestCase {
         unpair(app)
     }
 
+    /// A search left from finding a row hides the toolbar.
+    @MainActor
+    private func endSearch(_ app: XCUIApplication) {
+        if !app.buttons["设置"].exists, app.buttons["close"].exists { app.buttons["close"].tap() }
+    }
+
     @MainActor
     private func unpair(_ app: XCUIApplication) {
+        endSearch(app)
         app.buttons["设置"].tap()
         XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5), "no settings sheet")
         app.buttons["取消配对"].tap()
