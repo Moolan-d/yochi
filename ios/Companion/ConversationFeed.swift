@@ -4,7 +4,9 @@ import Observation
 /// One conversation item as the Gateway sends it (`/v0/conversation`).
 struct ConversationItem: Decodable, Identifiable, Equatable {
     enum Kind: String, Decodable {
-        case user, agent, tool, command, notice, other
+        /// task: a subagent or background task reporting back; `summary`,
+        /// `state` and its report in `text`.
+        case user, agent, tool, command, notice, task, other
     }
 
     enum ToolState: String, Decodable {
@@ -13,7 +15,7 @@ struct ConversationItem: Decodable, Identifiable, Equatable {
 
     let id: String
     let kind: Kind
-    /// user, agent and notice text; agent text is Markdown.
+    /// user, agent and notice text; agent and task text is Markdown.
     let text: String?
     /// Tool or command name.
     let name: String?

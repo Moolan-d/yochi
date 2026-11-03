@@ -17,6 +17,8 @@ struct ConversationPane: View {
     /// item above it.
     @State private var distanceBelow = CGFloat.zero
     @State private var viewport = CGFloat.zero
+    /// Items arrived while the reader was further back.
+    @State private var unseen = false
 
     private var working: Bool { status?.state == "working" }
 
@@ -96,11 +98,46 @@ struct ConversationPane: View {
             distanceBelow = metrics.x
             viewport = metrics.y
             atBottom = metrics.x < 60
+            if atBottom { unseen = false }
         }
-        .onChange(of: feed.items) { _, _ in follow() }
+        .onChange(of: feed.items) { _, _ in
+            if atBottom { follow() } else { unseen = true }
+        }
         .onChange(of: working) { _, _ in follow() }
         .onChange(of: keyboardShown) { _, _ in followAfterKeyboard() }
         .accessibilityIdentifier("conversation")
+        // After the identifier, which would otherwise name the button too.
+        .overlay(alignment: .bottomTrailing) {
+            ZStack {
+                if !atBottom {
+                    latestButton.transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+            }
+            .padding(.trailing, 16)
+            .padding(.bottom, 12)
+            .animation(.snappy(duration: 0.2), value: atBottom)
+        }
+    }
+
+    /// Back to the newest item; the list follows again from there.
+    private var latestButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: .circle)
+                .overlay(alignment: .topTrailing) {
+                    if unseen {
+                        Circle().fill(Color.accentColor).frame(width: 10, height: 10)
+                    }
+                }
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(unseen ? "回到最新，有新消息" : "回到最新")
+        .accessibilityIdentifier("scrollToLatest")
     }
 
     private func follow() {
@@ -141,6 +178,8 @@ struct ConversationRow: View {
             ToolRow(item: item)
         case .command:
             CommandRow(item: item)
+        case .task:
+            TaskRow(item: item)
         case .notice:
             Text(item.text ?? "")
                 .font(.footnote)
@@ -246,6 +285,84 @@ private struct ToolRow: View {
         case "TodoWrite": "checklist"
         default: "wrench.and.screwdriver"
         }
+    }
+}
+
+/// A subagent or background task reporting back, collapsed to its summary;
+/// tap for the report. Claude Code files it as a user message, but the user
+/// never typed it.
+struct TaskRow: View {
+    let item: ConversationItem
+    @State private var expanded = false
+
+    /// `Agent "Find roadmap items" finished` → a subagent named by its task.
+    private var subagent: String? {
+        guard let summary = item.summary, summary.hasPrefix("Agent \"") else { return nil }
+        let name = summary.dropFirst("Agent \"".count).prefix { $0 != "\"" }
+        return name.isEmpty ? nil : String(name)
+    }
+
+    private var failed: Bool { item.state == .error }
+
+    var heading: String {
+        let who = subagent == nil ? "后台任务" : "子代理"
+        return "\(who)\(failed ? "失败" : "完成")"
+    }
+
+    var detail: String { subagent ?? item.summary ?? "" }
+
+    private var report: String? {
+        guard let text = item.text, !text.isEmpty else { return nil }
+        return text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: subagent == nil ? "gearshape.2" : "person.2")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(heading)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(failed ? Color.red : Color.primary)
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(expanded ? nil : 2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 0)
+                    if report != nil {
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(report == nil)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(heading)：\(detail)")
+            .accessibilityHint(report == nil ? "" : "轻点两下显示或隐藏汇报")
+            .accessibilityIdentifier("taskRow")
+
+            if expanded, let report {
+                MarkdownText(text: report)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                    .accessibilityIdentifier("taskReport")
+            }
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
     }
 }
 

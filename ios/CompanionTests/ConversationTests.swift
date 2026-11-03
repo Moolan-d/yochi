@@ -30,6 +30,24 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(feed.items[1].output, "a\nb")
     }
 
+    func testTaskReportsAreTheirOwnItems() throws {
+        let feed = ConversationFeed()
+        feed.apply(try decode(#"""
+        {"type":"conversation","supported":true,"items":[
+          {"kind":"task","id":"u1","summary":"Agent \"Find roadmap items\" finished","state":"done","text":"Found **3**."},
+          {"kind":"task","id":"u2","summary":"Background command \"make\" failed with exit code 1","state":"error"}
+        ]}
+        """#))
+        XCTAssertEqual(feed.items.map(\.kind), [.task, .task])
+        let subagent = TaskRow(item: feed.items[0])
+        XCTAssertEqual(subagent.heading, "子代理完成")
+        XCTAssertEqual(subagent.detail, "Find roadmap items")
+        XCTAssertEqual(feed.items[0].text, "Found **3**.")
+        let command = TaskRow(item: feed.items[1])
+        XCTAssertEqual(command.heading, "后台任务失败")
+        XCTAssertEqual(command.detail, "Background command \"make\" failed with exit code 1")
+    }
+
     func testPendingPointsAtItsToolAndQuestionDecodes() throws {
         let feed = ConversationFeed()
         feed.apply(try decode(#"""

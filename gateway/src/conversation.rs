@@ -38,6 +38,16 @@ pub enum Item {
     Command { id: String, name: String, output: Option<String> },
     /// Something that happened to the conversation (compacted, interrupted, API error).
     Notice { id: String, text: String },
+    /// A subagent or background task reporting back to the Agent. Claude Code
+    /// files it as a user message; it is not what the user typed.
+    Task {
+        id: String,
+        summary: String,
+        state: ToolState,
+        /// The subagent's report, as Markdown; background commands have none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -55,7 +65,8 @@ impl Item {
             | Self::Agent { id, .. }
             | Self::Tool { id, .. }
             | Self::Command { id, .. }
-            | Self::Notice { id, .. } => id,
+            | Self::Notice { id, .. }
+            | Self::Task { id, .. } => id,
         }
     }
 }
@@ -143,7 +154,12 @@ impl Conversation {
 
     fn user(&mut self, uuid: &str, record: &Value) -> Vec<String> {
         let content = &record["message"]["content"];
+        let notification =
+            record["origin"]["kind"] == "task-notification" || record["turnOrigin"] == "task_notification";
         if let Some(text) = content.as_str() {
+            if notification || text.trim_start().starts_with("<task-notification>") {
+                return self.task(uuid, text).into_iter().collect();
+            }
             return self.user_text(uuid, text).into_iter().collect();
         }
         let mut touched = Vec::new();
@@ -158,7 +174,11 @@ impl Conversation {
                 _ => {}
             }
         }
-        touched.extend(self.user_text(uuid, &text));
+        if notification || text.trim_start().starts_with("<task-notification>") {
+            touched.extend(self.task(uuid, &text));
+        } else {
+            touched.extend(self.user_text(uuid, &text));
+        }
         touched
     }
 
@@ -181,6 +201,25 @@ impl Conversation {
             return Some(self.upsert(Item::Notice { id: uuid.into(), text: "已中断".into() }));
         }
         Some(self.upsert(Item::User { id: uuid.into(), text: clip(text, MAX_TEXT) }))
+    }
+
+    /// A `<task-notification>`: its summary on the collapsed line, the report
+    /// behind it. One without the tags still never shows as the user's.
+    fn task(&mut self, uuid: &str, text: &str) -> Option<String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let state = match tag(text, "status") {
+            Some("failed" | "killed" | "error") => ToolState::Error,
+            _ => ToolState::Done,
+        };
+        let (summary, report) = match tag(text, "summary") {
+            Some(summary) => (summary.to_owned(), tag(text, "result")),
+            None => ("任务通知".to_owned(), Some(text)),
+        };
+        let report = report.filter(|report| !report.is_empty()).map(|report| clip(report, MAX_TEXT));
+        Some(self.upsert(Item::Task { id: uuid.into(), summary: clip(&summary, MAX_OUTPUT), state, text: report }))
     }
 
     /// A local command's output belongs to the command just before it.
@@ -385,6 +424,7 @@ mod tests {
                 Item::Tool { .. } => "tool",
                 Item::Command { .. } => "command",
                 Item::Notice { .. } => "notice",
+                Item::Task { .. } => "task",
             })
             .collect()
     }
@@ -449,6 +489,32 @@ mod tests {
         assert!(matches!(&items[0], Item::Tool { state: ToolState::Error, output: Some(output), .. } if output == "no such file"));
         assert!(matches!(&items[3], Item::Command { name, output: Some(output), .. }
             if name == "/model haiku" && output == "Set model to haiku"));
+    }
+
+    #[test]
+    fn task_notifications_are_not_the_users_messages() {
+        let lines = [
+            // A subagent's report, as Claude Code 2.1.316 files it.
+            r#"{"type":"user","uuid":"u1","isSidechain":false,"origin":{"kind":"task-notification","producer":"session-task"},"promptSource":"system","turnOrigin":"task_notification","message":{"role":"user","content":"<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Find roadmap items\" finished</summary>\n<note>May notify again.</note>\n<result>Found **3** items.</result>\n<usage><tool_uses>2</tool_uses></usage>\n</task-notification>"}}"#,
+            // A background command, without a report.
+            r#"{"type":"user","uuid":"u2","origin":{"kind":"task-notification"},"message":{"content":"<task-notification>\n<status>failed</status>\n<summary>Background command \"make\" failed with exit code 1</summary>\n</task-notification>"}}"#,
+            // An older transcript without the metadata.
+            r#"{"type":"user","uuid":"u3","message":{"content":"<task-notification><status>completed</status><summary>Done</summary></task-notification>"}}"#,
+            // Flagged but without the tags: still not the user's.
+            r#"{"type":"user","uuid":"u4","turnOrigin":"task_notification","message":{"content":"something new"}}"#,
+            r#"{"type":"user","uuid":"u5","message":{"content":"What is a <task-notification>?"}}"#,
+        ];
+        let mut conversation = Conversation::default();
+        conversation.apply(lines);
+        let items = conversation.items();
+        assert_eq!(kinds(items), ["task", "task", "task", "task", "user"]);
+        assert!(matches!(&items[0], Item::Task { summary, state: ToolState::Done, text: Some(text), .. }
+            if summary == "Agent \"Find roadmap items\" finished" && text == "Found **3** items."));
+        assert!(matches!(&items[1], Item::Task { state: ToolState::Error, text: None, .. }));
+        assert!(matches!(&items[3], Item::Task { summary, text: Some(text), .. } if summary == "任务通知" && text == "something new"));
+        let json = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(json["kind"], "task");
+        assert_eq!(json["state"], "done");
     }
 
     #[test]

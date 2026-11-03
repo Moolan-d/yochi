@@ -128,15 +128,27 @@ private struct SessionRow: View {
     let session: Session
     let place: String?
 
+    /// Status leads the row in a slot of its own, so it lines up across rows
+    /// and stays clear of the list's disclosure chevron at the end.
+    @ScaledMetric(relativeTo: .headline) private var statusWidth: CGFloat = 22
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(session.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                if let status = session.status { StatusBadge(state: status.state) }
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Group {
+                if let status = session.status { StatusBadge(state: status.state) } else { Text(" ") }
             }
+            .font(.headline)
+            .frame(width: statusWidth, alignment: .center)
+            details
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(session.title)
+                .font(.headline)
+                .lineLimit(1)
             if let place {
                 Text(place)
                     .font(.subheadline)
@@ -154,7 +166,6 @@ private struct SessionRow: View {
                     .lineLimit(2)
             }
         }
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -162,12 +173,15 @@ private struct SessionRow: View {
 /// relies on color alone, and the localized word is its VoiceOver label.
 private struct StatusBadge: View {
     let state: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Label(title, systemImage: symbol)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(color)
             .labelStyle(.iconOnly)
+            // Working keeps turning, so it reads as live at a glance.
+            .symbolEffect(.rotate, options: .repeat(.continuous), isActive: state == "working" && !reduceMotion)
     }
 
     private var title: String {

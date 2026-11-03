@@ -172,6 +172,9 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
  "answers": {"Cats or Dogs?": "Cats"}}
 {"kind": "command", "id": "…", "name": "/model haiku", "output": "Set model to haiku"}
 {"kind": "notice", "id": "…", "text": "上下文已压缩"}   // 也用于「已中断」和 API 错误
+// 子代理或后台任务的完成汇报：Claude Code 把它记成一条 user 消息，但不是用户输入的
+{"kind": "task", "id": "…", "summary": "Agent \"Find roadmap items\" finished", "state": "done",
+ "text": "子代理的汇报（Markdown，后台命令没有）"}
 ```
 
 - 只发显示所需的字段；thinking、用量、请求记录和附件不离开 Gateway。图片显示为「［图片］」。

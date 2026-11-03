@@ -50,8 +50,10 @@ impl Session {
         let machine = id.rsplit_once('/').map(|(machine, _)| machine.to_owned());
         let foreground = &record["foreground"];
         // The command as started: Claude Code's process is named after its version (`2.1.316`).
+        // A terminal just started has no foreground yet; the core's argv names it.
         let program = foreground["argv"][0]
             .as_str()
+            .or_else(|| foreground.is_null().then(|| record["argv"][0].as_str()).flatten())
             .and_then(|argv0| argv0.rsplit('/').next())
             .map(|name| name.trim_start_matches('-'))
             .filter(|name| !name.is_empty())
@@ -129,6 +131,11 @@ mod tests {
         assert_eq!(program(json!({"name": "zsh", "argv": ["-zsh"]})).as_deref(), Some("zsh"));
         assert_eq!(program(json!({"name": "zsh", "argv": ["/bin/zsh", "-l"]})).as_deref(), Some("zsh"));
         assert_eq!(program(json!({"name": "pi"})).as_deref(), Some("pi"));
+        // Just started, before core reports the foreground.
+        let started = json!({"address": "t1", "state": "live", "cwd": "/", "argv": ["/Users/me/.local/bin/claude"]});
+        assert_eq!(Session::from_record(&started).unwrap().program.as_deref(), Some("claude"));
+        let shell = json!({"address": "t1", "state": "live", "cwd": "/", "argv": []});
+        assert_eq!(Session::from_record(&shell).unwrap().program, None);
     }
 
     #[test]
