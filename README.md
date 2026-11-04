@@ -26,7 +26,7 @@ BUNDLE_ID_SUFFIX = .yourname
 
 ## 常驻运行
 
-日常使用时让 Gateway 随登录启动，崩溃或 Tailscale 尚未就绪时由 launchd 每 10 秒重试：
+日常使用时让 Gateway 随登录启动，崩溃时由 launchd 每 10 秒重试。Mac 上的 Tailscale 没开时 Gateway 不退出：配了中继就照常经中继服务，同时每 5 秒找一次 tailnet 地址，找到后再在 tailnet 上监听。
 
 ```sh
 cargo install --path gateway        # 装到 ~/.cargo/bin，不随 cargo build 变化

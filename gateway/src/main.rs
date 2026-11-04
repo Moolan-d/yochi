@@ -156,7 +156,10 @@ async fn main() -> Result<()> {
     })?;
     match args.command.unwrap_or(Command::Serve(args.serve)) {
         Command::Serve(serve) => {
-            let listen = listen_addr(serve.listen.listen).await?;
+            let listen = match serve.listen.listen {
+                Some(addr) => server::Listen::At(addr),
+                None => server::Listen::Tailnet,
+            };
             let view = herdr::spawn(serve.hc.clone());
             server::serve(listen, store, serve.hc, view).await
         }

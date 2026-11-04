@@ -164,7 +164,18 @@ enum AppMessage {
     RelayEnroll { static_key: String },
 }
 
-pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
+/// Where the Gateway listens.
+pub enum Listen {
+    At(SocketAddr),
+    /// This Mac's tailnet address, once Tailscale is up. Until then phones
+    /// reach the Gateway only through the relay.
+    Tailnet,
+}
+
+/// How often the Gateway looks for the tailnet while it isn't up.
+const TAILNET_RETRY: Duration = Duration::from_secs(5);
+
+pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
     let devices = store.devices()?;
     if devices.is_empty() {
         eprintln!("No paired devices yet; pair a phone with `yochi pair`.");
@@ -186,10 +197,14 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
     let keys = state.store.gateway_key()?;
     let relay = relay::Relay { router: app.clone(), store: state.store.clone(), devices: state.devices.clone(), keys };
     tokio::spawn(relay::run(Arc::new(relay)));
-    let listener = tokio::net::TcpListener::bind(listen)
-        .await
-        .with_context(|| format!("listening on {listen}"))?;
-    eprintln!("Gateway listening on ws://{listen}/v0/ws");
+    let listener = match listen {
+        Listen::At(addr) => tokio::net::TcpListener::bind(addr).await.with_context(|| format!("listening on {addr}"))?,
+        Listen::Tailnet => tokio::select! {
+            listener = bind_when_ready(|| crate::listen_addr(None), TAILNET_RETRY) => listener?,
+            _ = tokio::signal::ctrl_c() => return Ok(()),
+        },
+    };
+    eprintln!("Gateway listening on ws://{}/v0/ws", listener.local_addr()?);
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -787,9 +802,90 @@ async fn send(socket: &mut WebSocket, message: &ServerMessage<'_>) -> Result<()>
     Ok(())
 }
 
+/// Binds where `resolve` says once that address exists on this Mac, trying
+/// again every `every` until then. Any other failure, such as the port being
+/// taken, is an error.
+async fn bind_when_ready<F, Fut>(mut resolve: F, every: Duration) -> Result<tokio::net::TcpListener>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<SocketAddr>>,
+{
+    let mut waiting = false;
+    loop {
+        let unavailable = match resolve().await {
+            Ok(addr) => match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    if waiting {
+                        eprintln!("On the tailnet now.");
+                    }
+                    return Ok(listener);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AddrNotAvailable => {
+                    anyhow::Error::new(err).context(format!("listening on {addr}"))
+                }
+                Err(err) => return Err(err).with_context(|| format!("listening on {addr}")),
+            },
+            Err(err) => err,
+        };
+        if !waiting {
+            eprintln!(
+                "Not on the tailnet ({unavailable:#}); until it is, phones reach this Gateway only through a relay. \
+                 Trying again every {} s.",
+                every.as_secs()
+            );
+            waiting = true;
+        }
+        tokio::time::sleep(every).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_gateway_listens_once_the_tailnet_address_exists() {
+        // 192.0.2.1 (TEST-NET-1) isn't on this machine, like the tailnet
+        // address while Tailscale is down.
+        let mut tries = 0;
+        let listener = bind_when_ready(
+            || {
+                tries += 1;
+                let ip = if tries < 3 { "192.0.2.1" } else { "127.0.0.1" };
+                std::future::ready(Ok(SocketAddr::new(ip.parse().unwrap(), 0)))
+            },
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+        assert_eq!(tries, 3);
+        assert!(listener.local_addr().unwrap().ip().is_loopback());
+
+        let mut tries = 0;
+        bind_when_ready(
+            || {
+                tries += 1;
+                std::future::ready(if tries < 2 { Err(anyhow::anyhow!("Tailscale is stopped")) } else { Ok("127.0.0.1:0".parse().unwrap()) })
+            },
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+        assert_eq!(tries, 2);
+    }
+
+    #[tokio::test]
+    async fn a_taken_port_is_an_error_not_a_wait() {
+        let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = taken.local_addr().unwrap();
+        let bound = tokio::time::timeout(
+            Duration::from_secs(1),
+            bind_when_ready(|| std::future::ready(Ok(addr)), Duration::from_millis(10)),
+        )
+        .await
+        .expect("gave up waiting");
+        assert!(bound.is_err());
+    }
 
     #[test]
     fn parses_agent_message_and_unpair() {
