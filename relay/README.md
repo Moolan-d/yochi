@@ -6,7 +6,9 @@ fork 自 [Alma Relay](https://github.com/yetone/alma-relay)（MIT，见 `LICENSE
 
 ## 部署
 
-一般用 `yochi relay setup` 引导部署。也可以手动部署，有两种方式：
+一般用 `yochi relay setup` 部署：它用你自己的 Cloudflare 账号部署 Worker 版（需要 Node.js，第一次会让你在浏览器里登录），生成注册密钥，再让 Gateway 连上去。`*.workers.dev` 在部分网络下打不开，可以用 `--domain relay.example.com` 挂到你在 Cloudflare 上的域名，DNS 记录和证书由 Cloudflare 自动建。之后 `yochi relay rotate` 可以换一个路由 token，旧的配对链接随之失效。
+
+也可以手动部署，有两种方式：
 
 - **Cloudflare Workers**（免费套餐可用）：
 

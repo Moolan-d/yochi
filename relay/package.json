@@ -8,7 +8,7 @@
     "main": "index.mjs",
     "scripts": {
         "start": "node index.mjs",
-        "test": "node test/relay.test.mjs",
+        "test": "node test/authorize.test.mjs && node test/relay.test.mjs",
         "test:cloudflare": "node test/relay.test.mjs --cloudflare",
         "dev:cloudflare": "wrangler dev",
         "deploy:cloudflare": "wrangler deploy"

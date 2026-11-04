@@ -75,9 +75,14 @@ export function safeEqual(a, b) {
  * Who may register a Gateway. With RELAY_REGISTRATION_KEY set, only a Gateway
  * that presents it; without, anyone (a Gateway is still only reachable with
  * its 256-bit route token, and only paired phones get past its Noise
- * handshake). Returns {ok:true} or {ok:false, message, code}.
+ * handshake). REQUIRE_REGISTRATION_KEY closes a relay that has no key yet:
+ * `yochi relay setup` deploys the Worker before it can set the secret.
+ * Returns {ok:true} or {ok:false, message, code}.
  */
 export function authorize(env, presented) {
+    if (!env.RELAY_REGISTRATION_KEY && env.REQUIRE_REGISTRATION_KEY) {
+        return { ok: false, message: 'No registration key set yet', code: 4003 };
+    }
     if (env.RELAY_REGISTRATION_KEY && !safeEqual(presented || '', env.RELAY_REGISTRATION_KEY)) {
         return { ok: false, message: 'Invalid registration key', code: 4003 };
     }

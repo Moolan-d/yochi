@@ -12,6 +12,7 @@ mod layout;
 mod noise;
 mod observe;
 mod relay;
+mod relay_setup;
 mod run;
 mod screen;
 mod server;
@@ -86,6 +87,20 @@ enum RelayAction {
         #[arg(long, env = "YOCHI_RELAY_KEY", hide_env_values = true)]
         key: Option<String>,
     },
+    /// Deploy a relay to your Cloudflare account (Workers, free plan) and use
+    /// it. Needs Node.js; wrangler asks you to log in the first time.
+    Setup {
+        /// Serve it on a hostname in one of your Cloudflare zones
+        /// (relay.example.com) instead of *.workers.dev, which some networks block.
+        #[arg(long)]
+        domain: Option<String>,
+        /// The Worker's name in your account.
+        #[arg(long, default_value = "yochi-relay")]
+        name: String,
+    },
+    /// Give this Gateway a new address on the relay. The old one, and pairing
+    /// links that carry it, stop working; phones learn the new one on the tailnet.
+    Rotate,
     /// Stop using a relay. Phones then reach this Gateway only on the tailnet.
     Off,
     /// Show the relay in use and whether the Gateway is connected to it.
@@ -220,15 +235,21 @@ fn relay_command(store: &Store, action: RelayAction) -> Result<()> {
     let dir = store.dir();
     match action {
         RelayAction::Use { url, key } => {
-            let mut config = relay::Config::new(&url, key)?;
             // The same route keeps phones that already know it working.
-            if let Some(old) = relay::Config::load(dir)? {
-                config.route = old.route;
-            }
-            config.save(dir)?;
+            let config = relay_setup::use_relay(dir, &url, key)?;
             println!("Using the relay at {}.", config.url);
             println!("The running Gateway connects within seconds; check with `yochi relay status`.");
             println!("Paired phones pick it up the next time they connect on the tailnet.");
+        }
+        RelayAction::Setup { domain, name } => {
+            let options = relay_setup::Options { name, domain, wait: Duration::from_secs(30) };
+            relay_setup::setup(dir, &options, &relay_setup::Wrangler::from_env())?;
+        }
+        RelayAction::Rotate => {
+            relay_setup::rotate(dir)?;
+            println!("This Gateway has a new address on the relay; the running Gateway moves to it within seconds.");
+            println!("Phones off the tailnet can't reach it until they next connect on the tailnet.");
+            println!("Pairing links shown before now no longer work through the relay.");
         }
         RelayAction::Off => {
             if relay::Config::remove(dir)? {
