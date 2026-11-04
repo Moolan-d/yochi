@@ -1033,6 +1033,52 @@ final class CompanionUITests: XCTestCase {
         unpair(app)
     }
 
+    /// Not a check: the first search and the first terminal after a cold
+    /// launch, already paired. Prints how long the keyboard and each
+    /// terminal took; the app logs `hang ms=…` for each main-thread stall.
+    @MainActor
+    func testPerfFirstUse() throws {
+        let paired = launchUnpaired()
+        pair(paired, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(paired)
+        paired.terminate()
+        let app = XCUIApplication()
+        app.launch()
+        waitUntilPaired(app)
+        XCTAssert(app.cells.firstMatch.waitForExistence(timeout: 15), "no sessions")
+        RunLoop.current.run(until: .now.addingTimeInterval(3))
+
+        let search = app.searchFields.firstMatch
+        var start = Date.now
+        search.tap()
+        let keyboard = app.keyboards.firstMatch.waitForExistence(timeout: 10)
+        print("perf-first search keyboard=\(keyboard) ms=\(Int(Date.now.timeIntervalSince(start) * 1000))")
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+        start = .now
+        search.typeText("c")
+        print("perf-first search typed ms=\(Int(Date.now.timeIntervalSince(start) * 1000))")
+        RunLoop.current.run(until: .now.addingTimeInterval(2))
+        search.typeText(XCUIKeyboardKey.delete.rawValue)
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+
+        for name in [env("COMPANION_PERF_SESSION_NAME"), "companion-uitest"] {
+            // A search left from the last round starts again from empty.
+            endSearch(app)
+            let cell = sessionCell(app, name: name)
+            XCTAssert(cell.waitForExistence(timeout: 15), "no \(name)")
+            RunLoop.current.run(until: .now.addingTimeInterval(1))
+            start = .now
+            cell.tap()
+            let grid = app.descendants(matching: .any)["terminalGrid"].waitForExistence(timeout: 15)
+            print("perf-first terminal \(name) grid=\(grid) ms=\(Int(Date.now.timeIntervalSince(start) * 1000))")
+            RunLoop.current.run(until: .now.addingTimeInterval(3))
+            app.navigationBars.buttons.firstMatch.tap()
+            XCTAssert(app.buttons["close"].waitForExistence(timeout: 10) || app.buttons["设置"].exists)
+            RunLoop.current.run(until: .now.addingTimeInterval(1))
+        }
+        unpair(app)
+    }
+
     // MARK: - Helpers
 
     @MainActor

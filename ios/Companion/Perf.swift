@@ -130,3 +130,38 @@ final class TouchWatcher: UIGestureRecognizer, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
+
+/// Main-thread stalls: each pass of the main run loop that runs longer than
+/// `threshold` logs `hang ms=…`, with the counts taken during it. Debug
+/// only; it catches what a frame meter can't, such as a tap that does nothing
+/// because the main thread was busy.
+@MainActor
+final class HangMeter {
+    static let shared = HangMeter()
+    private var observer: CFRunLoopObserver?
+    private var began: CFTimeInterval = 0
+    private let threshold: CFTimeInterval = 0.05
+
+    func start() {
+        #if DEBUG
+        guard observer == nil else { return }
+        let activities = CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue
+        observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) { [weak self] _, activity in
+            MainActor.assumeIsolated { self?.observe(activity) }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        began = CACurrentMediaTime()
+        #endif
+    }
+
+    private func observe(_ activity: CFRunLoopActivity) {
+        let now = CACurrentMediaTime()
+        if activity == .afterWaiting {
+            began = now
+            return
+        }
+        let ms = (now - began) * 1000
+        guard ms >= threshold * 1000 else { return }
+        Perf.log.notice("hang ms=\(ms, format: .fixed(precision: 0), privacy: .public)")
+    }
+}

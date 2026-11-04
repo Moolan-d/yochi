@@ -25,6 +25,11 @@ struct SessionListView: View {
         .overlay {
             if client.sessions.isEmpty { emptyState }
         }
+        .task {
+            // Once the first frame is up, while the Gateway is still connecting.
+            try? await Task.sleep(for: .milliseconds(200))
+            TerminalWarmup.run()
+        }
     }
 
     @ViewBuilder
@@ -121,6 +126,10 @@ struct HomeList<Banner: View>: View {
     let newSession: (() -> Void)?
     @ViewBuilder var banner: Banner
 
+    /// The search field's text, as typed.
+    @State private var searchText = ""
+    /// What the list is filtered by: the field's text once typing pauses
+    /// for `searchDelay`, so each key press only edits the field.
     @State private var query = ""
     /// Spaces the user folded, by id, kept on this iPhone.
     @AppStorage("collapsedSpaces") private var collapsedIDs = ""
@@ -129,17 +138,20 @@ struct HomeList<Banner: View>: View {
 
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
+    static var searchDelay: Duration { .milliseconds(300) }
+
     private var matches: [HomeRow] {
         home.groups.flatMap { $0.agents + $0.terminals }.filter { $0.matches(query) }
     }
 
     var body: some View {
         let _ = Perf.count("HomeList")
+        let found = searching ? matches : []
         List {
             banner
             if searching {
                 Section {
-                    ForEach(matches) { row in
+                    ForEach(found) { row in
                         link(row, awayFromSpace: true)
                     }
                 }
@@ -162,9 +174,18 @@ struct HomeList<Banner: View>: View {
                 }
             }
         }
-        .searchable(text: $query, prompt: "搜索 Agent、仓库、Space")
+        .searchable(text: $searchText, prompt: "搜索 Agent、仓库、Space")
+        .task(id: searchText) {
+            let text = searchText
+            // Clearing the field shows the whole list again at once.
+            if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                try? await Task.sleep(for: Self.searchDelay)
+                guard !Task.isCancelled else { return }
+            }
+            if query != text { query = text }
+        }
         .overlay {
-            if searching && matches.isEmpty {
+            if searching && found.isEmpty {
                 ContentUnavailableView {
                     Label("没有匹配「\(query)」的 Agent", systemImage: "magnifyingglass")
                 } description: {
@@ -434,21 +455,82 @@ private struct AgentMark: View {
         case "error":
             Circle().strokeBorder(.red, lineWidth: width)
         case "working":
-            let arc = Circle().inset(by: width / 2).trim(from: 0, to: 0.3)
-                .stroke(.blue, style: StrokeStyle(lineWidth: width, lineCap: .round))
             if reduceMotion {
-                arc.rotationEffect(.degrees(-90))
+                Circle().inset(by: width / 2).trim(from: 0, to: 0.3)
+                    .stroke(.blue, style: StrokeStyle(lineWidth: width, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
             } else {
-                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                    let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
-                    arc.rotationEffect(.degrees(turn * 360))
-                }
+                SpinningArc(lineWidth: width)
             }
         case "done" where unseen:
             Circle().strokeBorder(.blue, lineWidth: width)
         default:
             EmptyView()
         }
+    }
+}
+
+/// The working ring's turning arc. Core Animation turns it in the render
+/// server, so no view is updated per frame: a list of working Agents costs
+/// the main thread nothing while it waits for taps and keys.
+private struct SpinningArc: UIViewRepresentable {
+    let lineWidth: CGFloat
+
+    func makeUIView(context: Context) -> SpinningArcView { SpinningArcView() }
+
+    func updateUIView(_ view: SpinningArcView, context: Context) {
+        view.lineWidth = lineWidth
+    }
+}
+
+final class SpinningArcView: UIView {
+    private let arc = CAShapeLayer()
+    var lineWidth: CGFloat = 2 {
+        didSet { if lineWidth != oldValue { setNeedsLayout() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        arc.fillColor = nil
+        arc.lineCap = .round
+        layer.addSublayer(arc)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: Self, _) in
+            view.setNeedsLayout()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is unavailable")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A loose layer animates every change; the arc should just be redrawn.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        arc.frame = bounds
+        let radius = max(0, min(bounds.width, bounds.height) / 2 - lineWidth / 2)
+        // Three tenths of a turn from three o'clock, as the still ring draws it.
+        arc.path = UIBezierPath(arcCenter: CGPoint(x: bounds.midX, y: bounds.midY), radius: radius,
+                                startAngle: 0, endAngle: .pi * 2 * 0.3, clockwise: true).cgPath
+        arc.lineWidth = lineWidth
+        arc.strokeColor = UIColor.systemBlue.resolvedColor(with: traitCollection).cgColor
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // A reused row, or one back from the background, turns again.
+        guard window != nil, arc.animation(forKey: "spin") == nil else { return }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = Double.pi * 2
+        spin.duration = 1.2
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        arc.add(spin, forKey: "spin")
     }
 }
 

@@ -485,3 +485,35 @@ private final class SelectionOnlyTerminalView: UITerminalView {
 
     override func toggleSoftwareKeyboard() {}
 }
+
+/// Ghostty's first surface in a process pays once for what every later one
+/// reuses (its runtime, the font, the renderer's GPU pipelines), so the
+/// first terminal opened after launch stalled its page for seconds while the
+/// next opened at once. A hidden terminal pays that while the app is still
+/// connecting, when nothing else is asked of it.
+@MainActor
+enum TerminalWarmup {
+    private static var done = false
+
+    static func run() {
+        guard !done,
+              let window = UIApplication.shared.connectedScenes
+                  .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+        done = true
+        let size = UserDefaults.standard.object(forKey: TerminalTextSize.key) as? Double ?? TerminalTextSize.standard
+        let view = ObservedTerminalView(feed: TerminalFeed(), fontSize: Float(TerminalTextSize.clamped(size)),
+                                        desktopGrid: TerminalGrid(cols: 80, rows: 24))
+        view.frame = window.bounds
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.accessibilityElementsHidden = true
+        view.accessibilityIdentifier = nil
+        let start = ContinuousClock.now
+        // Behind the app's own views, so it is never seen.
+        window.insertSubview(view, at: 0)
+        view.layoutIfNeeded()
+        let ms = (ContinuousClock.now - start) / .milliseconds(1)
+        Perf.log.notice("terminal warmup ms=\(ms, format: .fixed(precision: 1), privacy: .public)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { view.removeFromSuperview() }
+    }
+}
