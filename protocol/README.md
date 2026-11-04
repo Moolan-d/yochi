@@ -8,7 +8,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
 - **连接**：所有接口都是 WebSocket，地址为 `ws://<主 Mac 的 tailnet IPv4>:7420/v0/…`。Gateway 只监听 tailnet 地址，不监听 LAN 或 localhost。
 - **认证**：除配对外，都需带 HTTP 头 `Authorization: Bearer <设备 token>`。token 无效或设备已被撤销时返回 `401`。设备被撤销后，它已建立的连接会在几秒内被关闭。
-- **加密**：明文 WebSocket，依赖 Tailscale（WireGuard）加密链路。
+- **加密**：明文 WebSocket，依赖 Tailscale（WireGuard）加密链路。经 Relay 时见下文「经 Relay 连接」。
 
 ### 配对（Device Pairing）
 
@@ -21,6 +21,15 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 {"type": "paired", "device": "8653add4", "token": "<64 位十六进制>"}
 {"type": "rejected"}  // 配对码错误、过期或已作废
 ```
+
+配置了 Relay（`yochi relay use`）时，二维码改为 link v2，App 不在 tailnet 上也能经 Relay 配对：
+
+```
+yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继地址，百分号编码>&route=<route token>&secret=<link secret>
+```
+
+- `key`、`secret` 都是 32 字节，base64url 不带填充；`route` 也是 base64url。
+- `secret` 与配对码属于同一次配对：单次使用，5 分钟内有效。配对码只在 tailnet 上用，`secret` 只在 Relay 上用，用掉任一个这次配对就结束。
 
 ### 会话列表
 
@@ -70,6 +79,18 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 - 数据来自各机器 herdr-core 中 Herdr 桌面端的布局文档，Gateway 只读不写。某台机器读不到布局（离线、没用过 Herdr 桌面端、core 不支持 `doc.get`）时，它的会话都不在 `spaces` 中。
 
 App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后删除这台设备并关闭连接。
+
+已配对的设备在这个连接上登记 Relay（ADR 0006）。App 每次在 tailnet 上连上时登记一次，从而拿到当前的中继地址和新的 psk：
+
+```jsonc
+// App → Gateway；static_key 是 App 的 Noise 静态公钥（32 字节，base64url）
+{"type": "relay_enroll", "static_key": "…"}
+// Gateway → App
+{"type": "relay", "available": true, "url": "https://relay.example.com", "route": "…", "gateway_key": "…", "psk": "…"}
+{"type": "relay", "available": false}  // 没配置 Relay；出错时另带 "error"
+```
+
+每次登记都会换一个新 psk，旧的立即失效。同一个静态公钥只属于一台设备。
 
 ### Agent Message
 
@@ -316,3 +337,27 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - `text`：可见的 `rows` 行，行间 `\r\n`；每次样式变化写一个从复位开始的 SGR（`ESC[0;…m`，只含粗体、暗色、斜体、反色和前景/背景色），行尾无背景的空白去掉。
 - `cursor`：`[行, 列]`，从 0 开始；光标隐藏时为 `null`。
 - 终端尺寸变化时按新尺寸重建屏幕。对话框的识别和作答按键都在 App 里，作答仍走「按键」消息。
+
+### 经 Relay 连接
+
+手机不在 tailnet 上时，经 Relay 连接（ADR 0006）。中继协议见 `relay/PROTOCOL.md`，中继只转发二进制帧，看不到明文。
+
+1. **连接**：App 打开 `wss://<中继>/c/<route token>`。中继找不到这个 Gateway（不在线或 route 不对）时返回 `502`。
+2. **握手**：Noise `Noise_IKpsk2_25519_ChaChaPoly_SHA256`，prologue 为 `yochi-relay-v1`，psk 放在第 2 个位置。App 是发起方，事先知道 Gateway 的静态公钥（`key` / `gateway_key`）。每条握手消息是一个二进制 WebSocket 消息，payload 为空。
+   - 已登记的设备用登记时拿到的 psk；正在配对的手机用 link v2 的 `secret`。
+   - Gateway 读完第一条握手消息后，按 App 的静态公钥选 psk：先找设备，再找正在等待的配对。都没有时关闭，close code `4401`。
+   - psk 不对时，App 读不了第二条握手消息，应当关闭连接。
+3. **请求**：握手后的第一条消息是 JSON 文本，说明要什么：
+   ```jsonc
+   {"path": "/v0/observe?session=t1&takeover=1&cols=49&rows=45"}  // 已配对设备：任一 /v0/ 接口，/v0/pair 除外
+   {"path": "/v0/pair", "name": "iPhone"}                        // 用 secret 配对
+   ```
+   配对时 Gateway 回一条文本消息后以 `1000` 关闭。设备 token 只在 tailnet 上用，psk 用于以后经 Relay 连接：
+   ```jsonc
+   {"type": "paired", "device": "8653add4", "token": "<64 位十六进制>", "psk": "…"}
+   {"type": "rejected"}
+   ```
+4. **之后**：消息与 tailnet 上的同名接口完全相同，认证由握手完成，不带 Bearer token。接口拒绝时 close code 为 `4000 + HTTP 状态`，例如会话不存在为 `4404`。请求无效时为 `4400`。
+
+**分片**：每个 WebSocket 消息加密为一条或多条 Noise 消息，每条单独作为一个二进制 WebSocket 消息发送。明文是 `[flags][payload]`：bit 0 置位表示二进制消息（否则为文本），bit 1 置位表示后面还有分片。每条 Noise 消息最多 65535 字节，所以每片 payload 最多 65518 字节；重组后的消息最多 64 MiB。Noise 消息不能重放、不能乱序，解密失败就结束连接。
+

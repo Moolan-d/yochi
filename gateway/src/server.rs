@@ -12,6 +12,9 @@
 //!   its Agent isn't working, for the app to find dialogs in (ADR 0005).
 //!
 //! Unpairing a device (by itself or with `yochi revoke`) closes its connections.
+//!
+//! The same endpoints are reachable through the Relay (`relay.rs`): there the
+//! Noise handshake names the device, carried as a `RelayDevice` extension.
 
 use crate::about::{self, About};
 use crate::agent;
@@ -23,12 +26,13 @@ use crate::devices::{Device, Store};
 use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::layout::Space;
+use crate::relay::{self, RelayDevice};
 use crate::observe::{self, Observer, Output};
 use crate::run;
 use crate::screen::Screen;
 use crate::session::Session;
 use anyhow::{Context as _, Result};
-use axum::Router;
+use axum::{Extension, Router};
 use axum::extract::{Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -155,6 +159,9 @@ enum AppMessage {
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
+    /// Let this device use the Relay with this Noise static key (base64url);
+    /// answered with `relay` (ADR 0006).
+    RelayEnroll { static_key: String },
 }
 
 pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
@@ -175,7 +182,10 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
         .route("/v0/observe", get(observe))
         .route("/v0/conversation", get(conversation))
         .route("/v0/screen", get(screen))
-        .with_state(state);
+        .with_state(state.clone());
+    let keys = state.store.gateway_key()?;
+    let relay = relay::Relay { router: app.clone(), store: state.store.clone(), devices: state.devices.clone(), keys };
+    tokio::spawn(relay::run(Arc::new(relay)));
     let listener = tokio::net::TcpListener::bind(listen)
         .await
         .with_context(|| format!("listening on {listen}"))?;
@@ -255,8 +265,13 @@ async fn unpair(state: &AppState, id: &str) {
     state.devices.send_modify(|devices| devices.retain(|device| device.id != id));
 }
 
-async fn upgrade(State(state): State<AppState>, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
-    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+async fn upgrade(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    via_relay: Option<Extension<RelayDevice>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     ws.on_upgrade(move |socket| push(socket, state, device))
@@ -288,10 +303,11 @@ fn valid_grid(cols: u16, rows: u16) -> bool {
 async fn observe(
     State(state): State<AppState>,
     headers: HeaderMap,
+    via_relay: Option<Extension<RelayDevice>>,
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(observed) = session_size(&state.view.borrow(), &query.session) else {
@@ -385,10 +401,11 @@ async fn relay(
 async fn screen(
     State(state): State<AppState>,
     headers: HeaderMap,
+    via_relay: Option<Extension<RelayDevice>>,
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(size) = session_size(&state.view.borrow(), &query.session) else {
@@ -483,10 +500,11 @@ async fn watch_screen(mut socket: WebSocket, state: AppState, device: String, id
 async fn conversation(
     State(state): State<AppState>,
     headers: HeaderMap,
+    via_relay: Option<Extension<RelayDevice>>,
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, &state.devices.borrow()) else {
+    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if session_size(&state.view.borrow(), &query.session).is_none() {
@@ -568,8 +586,12 @@ async fn follow(mut socket: WebSocket, state: AppState, device: String, id: Stri
     }
 }
 
-/// The paired device whose token the request carries.
-fn authorize(headers: &HeaderMap, devices: &[Device]) -> Option<String> {
+/// The paired device whose token the request carries, or that a Relay
+/// stream's handshake proved (only Relay streams carry that extension).
+fn authorize(headers: &HeaderMap, via_relay: Option<Extension<RelayDevice>>, devices: &[Device]) -> Option<String> {
+    if let Some(Extension(RelayDevice(id))) = via_relay {
+        return devices.iter().any(|device| device.id == id).then_some(id);
+    }
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -720,6 +742,25 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                             }
                         });
                     }
+                    Ok(AppMessage::RelayEnroll { static_key }) => {
+                        let state = state.clone();
+                        let outgoing = outgoing.clone();
+                        let device = device.clone();
+                        tokio::spawn(async move {
+                            let store = state.store.clone();
+                            let reply = tokio::task::spawn_blocking(move || {
+                                let reply = relay::enrollment(&store, &device, &static_key);
+                                (reply, store.devices())
+                            })
+                            .await;
+                            let Ok((reply, devices)) = reply else { return };
+                            if let Ok(devices) = devices {
+                                state.devices.send_if_modified(|current| std::mem::replace(current, devices) != *current);
+                            }
+                            let reply = reply.unwrap_or_else(|err| serde_json::json!({ "type": "relay", "available": false, "error": format!("{err:#}") }));
+                            let _ = outgoing.send(reply.to_string());
+                        });
+                    }
                     Ok(AppMessage::Keys { id, session, keys }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
@@ -806,10 +847,10 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
 
         let mut headers = HeaderMap::new();
-        assert_eq!(authorize(&headers, &devices), None);
+        assert_eq!(authorize(&headers, None, &devices), None);
         headers.insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
-        assert_eq!(authorize(&headers, &devices), Some(device.id));
+        assert_eq!(authorize(&headers, None, &devices), Some(device.id));
         headers.insert(header::AUTHORIZATION, "Bearer wrong".parse().unwrap());
-        assert_eq!(authorize(&headers, &devices), None);
+        assert_eq!(authorize(&headers, None, &devices), None);
     }
 }

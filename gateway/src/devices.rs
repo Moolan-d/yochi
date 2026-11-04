@@ -27,11 +27,32 @@ pub struct Device {
     pub paired_at: u64,
     /// The device's token stays on the device; only its hash is kept here.
     token_sha256: String,
+    /// The phone's Noise static public key (base64url), once it can use the
+    /// Relay (ADR 0006). Over the Relay it is the device's identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    static_key: Option<String>,
+    /// Its Noise psk (base64url), shared with the phone only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    psk: Option<String>,
 }
 
 impl Device {
     pub fn holds(&self, token: &str) -> bool {
         constant_time_eq(sha256(token).as_bytes(), self.token_sha256.as_bytes())
+    }
+
+    /// Whether the device has a Noise key, so can reach the Gateway over the Relay.
+    pub fn uses_relay(&self) -> bool {
+        self.static_key.is_some()
+    }
+
+    /// The psk of this device if `static_key` is its Noise key.
+    pub fn psk_for(&self, static_key: &[u8]) -> Option<[u8; 32]> {
+        let own = decode_key(self.static_key.as_deref()?)?;
+        if !constant_time_eq(&own, static_key) {
+            return None;
+        }
+        decode_key(self.psk.as_deref()?)
     }
 }
 
@@ -40,6 +61,10 @@ struct Offer {
     code_sha256: String,
     expires_at: u64,
     attempts: u32,
+    /// The pairing link's secret (base64url), the psk a new phone pairs with
+    /// over the Relay. Kept as is: the Noise handshake needs the key itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secret: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -96,9 +121,16 @@ impl Store {
     /// Starts a pairing, cancelling any earlier one, and returns its code.
     pub fn offer(&self) -> Result<String> {
         let code: String = random_bytes::<8>()?.iter().map(|b| CODE_ALPHABET[usize::from(b % 32)] as char).collect();
-        let offer = Offer { code_sha256: sha256(&code), expires_at: now() + OFFER_TTL.as_secs(), attempts: 0 };
+        let secret = Some(b64(&random_bytes::<32>()?));
+        let offer = Offer { code_sha256: sha256(&code), expires_at: now() + OFFER_TTL.as_secs(), attempts: 0, secret };
         self.update(|state| state.offer = Some(offer))?;
         Ok(code)
+    }
+
+    /// The waiting pairing's link secret, while it is valid.
+    pub fn offer_secret(&self) -> Result<Option<[u8; 32]>> {
+        let offer = self.read()?.offer.filter(|offer| offer.expires_at > now());
+        Ok(offer.and_then(|offer| decode_key(offer.secret.as_deref()?)))
     }
 
     /// Whether a pairing code is still waiting to be used.
@@ -129,10 +161,91 @@ impl Store {
                 return None;
             }
             state.offer = None;
-            let device = Device { id, name: name.to_owned(), paired_at: now(), token_sha256: sha256(&token) };
+            let device = Device {
+                id,
+                name: name.to_owned(),
+                paired_at: now(),
+                token_sha256: sha256(&token),
+                static_key: None,
+                psk: None,
+            };
             state.devices.push(device.clone());
             Some((device, token))
         })
+    }
+
+    /// Pairs a phone over the Relay: its handshake already proved it holds
+    /// the waiting pairing's link secret. The pairing is used up; the device
+    /// gets a token (for the tailnet) and its own psk (for the Relay).
+    pub fn pair_relay(&self, secret: &[u8; 32], static_key: &[u8; 32], name: &str) -> Result<Option<(Device, String, [u8; 32])>> {
+        let token = hex(&random_bytes::<32>()?);
+        let id = hex(&random_bytes::<4>()?);
+        let psk = random_bytes::<32>()?;
+        self.update(|state| {
+            let offer = state.offer.as_ref()?;
+            let waiting = decode_key(offer.secret.as_deref()?)?;
+            if offer.expires_at <= now() || !constant_time_eq(&waiting, secret) {
+                return None;
+            }
+            state.offer = None;
+            let static_key = b64(static_key);
+            state.devices.retain(|device| device.static_key.as_deref() != Some(&static_key));
+            let device = Device {
+                id,
+                name: name.to_owned(),
+                paired_at: now(),
+                token_sha256: sha256(&token),
+                static_key: Some(static_key),
+                psk: Some(b64(&psk)),
+            };
+            state.devices.push(device.clone());
+            Some((device, token, psk))
+        })
+    }
+
+    /// Lets a paired device use the Relay: records its Noise key and gives it
+    /// a new psk. `None` if the device is no longer paired.
+    pub fn enroll(&self, id: &str, static_key: &[u8; 32]) -> Result<Option<[u8; 32]>> {
+        let psk = random_bytes::<32>()?;
+        let static_key = b64(static_key);
+        self.update(|state| {
+            state.devices.iter().position(|device| device.id == id)?;
+            for device in &mut state.devices {
+                if device.id == id {
+                    device.static_key = Some(static_key.clone());
+                    device.psk = Some(b64(&psk));
+                } else if device.static_key.as_deref() == Some(&static_key) {
+                    device.static_key = None;
+                    device.psk = None;
+                }
+            }
+            Some(psk)
+        })
+    }
+
+    /// This Gateway's Noise static keypair, made on first use (ADR 0006).
+    pub fn gateway_key(&self) -> Result<crate::noise::Keypair> {
+        let path = self.dir.join("gateway.key");
+        match fs::read(&path) {
+            Ok(bytes) => return crate::noise::Keypair::from_bytes(&bytes).with_context(|| format!("reading {}", path.display())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
+        }
+        let keypair = crate::noise::Keypair::generate()?;
+        match fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&path) {
+            Ok(mut file) => {
+                file.write_all(&keypair.to_bytes())?;
+                file.sync_all()?;
+                Ok(keypair)
+            }
+            // Another process made it first.
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => self.gateway_key(),
+            Err(err) => Err(err).with_context(|| format!("writing {}", path.display())),
+        }
+    }
+
+    pub fn dir(&self) -> &std::path::Path {
+        &self.dir
     }
 
     pub fn revoke(&self, id: &str) -> Result<Option<Device>> {
@@ -199,6 +312,17 @@ fn sha256(text: &str) -> String {
     hex(&Sha256::digest(text.as_bytes()))
 }
 
+/// Keys in files and links: base64url without padding.
+pub(crate) fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+pub(crate) fn decode_key(text: &str) -> Option<[u8; 32]> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(text).ok()?.try_into().ok()
+}
+
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -255,6 +379,44 @@ mod tests {
         }
         assert!(store.pair(&code, "x").unwrap().is_none());
         assert!(store.devices().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_link_secret_pairs_one_phone_over_the_relay() {
+        let store = store();
+        store.offer().unwrap();
+        let secret = store.offer_secret().unwrap().expect("secret");
+        let phone = [7u8; 32];
+        assert!(store.pair_relay(&[0u8; 32], &phone, "x").unwrap().is_none());
+        let (device, token, psk) = store.pair_relay(&secret, &phone, "iPhone").unwrap().expect("paired");
+        assert!(device.holds(&token));
+        assert_eq!(device.psk_for(&phone), Some(psk));
+        assert_eq!(device.psk_for(&[8u8; 32]), None);
+        assert!(store.pair_relay(&secret, &phone, "again").unwrap().is_none());
+        assert_eq!(store.offer_secret().unwrap(), None);
+    }
+
+    #[test]
+    fn enrolling_moves_a_noise_key_to_its_device() {
+        let store = store();
+        let code = store.offer().unwrap();
+        let (a, _) = store.pair(&code, "a").unwrap().unwrap();
+        let code = store.offer().unwrap();
+        let (b, _) = store.pair(&code, "b").unwrap().unwrap();
+        let key = [5u8; 32];
+        let psk_a = store.enroll(&a.id, &key).unwrap().unwrap();
+        let psk_b = store.enroll(&b.id, &key).unwrap().unwrap();
+        assert_ne!(psk_a, psk_b);
+        let devices = store.devices().unwrap();
+        assert_eq!(devices.iter().filter_map(|d| d.psk_for(&key)).collect::<Vec<_>>(), vec![psk_b]);
+        assert!(store.enroll("gone", &key).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_gateway_key_is_made_once() {
+        let store = store();
+        let first = store.gateway_key().unwrap();
+        assert_eq!(store.gateway_key().unwrap().public, first.public);
     }
 
     #[test]
