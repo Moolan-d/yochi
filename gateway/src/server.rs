@@ -550,23 +550,34 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
     if send(&mut socket, &hello).await.is_err() {
         return;
     }
+    // The list goes out at the start and after each change, not again after
+    // every reply, ping or request: the App redraws its pages on each list.
+    let mut changed_since_sent = true;
     loop {
-        let message = {
-            let current = view.borrow_and_update();
-            serde_json::to_string(&ServerMessage::Sessions {
-                core: current.core.as_deref(),
-                connected: current.connected(),
-                sessions: about.borrow_and_update().fill(&current.sessions),
-                spaces: &current.spaces,
-            })
-        };
-        let Ok(message) = message else { return };
-        if socket.send(Message::Text(message.into())).await.is_err() {
-            return;
+        if std::mem::take(&mut changed_since_sent) {
+            let message = {
+                let current = view.borrow_and_update();
+                serde_json::to_string(&ServerMessage::Sessions {
+                    core: current.core.as_deref(),
+                    connected: current.connected(),
+                    sessions: about.borrow_and_update().fill(&current.sessions),
+                    spaces: &current.spaces,
+                })
+            };
+            let Ok(message) = message else { return };
+            if socket.send(Message::Text(message.into())).await.is_err() {
+                return;
+            }
         }
         tokio::select! {
-            changed = view.changed() => if changed.is_err() { return },
-            changed = about.changed() => if changed.is_err() { return },
+            changed = view.changed() => {
+                if changed.is_err() { return }
+                changed_since_sent = true;
+            },
+            changed = about.changed() => {
+                if changed.is_err() { return }
+                changed_since_sent = true;
+            },
             response = responses.recv() => {
                 let Some(response) = response else { return };
                 if socket.send(Message::Text(response.into())).await.is_err() { return }
