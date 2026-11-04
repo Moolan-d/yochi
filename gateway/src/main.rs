@@ -21,7 +21,7 @@ mod session;
 mod transcript;
 
 use anyhow::{Context as _, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory as _, FromArgMatches as _, Parser, Subcommand};
 use devices::{Device, Store};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -29,31 +29,50 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(version, about = "Yochi: serves herdr-core sessions to the Yochi iPhone app over the tailnet")]
+#[command(
+    version,
+    about = "Yochi: serves herdr-core sessions to the Yochi iPhone app, on the tailnet or through a Relay"
+)]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// Address to listen on (and to give phones when pairing). Defaults to this
-    /// Mac's tailnet IPv4, port 7420.
-    #[arg(long, global = true, env = "YOCHI_LISTEN")]
-    listen: Option<SocketAddr>,
+    /// Without a command, the Gateway runs with these.
+    #[command(flatten)]
+    serve: ServeArgs,
 
-    /// Where paired devices are kept. Defaults to ~/Library/Application Support/Yochi.
+    /// Where paired devices and the relay settings are kept. Defaults to
+    /// ~/Library/Application Support/Yochi.
     #[arg(long, global = true, env = "YOCHI_STATE_DIR")]
     state_dir: Option<PathBuf>,
+}
+
+#[derive(clap::Args)]
+struct ListenArg {
+    /// Address to listen on (and to give phones when pairing). Defaults to this
+    /// Mac's tailnet IPv4, port 7420.
+    #[arg(long, env = "YOCHI_LISTEN")]
+    listen: Option<SocketAddr>,
+}
+
+#[derive(clap::Args)]
+struct ServeArgs {
+    #[command(flatten)]
+    listen: ListenArg,
 
     /// The hc binary used to reach the local herdr-core.
-    #[arg(long, global = true, env = "YOCHI_HC", default_value = "hc")]
+    #[arg(long, env = "YOCHI_HC", default_value = "hc")]
     hc: String,
 }
 
 #[derive(Subcommand)]
 enum Command {
     /// Run the Gateway (the default).
-    Serve,
+    Serve(ServeArgs),
     /// Pair a phone: show a single-use code, valid for five minutes.
     Pair {
+        #[command(flatten)]
+        listen: ListenArg,
         /// Also print the pairing link, for the UI tests.
         #[arg(long, hide = true)]
         link: bool,
@@ -61,7 +80,10 @@ enum Command {
     /// List paired devices.
     Devices,
     /// Unpair a device; its open connections close within seconds.
-    Revoke { id: String },
+    Revoke {
+        /// The device's ID, as `yochi devices` lists it.
+        id: String,
+    },
     /// Reach this Gateway through a Relay when the phone is off the tailnet.
     Relay {
         #[command(subcommand)]
@@ -79,14 +101,6 @@ enum Command {
 
 #[derive(Subcommand)]
 enum RelayAction {
-    /// Use the relay at this address (https://…); the running Gateway connects
-    /// within seconds. Phones learn it the next time they connect on the tailnet.
-    Use {
-        url: String,
-        /// The relay's registration key.
-        #[arg(long, env = "YOCHI_RELAY_KEY", hide_env_values = true)]
-        key: Option<String>,
-    },
     /// Deploy a relay to your Cloudflare account (Workers, free plan) and use
     /// it. Needs Node.js; wrangler asks you to log in the first time.
     Setup {
@@ -98,41 +112,55 @@ enum RelayAction {
         #[arg(long, default_value = "yochi-relay")]
         name: String,
     },
+    /// Show the relay in use, whether the Gateway is connected to it, and how
+    /// many phones can use it.
+    Status,
+    /// Use a relay you already run; the running Gateway connects within
+    /// seconds. Phones learn it the next time they connect on the tailnet.
+    Use {
+        /// The relay's address, https://…
+        url: String,
+        /// The relay's registration key.
+        #[arg(long, env = "YOCHI_RELAY_KEY", hide_env_values = true)]
+        key: Option<String>,
+    },
     /// Give this Gateway a new address on the relay. The old one, and pairing
     /// links that carry it, stop working; phones learn the new one on the tailnet.
     Rotate,
     /// Stop using a relay. Phones then reach this Gateway only on the tailnet.
     Off,
-    /// Show the relay in use and whether the Gateway is connected to it.
-    Status,
 }
 
 #[derive(Subcommand)]
 enum ServiceAction {
-    /// Install (or update) the LaunchAgent and start it.
-    Install,
+    /// Install (or update) the LaunchAgent and start it. It runs the Gateway
+    /// with these settings.
+    Install(ServeArgs),
     /// Stop the LaunchAgent and remove it.
     Uninstall,
     /// Show whether the LaunchAgent is installed and running.
-    Status,
+    Status {
+        #[command(flatten)]
+        listen: ListenArg,
+    },
 }
 
 const DEFAULT_PORT: u16 = 7420;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let args = parse_args();
     let store = Store::open(match &args.state_dir {
         Some(dir) => dir.clone(),
         None => Store::default_dir()?,
     })?;
-    match args.command.unwrap_or(Command::Serve) {
-        Command::Serve => {
-            let listen = listen_addr(args.listen).await?;
-            let view = herdr::spawn(args.hc.clone());
-            server::serve(listen, store, args.hc, view).await
+    match args.command.unwrap_or(Command::Serve(args.serve)) {
+        Command::Serve(serve) => {
+            let listen = listen_addr(serve.listen.listen).await?;
+            let view = herdr::spawn(serve.hc.clone());
+            server::serve(listen, store, serve.hc, view).await
         }
-        Command::Pair { link } => pair(&store, listen_addr(args.listen).await?, link).await,
+        Command::Pair { listen, link } => pair(&store, listen_addr(listen.listen).await?, link).await,
         Command::Devices => {
             list(&store.devices()?);
             Ok(())
@@ -146,7 +174,7 @@ async fn main() -> Result<()> {
         },
         Command::Relay { action } => relay_command(&store, action),
         Command::Service { action, label } => match action {
-            ServiceAction::Install => install(&label, args.listen, args.state_dir, &args.hc).await,
+            ServiceAction::Install(serve) => install(&label, serve.listen.listen, args.state_dir, &serve.hc).await,
             ServiceAction::Uninstall => {
                 if label == service::LABEL && service::uninstall(service::LEGACY_LABEL)? {
                     println!("Stopped and removed the old LaunchAgent {}.", service::LEGACY_LABEL);
@@ -158,9 +186,25 @@ async fn main() -> Result<()> {
                 }
                 Ok(())
             }
-            ServiceAction::Status => status(&label, args.listen).await,
+            ServiceAction::Status { listen } => status(&label, listen.listen).await,
         },
     }
+}
+
+/// `--listen` and `--hc` before a command would be ignored, so they are refused.
+fn parse_args() -> Args {
+    let matches = Args::command().get_matches();
+    let args = Args::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    if let Some((name, _)) = matches.subcommand() {
+        for id in ["listen", "hc"] {
+            if matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine) {
+                Args::command()
+                    .error(clap::error::ErrorKind::ArgumentConflict, format!("--{id} before a command has no effect; put it after the command if it takes one (see `yochi {name} --help`)"))
+                    .exit();
+            }
+        }
+    }
+    args
 }
 
 async fn install(label: &str, listen: Option<SocketAddr>, state_dir: Option<PathBuf>, hc: &str) -> Result<()> {
