@@ -371,6 +371,7 @@ dependencies = [
  "fiat-crypto",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -1471,6 +1472,7 @@ dependencies = [
  "axum",
  "base64",
  "clap",
+ "curve25519-dalek",
  "futures-util",
  "hyper",
  "hyper-util",

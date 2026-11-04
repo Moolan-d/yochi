@@ -204,8 +204,12 @@ impl Store {
     }
 
     /// Lets a paired device use the Relay: records its Noise key and gives it
-    /// a new psk. `None` if the device is no longer paired.
+    /// a psk, the same one again while the key stays the same. `None` if the
+    /// device is no longer paired.
     pub fn enroll(&self, id: &str, static_key: &[u8; 32]) -> Result<Option<[u8; 32]>> {
+        if let Some(psk) = self.devices()?.iter().find(|device| device.id == id).and_then(|device| device.psk_for(static_key)) {
+            return Ok(Some(psk));
+        }
         let psk = random_bytes::<32>()?;
         let static_key = b64(static_key);
         self.update(|state| {
@@ -405,10 +409,13 @@ mod tests {
         let (b, _) = store.pair(&code, "b").unwrap().unwrap();
         let key = [5u8; 32];
         let psk_a = store.enroll(&a.id, &key).unwrap().unwrap();
+        assert_eq!(store.enroll(&a.id, &key).unwrap(), Some(psk_a), "the same key keeps its psk");
         let psk_b = store.enroll(&b.id, &key).unwrap().unwrap();
         assert_ne!(psk_a, psk_b);
+        assert_ne!(store.enroll(&a.id, &[6u8; 32]).unwrap(), Some(psk_a), "a new key gets a new psk");
+        assert_eq!(store.enroll(&a.id, &key).unwrap().map(|_| ()), Some(()));
         let devices = store.devices().unwrap();
-        assert_eq!(devices.iter().filter_map(|d| d.psk_for(&key)).collect::<Vec<_>>(), vec![psk_b]);
+        assert_eq!(devices.iter().filter(|d| d.psk_for(&key).is_some()).map(|d| d.id.clone()).collect::<Vec<_>>(), vec![a.id.clone()]);
         assert!(store.enroll("gone", &key).unwrap().is_none());
     }
 

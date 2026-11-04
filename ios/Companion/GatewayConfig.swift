@@ -55,10 +55,11 @@ struct GatewayConfig: Equatable {
         UserDefaults.standard.removeObject(forKey: hostKey)
         UserDefaults.standard.removeObject(forKey: deviceKey)
         Keychain.delete(tokenAccount)
+        RelayKeys.clear()
     }
 }
 
-private enum Keychain {
+enum Keychain {
     static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: Bundle.main.bundleIdentifier ?? "companion",

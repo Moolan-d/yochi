@@ -209,8 +209,10 @@ struct PairingView: View {
         pairing = true
         error = nil
         defer { pairing = false }
-        let invite = PairingInvite(host: host.trimmingCharacters(in: .whitespaces),
-                                   code: code.trimmingCharacters(in: .whitespaces))
+        let host = host.trimmingCharacters(in: .whitespaces)
+        // A scanned link's way through the Relay holds while its address does.
+        let invite = PairingInvite(host: host, code: code.trimmingCharacters(in: .whitespaces),
+                                   relay: self.invite?.host == host ? self.invite?.relay : nil)
         do {
             onPaired(try await invite.pair())
         } catch {
@@ -232,6 +234,10 @@ struct GatewaySettingsView: View {
                 Section("Gateway") {
                     LabeledContent("地址", value: config.host)
                     LabeledContent("状态", value: client.statusText)
+                    if let path = client.path {
+                        LabeledContent("连接方式", value: path == .relay ? "Relay（端到端加密）" : "Tailnet")
+                            .accessibilityIdentifier("gateway.path")
+                    }
                     if let core = client.coreName {
                         LabeledContent("主 Mac", value: core)
                     }

@@ -272,7 +272,7 @@ final class ConversationFeed {
     /// reveals it from what was there before, as a stream would have.
     private(set) var arrivals: [String: Arrival] = [:]
 
-    private var socket: URLSessionWebSocketTask?
+    private var socket: GatewaySocket?
     private var loop: Task<Void, Never>?
 
     var todoProgress: TodoProgress? { TodoProgress(items: items) }
@@ -298,24 +298,20 @@ final class ConversationFeed {
             phase = .failed("地址无效：\(config.host)")
             return
         }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
-        let socket = URLSession.shared.webSocketTask(with: request)
-        socket.maximumMessageSize = 32 << 20
+        let socket = GatewaySocket(url: url, token: config.token, maximumMessageSize: 32 << 20)
         self.socket = socket
         if phase != .following { phase = .connecting }
-        socket.resume()
         loop = Task { await follow(socket) }
     }
 
     func stop() {
         loop?.cancel()
         loop = nil
-        socket?.cancel(with: .goingAway, reason: nil)
+        socket?.cancel()
         socket = nil
     }
 
-    private func follow(_ socket: URLSessionWebSocketTask) async {
+    private func follow(_ socket: GatewaySocket) async {
         do {
             while true {
                 guard case .string(let text) = try await socket.receive() else { continue }
@@ -324,7 +320,7 @@ final class ConversationFeed {
         } catch {
             if Task.isCancelled { return }
             if case .closed = phase { return }
-            let status = (socket.response as? HTTPURLResponse)?.statusCode
+            let status = socket.status
             let reason = switch status {
             case 401: "配对已失效"
             case 404: "会话已不存在"

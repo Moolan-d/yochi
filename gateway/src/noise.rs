@@ -199,4 +199,78 @@ pub mod tests {
         assert!(opener.open(&mut gateway, &one_again).is_err());
         let _ = one;
     }
+
+    /// Fixed-key handshake and messages the iOS Noise is checked against
+    /// (`ios/CompanionTests/Fixtures/noise/ikpsk2.json`). The test fails if the
+    /// file is out of date; `WRITE_NOISE_VECTORS=1 cargo test` rewrites it.
+    #[test]
+    fn interop_vectors_for_the_app_are_current() {
+        let key = |byte: u8| -> [u8; 32] { std::array::from_fn(|i| byte.wrapping_add(i as u8)) };
+        let (phone_static, phone_ephemeral, gateway_static, gateway_ephemeral, psk) = (key(0x10), key(0x30), key(0x50), key(0x70), key(0x90));
+        let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+        let public = |private: &[u8; 32]| curve25519_dalek::MontgomeryPoint::mul_base_clamped(*private).to_bytes();
+        let gateway_public = public(&gateway_static);
+
+        let mut initiator = Builder::new(params())
+            .local_private_key(&phone_static)
+            .unwrap()
+            .remote_public_key(&gateway_public)
+            .unwrap()
+            .prologue(PROLOGUE)
+            .unwrap()
+            .psk(PSK_SLOT as u8, &psk)
+            .unwrap()
+            .fixed_ephemeral_key_for_testing_only(&phone_ephemeral)
+            .build_initiator()
+            .unwrap();
+        let mut responder = Builder::new(params())
+            .local_private_key(&gateway_static)
+            .unwrap()
+            .prologue(PROLOGUE)
+            .unwrap()
+            .fixed_ephemeral_key_for_testing_only(&gateway_ephemeral)
+            .build_responder()
+            .unwrap();
+        let mut buffer = [0u8; MAX_MESSAGE];
+        let n = initiator.write_message(&[], &mut buffer).unwrap();
+        let first = buffer[..n].to_vec();
+        responder.read_message(&first, &mut [0u8; MAX_MESSAGE]).unwrap();
+        responder.set_psk(PSK_SLOT, &psk).unwrap();
+        let n = responder.write_message(&[], &mut buffer).unwrap();
+        let second = buffer[..n].to_vec();
+        initiator.read_message(&second, &mut [0u8; MAX_MESSAGE]).unwrap();
+        let (mut phone, mut gateway) = (initiator.into_transport_mode().unwrap(), responder.into_transport_mode().unwrap());
+
+        let request = br#"{"path":"/v0/ws"}"#;
+        let to_gateway: Vec<String> = [seal(&mut phone, false, request).unwrap(), seal(&mut phone, true, &[]).unwrap()].concat().iter().map(|m| hex(m)).collect();
+        let to_phone: Vec<String> = [seal(&mut gateway, false, br#"{"type":"hello"}"#).unwrap(), seal(&mut gateway, true, &[0, 1, 2, 255]).unwrap()]
+            .concat()
+            .iter()
+            .map(|m| hex(m))
+            .collect();
+        let vectors = serde_json::json!({
+            "protocol": PARAMS,
+            "prologue": hex(PROLOGUE),
+            "psk_slot": PSK_SLOT,
+            "phone_static_private": hex(&phone_static),
+            "phone_static_public": hex(&public(&phone_static)),
+            "phone_ephemeral_private": hex(&phone_ephemeral),
+            "gateway_static_private": hex(&gateway_static),
+            "gateway_static_public": hex(&gateway_public),
+            "gateway_ephemeral_private": hex(&gateway_ephemeral),
+            "psk": hex(&psk),
+            "message_1": hex(&first),
+            "message_2": hex(&second),
+            "to_gateway": { "messages": to_gateway, "plain": [{ "binary": false, "text": std::str::from_utf8(request).unwrap() }, { "binary": true, "hex": "" }] },
+            "to_phone": { "messages": to_phone, "plain": [{ "binary": false, "text": "{\"type\":\"hello\"}" }, { "binary": true, "hex": "000102ff" }] },
+        });
+        let text = serde_json::to_string_pretty(&vectors).unwrap() + "\n";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ios/CompanionTests/Fixtures/noise/ikpsk2.json");
+        if std::env::var_os("WRITE_NOISE_VECTORS").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &text).unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(&path).ok().as_deref(), Some(text.as_str()), "rerun with WRITE_NOISE_VECTORS=1");
+    }
 }
+

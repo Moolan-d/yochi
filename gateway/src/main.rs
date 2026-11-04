@@ -52,7 +52,11 @@ enum Command {
     /// Run the Gateway (the default).
     Serve,
     /// Pair a phone: show a single-use code, valid for five minutes.
-    Pair,
+    Pair {
+        /// Also print the pairing link, for the UI tests.
+        #[arg(long, hide = true)]
+        link: bool,
+    },
     /// List paired devices.
     Devices,
     /// Unpair a device; its open connections close within seconds.
@@ -113,7 +117,7 @@ async fn main() -> Result<()> {
             let view = herdr::spawn(args.hc.clone());
             server::serve(listen, store, args.hc, view).await
         }
-        Command::Pair => pair(&store, listen_addr(args.listen).await?).await,
+        Command::Pair { link } => pair(&store, listen_addr(args.listen).await?, link).await,
         Command::Devices => {
             list(&store.devices()?);
             Ok(())
@@ -280,7 +284,7 @@ fn invite(store: &Store, listen: SocketAddr, code: &str) -> Result<String> {
     })
 }
 
-async fn pair(store: &Store, listen: SocketAddr) -> Result<()> {
+async fn pair(store: &Store, listen: SocketAddr, link: bool) -> Result<()> {
     if !answering(listen).await {
         eprintln!("Note: no Gateway is answering at {listen}; start it (`yochi`) before the phone pairs.\n");
     }
@@ -292,6 +296,9 @@ async fn pair(store: &Store, listen: SocketAddr) -> Result<()> {
     println!("Scan with the iPhone camera, or enter these in Yochi:");
     println!("  Address  {listen}");
     println!("  Code     {}\n", devices::display_code(&code));
+    if link {
+        println!("  Link     {invite}\n");
+    }
     println!("A paired phone can watch and type into every session this Gateway serves,");
     println!("which means running anything your account can on this Mac and its machines.");
     println!("Unpair later with `yochi revoke <id>`.\n");

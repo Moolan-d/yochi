@@ -13,7 +13,7 @@ final class ScreenFeed {
     /// Counts screens received, so a waiting step can tell a fresh one.
     private(set) var revision = 0
 
-    private var socket: URLSessionWebSocketTask?
+    private var socket: GatewaySocket?
     private var loop: Task<Void, Never>?
     /// The session ended or refused the phone; nothing reconnects.
     @ObservationIgnored private var ended = false
@@ -31,7 +31,7 @@ final class ScreenFeed {
     func stop() {
         loop?.cancel()
         loop = nil
-        socket?.cancel(with: .goingAway, reason: nil)
+        socket?.cancel()
         socket = nil
     }
 
@@ -62,12 +62,8 @@ final class ScreenFeed {
     private func follow(_ url: URL, token: String) async {
         var delay = Duration.seconds(1)
         while !Task.isCancelled {
-            var request = URLRequest(url: url)
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let socket = URLSession.shared.webSocketTask(with: request)
-            socket.maximumMessageSize = 4 << 20
+            let socket = GatewaySocket(url: url, token: token, maximumMessageSize: 4 << 20)
             self.socket = socket
-            socket.resume()
             do {
                 while true {
                     guard case .string(let text) = try await socket.receive() else { continue }
@@ -87,7 +83,7 @@ final class ScreenFeed {
             } catch {
                 if Task.isCancelled { return }
                 clear()
-                let status = (socket.response as? HTTPURLResponse)?.statusCode
+                let status = socket.status
                 if status == 401 || status == 404 {
                     ended = true
                     return

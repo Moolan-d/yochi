@@ -205,6 +205,41 @@ final class CompanionUITests: XCTestCase {
         snapshot("2 prefilled form")
     }
 
+    /// Off the tailnet (the link's address goes nowhere), the phone pairs and
+    /// watches a terminal through the Relay, end-to-end encrypted.
+    @MainActor
+    func testPairAndObserveOverRelay() throws {
+        let app = launchUnpaired()
+        let link = try XCTUnwrap(URL(string: env("COMPANION_LINK")))
+        XCUIDevice.shared.system.open(link)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let open = springboard.buttons.matching(NSPredicate(format: "label IN {'打开', 'Open'}")).firstMatch
+        let address = app.textFields["地址"]
+        let deadline = Date.now.addingTimeInterval(10)
+        while (address.value as? String)?.hasPrefix("192.0.2.") != true, Date.now < deadline {
+            if open.exists { open.tap() }
+            RunLoop.current.run(until: .now.addingTimeInterval(0.3))
+        }
+        XCTAssertEqual(address.value as? String, "192.0.2.1:7421", "the link did not fill the form")
+        app.buttons["配对"].tap()
+        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 30), "pairing through the Relay did not finish")
+
+        app.buttons["设置"].tap()
+        let path = app.descendants(matching: .any)["gateway.path"]
+        XCTAssert(path.waitForExistence(timeout: 10), "no connection path in settings")
+        XCTAssert(path.label.contains("Relay") || (path.value as? String)?.contains("Relay") == true,
+                  "not connected through the Relay: \(path.label)")
+        snapshot("1 settings over relay")
+        app.buttons["完成"].tap()
+
+        let session = testSession(app)
+        XCTAssert(session.waitForExistence(timeout: 15), "no sessions through the Relay")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 20), "terminal never attached through the Relay")
+        snapshot("2 observe over relay")
+        leaveAndUnpair(app)
+    }
+
     @MainActor
     func testAgentMessageIsAccepted() throws {
         let app = launchUnpaired(observing: env("COMPANION_SESSION"))

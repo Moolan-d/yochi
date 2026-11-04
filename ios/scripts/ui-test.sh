@@ -5,7 +5,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-SIM=${SIM:-iPhone 17 Pro}
+SIM=${SIM:-iPhone 18 Pro}
 # By name alone xcodebuild wants the newest OS, which may not have this model.
 sim_id=$(xcrun simctl list devices available | grep -m1 "    $SIM (" | grep -oE '[0-9A-F-]{36}') || {
     echo "no simulator named $SIM" >&2; exit 1; }
@@ -22,12 +22,24 @@ export YOCHI_STATE_DIR="$state"
 export YOCHI_LISTEN="$(tailscale ip -4 | head -1):7421"
 "$GATEWAY" > "$state/gateway.log" 2>&1 &
 gateway=$!
+# A local Relay, for the phone off the tailnet; every test pairs with it in
+# use, so each one also enrolls through the tailnet.
+relay_port=${RELAY_PORT:-7431}
+relay_key=uitest-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+PORT=$relay_port HOST=127.0.0.1 RELAY_REGISTRATION_KEY=$relay_key node ../relay/index.mjs > "$state/relay.log" 2>&1 &
+relay=$!
+# Another relay left on the port would answer the health check with another key.
+until grep -q "listening on" "$state/relay.log"; do
+    kill -0 $relay 2>/dev/null || { echo "the relay did not start:" >&2; cat "$state/relay.log" >&2; exit 1; }
+    sleep 0.2
+done
+YOCHI_RELAY_KEY=$relay_key "$GATEWAY" relay use "http://127.0.0.1:$relay_port" > /dev/null
 pairing=
 # Cleanup by the unique name, not by parsed ids: a bad parse must not leak the
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -121,11 +133,24 @@ start_changes_repo() {
 # testChangesPage run only when named, as do testTabMenu, testClaudeStartedInTerminal
 # (starts Claude Code without sending it anything) and the testPerf*
 # measurements (scripts/perf-test.sh).
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testConversationCards testHomeSample}; do
-    "$GATEWAY" pair > "$state/pair.log" 2>&1 &
+for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testConversationCards testHomeSample}; do
+    if [ "$test" = testPairAndObserveOverRelay ]; then
+        # The link's tailnet address goes nowhere (TEST-NET-1), so the phone
+        # has to pair and connect through the Relay.
+        tries=0
+        until grep -q '"connected":true' "$state/relay-status.json" 2>/dev/null; do
+            tries=$((tries + 1))
+            [ $tries -lt 150 ] || { echo "the Gateway never reached the relay:" >&2; cat "$state/relay-status.json" >&2; exit 1; }
+            sleep 0.2
+        done
+        YOCHI_LISTEN=192.0.2.1:7421 "$GATEWAY" pair --link > "$state/pair.log" 2>&1 &
+    else
+        "$GATEWAY" pair > "$state/pair.log" 2>&1 &
+    fi
     pairing=$!
-    until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
+    until grep -q "Link \|Code " "$state/pair.log" && { [ "$test" != testPairAndObserveOverRelay ] || grep -q "Link " "$state/pair.log"; }; do sleep 0.2; done
     code=$(awk '/Code /{print $2}' "$state/pair.log")
+    link=$(awk '/Link /{print $2}' "$state/pair.log")
 
     echo "== $test"
     extra=
@@ -178,6 +203,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     fi
     env $extra \
         TEST_RUNNER_COMPANION_HOST="$YOCHI_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
+        TEST_RUNNER_COMPANION_LINK="$link" \
         TEST_RUNNER_COMPANION_SESSION="$test_session" \
         xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINATION" \
         -derivedDataPath build -quiet test-without-building \
@@ -263,4 +289,5 @@ if ! "$GATEWAY" devices | grep -q "No paired devices"; then
     failed=1
 fi
 echo "Gateway log:"; sed 's/^/  /' "$state/gateway.log"
+echo "Relay log:"; sed 's/^/  /' "$state/relay.log"
 exit $failed

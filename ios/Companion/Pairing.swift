@@ -3,27 +3,81 @@ import UIKit
 
 /// What `yochi pair` shows: the Gateway's address and a single-use
 /// code, typed in or opened from its QR code (`yochi://pair?host=…&code=…`).
+/// A Gateway with a Relay adds a way through it (link v2): the Relay, the
+/// route, the Gateway's Noise key and a single-use secret.
 struct PairingInvite: Equatable {
     var host: String
     var code: String
+    var relay: Relay?
 
-    init(host: String, code: String) {
+    struct Relay: Equatable {
+        var url: String
+        var route: String
+        var gatewayKey: String
+        var secret: String
+    }
+
+    init(host: String, code: String, relay: Relay? = nil) {
         self.host = host
         self.code = code
+        self.relay = relay
     }
 
     init?(url: URL) {
         guard url.scheme == "yochi", url.host() == "pair",
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
-              let host = items.first(where: { $0.name == "host" })?.value, !host.isEmpty,
-              let code = items.first(where: { $0.name == "code" })?.value, !code.isEmpty
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
         else { return nil }
-        self.init(host: host, code: code)
+        func value(_ name: String) -> String? {
+            items.first(where: { $0.name == name })?.value.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        guard let host = value("host"), let code = value("code") else { return nil }
+        var relay: Relay?
+        // A link without every Relay part still pairs over the tailnet.
+        if value("v") == "2", let address = value("relay"), let route = value("route"), let key = value("key"),
+           let secret = value("secret"), address.hasPrefix("https://") || address.hasPrefix("http://") {
+            relay = Relay(url: address, route: route, gatewayKey: key, secret: secret)
+        }
+        self.init(host: host, code: code, relay: relay)
+    }
+
+    /// Pairs over the tailnet; with a Relay in the link, through the Relay
+    /// when the tailnet doesn't answer.
+    func pair() async throws -> GatewayConfig {
+        guard let relay else { return try await pairOnTailnet() }
+        do {
+            return try await withTimeout(.seconds(4)) { try await pairOnTailnet() }
+        } catch PairingError.rejected {
+            throw PairingError.rejected
+        } catch {
+            return try await pairThrough(relay)
+        }
+    }
+
+    /// Proves this device with the link's secret; the Gateway answers with
+    /// a token and this device's own psk.
+    private func pairThrough(_ relay: Relay) async throws -> GatewayConfig {
+        guard let gateway = Data(base64URL: relay.gatewayKey), let secret = Data(base64URL: relay.secret) else {
+            throw PairingError.badAddress
+        }
+        let link = RelayInfo(url: relay.url, route: relay.route, gatewayKey: relay.gatewayKey, psk: relay.secret)
+        let name = await UIDevice.current.name
+        let paired: RelayPairing.Paired?
+        do {
+            paired = try await RelayPairing.pair(link, secret: secret, gateway: gateway, name: name)
+        } catch is GatewayRefusal {
+            throw PairingError.rejected
+        } catch Noise.Failure.decrypt {
+            // The secret was used or has expired.
+            throw PairingError.rejected
+        }
+        guard let paired else { throw PairingError.unexpected }
+        RelayKeys.save(RelayInfo(url: relay.url, route: relay.route, gatewayKey: relay.gatewayKey, psk: paired.psk))
+        return GatewayConfig(host: host, token: paired.token, device: paired.device)
     }
 
     /// Trades the code for this device's own token, over a WebSocket like the
     /// rest of the API (iOS refuses plain HTTP to tailnet IPs).
-    func pair() async throws -> GatewayConfig {
+    private func pairOnTailnet() async throws -> GatewayConfig {
         guard let url = GatewayConfig.endpoint(host: host, path: "/v0/pair") else {
             throw PairingError.badAddress
         }

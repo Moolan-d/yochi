@@ -1,0 +1,46 @@
+{
+  "gateway_ephemeral_private": "707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f",
+  "gateway_static_private": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f",
+  "gateway_static_public": "392d174a38b3b1beafaf1fe824870841c5fa531bc6eafdb6402c124664488c1c",
+  "message_1": "34e42d4af5ef94a07a3a84201b889d4cd1a743cb27b11b6a10438a8feb8e58477c67e7a08664e7ba3a67cd912b64195f6c92c68cc60ed410e676288c29d1bb4bcb698e48acf796c66a4bfba015e33ed7abe276b85367bd336593dd11323bf10c",
+  "message_2": "23b7bb8c91ae008711fb12846780bcdf1e065f821bdfec49f57e7c7dcd4c4823d2f1f576bce7e51d978d0871cf054c67",
+  "phone_ephemeral_private": "303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+  "phone_static_private": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+  "phone_static_public": "d89e3bad79437dbed9f843418304f460ff05c7fe81fe4a9577a804cb9367ff66",
+  "prologue": "796f6368692d72656c61792d7631",
+  "protocol": "Noise_IKpsk2_25519_ChaChaPoly_SHA256",
+  "psk": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+  "psk_slot": 2,
+  "to_gateway": {
+    "messages": [
+      "7a30d858ef5f118b346655e7f04c4b42ff6cd4b8560c090f2f9eb9da1e37503eb211",
+      "958f06b307c00014b31e2d8dc5a65c05fd"
+    ],
+    "plain": [
+      {
+        "binary": false,
+        "text": "{\"path\":\"/v0/ws\"}"
+      },
+      {
+        "binary": true,
+        "hex": ""
+      }
+    ]
+  },
+  "to_phone": {
+    "messages": [
+      "f65fca8830f2dfc05ab1df284901ec671df799b5464b717da2ef65d373bbb62910",
+      "ba7e7b3936ac7eed39f258e081d425270a055e4d1c"
+    ],
+    "plain": [
+      {
+        "binary": false,
+        "text": "{\"type\":\"hello\"}"
+      },
+      {
+        "binary": true,
+        "hex": "000102ff"
+      }
+    ]
+  }
+}

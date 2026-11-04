@@ -80,8 +80,10 @@ final class GatewayClient {
     private var host: String?
     /// Session pages' streams, kept a while after a page leaves.
     @ObservationIgnored let feedStore = SessionFeedStore()
+    /// How the app reaches the Gateway right now, once connected.
+    private(set) var path: GatewayPath?
 
-    private var socket: URLSessionWebSocketTask?
+    private var socket: GatewaySocket?
     private var loop: Task<Void, Never>?
     /// Pending requests stay bound to the socket they were written to, so a
     /// superseded connection's teardown cannot fail a newer connection's request.
@@ -89,7 +91,7 @@ final class GatewayClient {
     private var responseTimeouts: [String: Task<Void, Never>] = [:]
 
     private struct Pending {
-        let socket: URLSessionWebSocketTask
+        let socket: GatewaySocket
         let continuation: CheckedContinuation<Reply, Never>
     }
 
@@ -188,8 +190,9 @@ final class GatewayClient {
         failPending()
         loop?.cancel()
         loop = nil
-        socket?.cancel(with: .goingAway, reason: nil)
+        socket?.cancel()
         socket = nil
+        path = nil
         phase = .disconnected
     }
 
@@ -359,14 +362,14 @@ final class GatewayClient {
                 try? await Task.sleep(for: .seconds(45))
                 guard !Task.isCancelled else { return }
                 complete(id: id, with: .unknown)
-                socket.cancel(with: .goingAway, reason: nil)
+                socket.cancel()
             }
             Task {
                 do {
                     try await socket.send(.string(String(decoding: data, as: UTF8.self)))
                 } catch {
                     complete(id: id, with: .unknown)
-                    socket.cancel(with: .goingAway, reason: nil)
+                    socket.cancel()
                 }
             }
         }
@@ -395,7 +398,8 @@ final class GatewayClient {
                 try await follow(url: url, token: config.token)
             } catch {
                 if Task.isCancelled { return }
-                if (socket?.response as? HTTPURLResponse)?.statusCode == 401 {
+                path = nil
+                if socket?.status == 401 {
                     // Unpaired: what this device saw before is no longer its to show.
                     sessions = []
                     spaces = []
@@ -412,18 +416,15 @@ final class GatewayClient {
     }
 
     private func follow(url: URL, token: String) async throws {
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let socket = URLSession.shared.webSocketTask(with: request)
-        // A file's diff can run to half a megabyte.
-        socket.maximumMessageSize = 4 << 20
+        // A file's diff can run to half a megabyte. The tailnet goes first
+        // even after the Relay, so the app finds its way back to it.
+        let socket = GatewaySocket(url: url, token: token, maximumMessageSize: 4 << 20, tailnetFirst: true)
         self.socket = socket
-        socket.resume()
         let pings = Task { await Self.keepAlive(socket) }
         defer {
             failPending(for: socket)
             pings.cancel()
-            socket.cancel(with: .goingAway, reason: nil)
+            socket.cancel()
         }
 
         while true {
@@ -431,6 +432,16 @@ final class GatewayClient {
             switch try await Self.decode(text) {
             case .hello:
                 phase = .connected
+                path = socket.path
+                // On the tailnet, the Gateway tells this device how to reach
+                // it through the Relay, for when the tailnet isn't there.
+                if path == .tailnet {
+                    let key = RelayKeys.staticKey().publicKey.rawRepresentation.base64URL
+                    try? await socket.send(.string(#"{"type":"relay_enroll","static_key":"\#(key)"}"#))
+                }
+            case .relay(let info, let failed):
+                // A failed enrollment keeps what this device had.
+                if info != nil || !failed { RelayKeys.save(info) }
             case .sessions(let core, let connected, let sessions, let spaces):
                 // Every page reads these; an unchanged list redraws nothing.
                 if coreName != core { coreName = core }
@@ -478,7 +489,7 @@ final class GatewayClient {
         pending.removeValue(forKey: id)?.continuation.resume(returning: result)
     }
 
-    private func failPending(for socket: URLSessionWebSocketTask? = nil) {
+    private func failPending(for socket: GatewaySocket? = nil) {
         let failed = pending.filter { socket == nil || $0.value.socket === socket }
         for (id, request) in failed {
             pending.removeValue(forKey: id)
@@ -488,14 +499,11 @@ final class GatewayClient {
     }
 
     /// A dead link (the Mac slept, the phone changed networks) shows as a failed ping.
-    private static func keepAlive(_ socket: URLSessionWebSocketTask) async {
+    private static func keepAlive(_ socket: GatewaySocket) async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(15))
-            let alive = await withCheckedContinuation { done in
-                socket.sendPing { done.resume(returning: $0 == nil) }
-            }
-            if !alive {
-                socket.cancel(with: .goingAway, reason: nil)
+            if !(await socket.ping()) {
+                socket.cancel()
                 return
             }
         }

@@ -143,10 +143,14 @@ enum ServerMessage: Decodable {
     case changesFailed(id: String, kind: String, message: String)
     case changeDiff(id: String, patch: String, truncated: Bool)
     case changeDiffFailed(id: String, kind: String, message: String)
+    /// The answer to `relay_enroll`: no info when the Gateway has no Relay,
+    /// `failed` when it couldn't enroll this device.
+    case relay(info: RelayInfo?, failed: Bool)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
         case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path, commands, patch, truncated
+        case available, url, route, gatewayKey = "gateway_key", psk, error
     }
 
     init(from decoder: Decoder) throws {
@@ -225,6 +229,16 @@ enum ServerMessage: Decodable {
             self = try c.decode(String.self, forKey: .type) == "changes_failed"
                 ? .changesFailed(id: id, kind: kind, message: message)
                 : .changeDiffFailed(id: id, kind: kind, message: message)
+        case "relay":
+            if try c.decode(Bool.self, forKey: .available) {
+                self = .relay(info: RelayInfo(url: try c.decode(String.self, forKey: .url),
+                                              route: try c.decode(String.self, forKey: .route),
+                                              gatewayKey: try c.decode(String.self, forKey: .gatewayKey),
+                                              psk: try c.decode(String.self, forKey: .psk)),
+                              failed: false)
+            } else {
+                self = .relay(info: nil, failed: try c.decodeIfPresent(String.self, forKey: .error) != nil)
+            }
         default:
             self = .unknown
         }

@@ -80,7 +80,7 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 
 App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后删除这台设备并关闭连接。
 
-已配对的设备在这个连接上登记 Relay（ADR 0006）。App 每次在 tailnet 上连上时登记一次，从而拿到当前的中继地址和新的 psk：
+已配对的设备在这个连接上登记 Relay（ADR 0006）。App 每次在 tailnet 上连上时登记一次，从而拿到当前的中继地址和 psk：
 
 ```jsonc
 // App → Gateway；static_key 是 App 的 Noise 静态公钥（32 字节，base64url）
@@ -90,7 +90,7 @@ App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后�
 {"type": "relay", "available": false}  // 没配置 Relay；出错时另带 "error"
 ```
 
-每次登记都会换一个新 psk，旧的立即失效。同一个静态公钥只属于一台设备。
+静态公钥不变时，重复登记拿到同一个 psk；换了静态公钥会得到新 psk，旧的立即失效。同一个静态公钥只属于一台设备。
 
 ### Agent Message
 
