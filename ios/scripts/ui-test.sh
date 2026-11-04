@@ -135,15 +135,28 @@ start_changes_repo() {
 # measurements (scripts/perf-test.sh).
 for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testConversationCards testHomeSample}; do
     if [ "$test" = testPairAndObserveOverRelay ]; then
-        # The link's tailnet address goes nowhere (TEST-NET-1), so the phone
-        # has to pair and connect through the Relay.
+        # With the tailnet off the link has only the Relay, so the phone pairs
+        # and connects through it. Once it has, the tailnet comes back on and
+        # the phone learns its address over the Relay.
         tries=0
         until grep -q '"connected":true' "$state/relay-status.json" 2>/dev/null; do
             tries=$((tries + 1))
             [ $tries -lt 150 ] || { echo "the Gateway never reached the relay:" >&2; cat "$state/relay-status.json" >&2; exit 1; }
             sleep 0.2
         done
-        YOCHI_LISTEN=192.0.2.1:7421 "$GATEWAY" pair --link > "$state/pair.log" 2>&1 &
+        "$GATEWAY" tailnet off > /dev/null
+        tries=0
+        while nc -z "${YOCHI_LISTEN%:*}" "${YOCHI_LISTEN##*:}" 2>/dev/null; do
+            tries=$((tries + 1))
+            [ $tries -lt 50 ] || { echo "the Gateway kept listening on the tailnet" >&2; exit 1; }
+            sleep 0.2
+        done
+        "$GATEWAY" pair --link > "$state/pair.log" 2>&1 &
+        ( until grep -q "^Paired" "$state/pair.log"; do sleep 0.2; done
+          # Time to check the Relay and watch the terminal through it.
+          sleep 15
+          "$GATEWAY" tailnet on > /dev/null ) &
+        tailnet_back=$!
     else
         "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     fi
@@ -209,6 +222,11 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         -derivedDataPath build -quiet test-without-building \
         -only-testing:"CompanionUITests/CompanionUITests/$test" \
         -resultBundlePath "$RESULTS/$test.xcresult" || failed=1
+    if [ "$test" = testPairAndObserveOverRelay ]; then
+        kill $tailnet_back 2>/dev/null || true
+        "$GATEWAY" tailnet on > /dev/null
+        until nc -z "${YOCHI_LISTEN%:*}" "${YOCHI_LISTEN##*:}" 2>/dev/null; do sleep 0.2; done
+    fi
     # The UI test only saw "已送达"; the shell must have run each command:
     # the echo twice (sent, then ↑ ⏎), and the last one only after Ctrl+C.
     if [ "$test" = testShellCommandsRun ]; then

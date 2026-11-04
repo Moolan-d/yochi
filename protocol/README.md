@@ -30,6 +30,7 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 
 - `key`、`secret` 都是 32 字节，base64url 不带填充；`route` 也是 base64url。
 - `secret` 与配对码属于同一次配对：单次使用，5 分钟内有效。配对码只在 tailnet 上用，`secret` 只在 Relay 上用，用掉任一个这次配对就结束。
+- Gateway 的 tailnet 关着（`yochi tailnet off`）或 Mac 不在 tailnet 上时，链接不带 `host` 和 `code`，手机只经 Relay 配对和连接，之后由下面的 `tailnet` 消息补上 tailnet 地址。
 
 ### 会话列表
 
@@ -91,6 +92,16 @@ App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后�
 ```
 
 静态公钥不变时，重复登记拿到同一个 psk；换了静态公钥会得到新 psk，旧的立即失效。同一个静态公钥只属于一台设备。
+
+Gateway 在 hello 之后、以及 tailnet 地址变化时，告诉 App 它在 tailnet 上的地址。经 tailnet 或经 Relay 连上都会收到，App 据此更新保存的地址，不必重新扫码：
+
+```jsonc
+// Gateway → App
+{"type": "tailnet", "host": "100.64.0.1:7420"}
+{"type": "tailnet", "host": null}  // tailnet 已关（`yochi tailnet off`），只经 Relay
+```
+
+Mac 暂时不在 tailnet 上时不发，App 保留原来的地址。tailnet 关掉时，Gateway 关闭经 tailnet 的连接，经 Relay 的连接不受影响。
 
 ### Agent Message
 

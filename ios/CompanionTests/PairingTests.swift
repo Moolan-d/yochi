@@ -24,6 +24,28 @@ struct PairingTests {
         #expect(PairingInvite(url: URL(string: "yochi://pair?v=2&code=C")!) == nil)
     }
 
+    @Test func aLinkOffTheTailnetPairsThroughTheRelayOnly() throws {
+        let url = URL(string: "yochi://pair?v=2&code=ABCD-1234&key=k&relay=https%3A%2F%2Fr.example&route=rt&secret=s")!
+        let invite = try #require(PairingInvite(url: url))
+        #expect(invite.host.isEmpty)
+        #expect(invite.relay?.route == "rt")
+        let config = GatewayConfig(host: "", token: "t")
+        #expect(config.url?.host() == GatewayConfig.relayOnlyHost)
+        #expect(config.url?.path() == "/v0/ws")
+    }
+
+    @Test func theTailnetAddressDecodes() throws {
+        func decode(_ json: String) throws -> ServerMessage {
+            try JSONDecoder().decode(ServerMessage.self, from: Data(json.utf8))
+        }
+        guard case .tailnet(let host) = try decode(#"{"type":"tailnet","host":"100.64.0.1:7420"}"#) else {
+            Issue.record("not tailnet")
+            return
+        }
+        #expect(host == "100.64.0.1:7420")
+        guard case .tailnet(nil) = try decode(#"{"type":"tailnet","host":null}"#) else { Issue.record("off"); return }
+    }
+
     @Test func aRelayOnlySpeaksWebSocketsOverItsOwnScheme() {
         let secure = RelayInfo(url: "https://relay.example.com", route: "abc", gatewayKey: "", psk: "")
         #expect(secure.streamURL?.absoluteString == "wss://relay.example.com/c/abc")

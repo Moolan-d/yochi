@@ -4,7 +4,8 @@ import UIKit
 /// What `yochi pair` shows: the Gateway's address and a single-use
 /// code, typed in or opened from its QR code (`yochi://pair?host=…&code=…`).
 /// A Gateway with a Relay adds a way through it (link v2): the Relay, the
-/// route, the Gateway's Noise key and a single-use secret.
+/// route, the Gateway's Noise key and a single-use secret. Off the tailnet
+/// the link has only that, and `host` is empty.
 struct PairingInvite: Equatable {
     var host: String
     var code: String
@@ -30,20 +31,22 @@ struct PairingInvite: Equatable {
         func value(_ name: String) -> String? {
             items.first(where: { $0.name == name })?.value.flatMap { $0.isEmpty ? nil : $0 }
         }
-        guard let host = value("host"), let code = value("code") else { return nil }
         var relay: Relay?
         // A link without every Relay part still pairs over the tailnet.
         if value("v") == "2", let address = value("relay"), let route = value("route"), let key = value("key"),
            let secret = value("secret"), address.hasPrefix("https://") || address.hasPrefix("http://") {
             relay = Relay(url: address, route: route, gatewayKey: key, secret: secret)
         }
-        self.init(host: host, code: code, relay: relay)
+        let host = value("host")
+        guard host != nil || relay != nil else { return nil }
+        self.init(host: host ?? "", code: value("code") ?? "", relay: relay)
     }
 
     /// Pairs over the tailnet; with a Relay in the link, through the Relay
     /// when the tailnet doesn't answer.
     func pair() async throws -> GatewayConfig {
         guard let relay else { return try await pairOnTailnet() }
+        if host.isEmpty { return try await pairThrough(relay) }
         do {
             return try await withTimeout(.seconds(4)) { try await pairOnTailnet() }
         } catch PairingError.rejected {

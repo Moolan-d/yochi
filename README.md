@@ -26,7 +26,13 @@ BUNDLE_ID_SUFFIX = .yourname
 
 ## 常驻运行
 
-日常使用时让 Gateway 随登录启动，崩溃时由 launchd 每 10 秒重试。Mac 上的 Tailscale 没开时 Gateway 不退出：配了中继就照常经中继服务，同时每 5 秒找一次 tailnet 地址，找到后再在 tailnet 上监听。
+日常使用时让 Gateway 随登录启动，崩溃时由 launchd 每 10 秒重试。
+
+tailnet 和中继是两条独立的路径，可以只开一条：
+
+- tailnet 默认开着。Mac 上的 Tailscale 没开或没装时 Gateway 不退出：配了中继就照常经中继服务，同时每 5 秒找一次 tailnet 地址，找到后再在 tailnet 上监听。
+- `yochi tailnet off` 让 Gateway 不在 tailnet 上监听，只经中继服务；`yochi tailnet on` 恢复，`yochi tailnet status` 查看。
+- 只开中继时 `yochi pair` 的二维码只带中继信息，手机不需要装 Tailscale。之后 tailnet 打开，Gateway 会把地址告诉已配对的手机，手机自动改走 tailnet。
 
 ```sh
 cargo install --path gateway        # 装到 ~/.cargo/bin，不随 cargo build 变化
@@ -35,6 +41,6 @@ yochi service status                # 是否在运行、监听地址、日志位
 yochi service uninstall
 ```
 
-安装时会记下当前 `hc` 和 `tailscale` 的绝对路径（launchd 不继承 shell 的 PATH），以及显式传入的 `--listen`、`--state-dir`。日志在 `~/Library/Logs/Yochi/gateway.log`。已有 Gateway 占着端口时安装会拒绝，先停掉它。
+安装时会记下当前 `hc` 和 `tailscale`（装了的话）的绝对路径（launchd 不继承 shell 的 PATH），以及显式传入的 `--listen`、`--state-dir`。日志在 `~/Library/Logs/Yochi/gateway.log`。已有 Gateway 占着端口时安装会拒绝，先停掉它。
 
 从改名前的版本（`companion-gateway`）升级：`yochi service install` 会先停掉并移除旧的 `dev.companion.gateway`，配对记录随后从 `~/Library/Application Support/Companion Gateway` 迁到 `~/Library/Application Support/Yochi`。iOS 的 bundle ID 也改成了 `dev.yochi.app`，手机上会装成一个新 App，需要重新配对，旧 App 可以删掉。

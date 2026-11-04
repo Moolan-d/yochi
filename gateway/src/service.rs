@@ -20,7 +20,8 @@ pub struct Agent {
     pub label: String,
     pub exe: PathBuf,
     pub hc: PathBuf,
-    pub tailscale: PathBuf,
+    /// Absent when Tailscale isn't installed; the Gateway then waits for it.
+    pub tailscale: Option<PathBuf>,
     pub listen: Option<SocketAddr>,
     pub state_dir: Option<PathBuf>,
     pub log: PathBuf,
@@ -28,10 +29,8 @@ pub struct Agent {
 
 impl Agent {
     pub fn plist(&self) -> String {
-        let mut env = vec![(
-            "PATH",
-            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.tailscale.parent().unwrap_or(Path::new("/")).display()),
-        )];
+        let tailscale = self.tailscale.as_deref().and_then(Path::parent).map(|dir| format!("{}:", dir.display()));
+        let mut env = vec![("PATH", format!("{}/usr/bin:/bin:/usr/sbin:/sbin", tailscale.unwrap_or_default()))];
         env.push(("YOCHI_HC", self.hc.display().to_string()));
         if let Some(listen) = self.listen {
             env.push(("YOCHI_LISTEN", listen.to_string()));
@@ -195,7 +194,7 @@ mod tests {
             label: LABEL.into(),
             exe: "/opt/demo/.cargo/bin/yochi".into(),
             hc: "/opt/demo/.local/bin/hc".into(),
-            tailscale: "/usr/local/bin/tailscale".into(),
+            tailscale: Some("/usr/local/bin/tailscale".into()),
             listen: None,
             state_dir: None,
             log: "/opt/demo/Library/Logs/Yochi/gateway.log".into(),
@@ -223,5 +222,11 @@ mod tests {
         .plist();
         assert!(plist.contains("<key>YOCHI_LISTEN</key>\n\t\t<string>100.64.0.1:7422</string>"));
         assert!(plist.contains("<string>/tmp/a&amp;b&lt;c&gt;</string>"));
+    }
+
+    #[test]
+    fn tailscale_is_optional() {
+        let plist = Agent { tailscale: None, ..agent() }.plist();
+        assert!(plist.contains("<key>PATH</key>\n\t\t<string>/usr/bin:/bin:/usr/sbin:/sbin</string>"));
     }
 }

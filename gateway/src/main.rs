@@ -18,6 +18,7 @@ mod screen;
 mod server;
 mod service;
 mod session;
+mod tailnet;
 mod transcript;
 
 use anyhow::{Context as _, Result, bail};
@@ -84,6 +85,11 @@ enum Command {
         /// The device's ID, as `yochi devices` lists it.
         id: String,
     },
+    /// Reach this Gateway on the tailnet: on by default, whenever this Mac is on it.
+    Tailnet {
+        #[command(subcommand)]
+        action: TailnetAction,
+    },
     /// Reach this Gateway through a Relay when the phone is off the tailnet.
     Relay {
         #[command(subcommand)]
@@ -96,6 +102,21 @@ enum Command {
         /// The LaunchAgent's label; another one can try a second Gateway alongside.
         #[arg(long, default_value = service::LABEL, global = true, hide = true)]
         label: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TailnetAction {
+    /// Listen on the tailnet again whenever this Mac is on it.
+    On,
+    /// Stop listening on the tailnet and close its connections; phones then
+    /// reach this Gateway only through a relay.
+    Off,
+    /// Show whether the tailnet is on, this Mac's address on it, and whether
+    /// the Gateway is listening there.
+    Status {
+        #[command(flatten)]
+        listen: ListenArg,
     },
 }
 
@@ -163,7 +184,7 @@ async fn main() -> Result<()> {
             let view = herdr::spawn(serve.hc.clone());
             server::serve(listen, store, serve.hc, view).await
         }
-        Command::Pair { listen, link } => pair(&store, listen_addr(listen.listen).await?, link).await,
+        Command::Pair { listen, link } => pair(&store, listen.listen, link).await,
         Command::Devices => {
             list(&store.devices()?);
             Ok(())
@@ -175,6 +196,7 @@ async fn main() -> Result<()> {
             }
             None => bail!("no paired device {id:?}; see `yochi devices`"),
         },
+        Command::Tailnet { action } => tailnet_command(&store, action).await,
         Command::Relay { action } => relay_command(&store, action),
         Command::Service { action, label } => match action {
             ServiceAction::Install(serve) => install(&label, serve.listen.listen, args.state_dir, &serve.hc).await,
@@ -211,28 +233,35 @@ fn parse_args() -> Args {
 }
 
 async fn install(label: &str, listen: Option<SocketAddr>, state_dir: Option<PathBuf>, hc: &str) -> Result<()> {
+    // Off the tailnet there is no address to check; the Gateway waits for one.
+    let dir = state_dir.clone().map_or_else(Store::default_dir, Ok)?;
+    let addr = if tailnet::enabled(&dir) { listen_addr(listen).await.ok() } else { None };
     let agent = service::Agent {
         label: label.into(),
         exe: std::env::current_exe()?.canonicalize()?,
         hc: service::which(hc)?,
-        tailscale: service::which("tailscale")?,
+        tailscale: service::which("tailscale").ok(),
         listen,
         state_dir,
         log: service::default_log()?,
     };
-    let addr = listen_addr(listen).await?;
     if label == service::LABEL && service::uninstall(service::LEGACY_LABEL)? {
         println!("Stopped and removed the old LaunchAgent {}.", service::LEGACY_LABEL);
         // bootout returns before the old Gateway lets go of the port.
-        for _ in 0..20 {
-            if !answering(addr).await {
-                break;
+        if let Some(addr) = addr {
+            for _ in 0..20 {
+                if !answering(addr).await {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
-            tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
     // The LaunchAgent would only crash-loop on a port another Gateway holds.
-    if service::status(label)?.running.is_none() && answering(addr).await {
+    if let Some(addr) = addr
+        && service::status(label)?.running.is_none()
+        && answering(addr).await
+    {
         bail!("a Gateway is already listening at {addr}; stop it first, then install");
     }
     if agent.exe.components().any(|part| part.as_os_str() == "target") {
@@ -242,13 +271,63 @@ async fn install(label: &str, listen: Option<SocketAddr>, state_dir: Option<Path
     let plist = service::install(&agent)?;
     println!("Installed {}", plist.display());
     for _ in 0..20 {
-        if answering(addr).await {
-            println!("The Gateway is running at {addr} and will start again at login.");
-            return Ok(());
-        }
         tokio::time::sleep(Duration::from_millis(250)).await;
+        match addr {
+            Some(addr) if answering(addr).await => {
+                println!("The Gateway is running at {addr} and will start again at login.");
+                return Ok(());
+            }
+            None if service::status(label)?.running.is_some() => {
+                println!("The Gateway is running and will start again at login.");
+                println!("It isn't on the tailnet, so phones reach it only through a relay (`yochi relay status`).");
+                return Ok(());
+            }
+            _ => {}
+        }
     }
-    bail!("the Gateway did not start listening at {addr}; see {}", agent.log.display())
+    match addr {
+        Some(addr) => bail!("the Gateway did not start listening at {addr}; see {}", agent.log.display()),
+        None => bail!("the Gateway did not start; see {}", agent.log.display()),
+    }
+}
+
+async fn tailnet_command(store: &Store, action: TailnetAction) -> Result<()> {
+    let dir = store.dir();
+    match action {
+        TailnetAction::On => {
+            if tailnet::set(dir, true)? {
+                println!("Tailnet on; the running Gateway listens there within seconds, once this Mac is on the tailnet.");
+                println!("Phones learn the address the next time they connect, even through a relay.");
+            } else {
+                println!("The tailnet was already on.");
+            }
+        }
+        TailnetAction::Off => {
+            if tailnet::set(dir, false)? {
+                println!("Tailnet off; the running Gateway stops listening there and closes its tailnet connections within seconds.");
+                if relay::Config::load(dir)?.is_none() {
+                    println!("No relay is in use either, so no phone can reach this Gateway now; `yochi relay setup` sets one up.");
+                }
+            } else {
+                println!("The tailnet was already off.");
+            }
+        }
+        TailnetAction::Status { listen } => {
+            if !tailnet::enabled(dir) {
+                println!("Tailnet    off; `yochi tailnet on` turns it on");
+                return Ok(());
+            }
+            println!("Tailnet    on");
+            match listen_addr(listen.listen).await {
+                Ok(addr) => {
+                    println!("Address    {addr}");
+                    println!("Listening  {}", if answering(addr).await { "yes" } else { "no; is the Gateway running?" });
+                }
+                Err(err) => println!("Address    none, not on the tailnet ({err:#})"),
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn status(label: &str, listen: Option<SocketAddr>) -> Result<()> {
@@ -312,9 +391,8 @@ fn relay_command(store: &Store, action: RelayAction) -> Result<()> {
             };
             println!("Relay      {}", config.url);
             println!("Key        {}", if config.key.is_some() { "set" } else { "none" });
-            let fresh = |status: &relay::Status| devices::now().saturating_sub(status.at) <= 3 * relay::Status::EVERY.as_secs();
             match relay::Status::load(dir) {
-                Some(status) if status.url == config.url && status.connected && fresh(&status) => println!("Connected  yes"),
+                _ if relay_connected(dir, &config) => println!("Connected  yes"),
                 Some(status) if status.url == config.url && !status.connected => {
                     println!("Connected  no, {} ago{}", ago(devices::now().saturating_sub(status.at)), status.error.map(|e| format!(": {e}")).unwrap_or_default())
                 }
@@ -339,31 +417,66 @@ fn query_value(text: &str) -> String {
 
 /// The pairing link. With a relay in use it is link v2 (ADR 0006): the phone
 /// can also pair through the relay, with the link secret as its psk.
-fn invite(store: &Store, listen: SocketAddr, code: &str) -> Result<String> {
-    Ok(match (relay::Config::load(store.dir())?, store.offer_secret()?) {
-        (Some(config), Some(secret)) => format!(
-            "yochi://pair?v=2&host={listen}&code={code}&key={}&relay={}&route={}&secret={}",
+/// Off the tailnet (`host` is None) the link has only the way through the relay.
+fn invite(store: &Store, host: Option<SocketAddr>, code: &str) -> Result<String> {
+    Ok(match (relay::Config::load(store.dir())?, store.offer_secret()?, host) {
+        (Some(config), Some(secret), _) => format!(
+            "yochi://pair?v=2{}&code={code}&key={}&relay={}&route={}&secret={}",
+            host.map(|host| format!("&host={host}")).unwrap_or_default(),
             devices::b64(&store.gateway_key()?.public),
             query_value(&config.url),
             config.route,
             devices::b64(&secret),
         ),
-        _ => format!("yochi://pair?host={listen}&code={code}"),
+        (_, _, Some(host)) => format!("yochi://pair?host={host}&code={code}"),
+        _ => bail!("the link has no way to this Gateway: neither the tailnet nor a relay"),
     })
 }
 
-async fn pair(store: &Store, listen: SocketAddr, link: bool) -> Result<()> {
-    if !answering(listen).await {
-        eprintln!("Note: no Gateway is answering at {listen}; start it (`yochi`) before the phone pairs.\n");
+/// The running Gateway reported being connected to this relay a moment ago.
+fn relay_connected(dir: &std::path::Path, config: &relay::Config) -> bool {
+    relay::Status::load(dir).is_some_and(|status| {
+        status.url == config.url && status.connected && devices::now().saturating_sub(status.at) <= 3 * relay::Status::EVERY.as_secs()
+    })
+}
+
+async fn pair(store: &Store, listen: Option<SocketAddr>, link: bool) -> Result<()> {
+    let relay = relay::Config::load(store.dir())?;
+    let host = if tailnet::enabled(store.dir()) {
+        match listen_addr(listen).await {
+            Ok(host) => Some(host),
+            Err(err) if relay.is_some() => {
+                eprintln!("Note: not on the tailnet ({err:#}); the phone pairs through the relay.\n");
+                None
+            }
+            Err(err) => return Err(err.context("not on the tailnet, and no relay is in use; `yochi relay setup` sets one up")),
+        }
+    } else {
+        None
+    };
+    match (host, &relay) {
+        (None, None) => bail!("the tailnet is off and no relay is in use; `yochi tailnet on` or `yochi relay setup`"),
+        (Some(host), _) if !answering(host).await => {
+            eprintln!("Note: no Gateway is answering at {host}; start it (`yochi`) before the phone pairs.\n");
+        }
+        (None, Some(config)) if !relay_connected(store.dir(), config) => {
+            eprintln!("Note: the Gateway isn't connected to the relay; start it (`yochi`) before the phone pairs.\n");
+        }
+        _ => {}
     }
     let before: HashSet<String> = store.devices()?.into_iter().map(|device| device.id).collect();
     let code = store.offer()?;
-    let invite = invite(store, listen, &code)?;
+    let invite = invite(store, host, &code)?;
 
     println!("{}", qr(&invite)?);
-    println!("Scan with the iPhone camera, or enter these in Yochi:");
-    println!("  Address  {listen}");
-    println!("  Code     {}\n", devices::display_code(&code));
+    match host {
+        Some(host) => {
+            println!("Scan with the iPhone camera, or enter these in Yochi:");
+            println!("  Address  {host}");
+            println!("  Code     {}\n", devices::display_code(&code));
+        }
+        None => println!("Scan with the iPhone camera; the phone pairs through the relay.\n"),
+    }
     if link {
         println!("  Link     {invite}\n");
     }
@@ -465,14 +578,23 @@ mod tests {
         let store = Store::open(dir.clone()).unwrap();
         let listen: SocketAddr = "100.64.0.1:7420".parse().unwrap();
         let code = store.offer().unwrap();
-        assert_eq!(invite(&store, listen, &code).unwrap(), format!("yochi://pair?host=100.64.0.1:7420&code={code}"));
+        assert_eq!(invite(&store, Some(listen), &code).unwrap(), format!("yochi://pair?host=100.64.0.1:7420&code={code}"));
+        assert!(invite(&store, None, &code).is_err(), "a link with no way to the Gateway");
 
         let config = relay::Config::new("https://relay.example.com", None).unwrap();
         config.save(&dir).unwrap();
-        let link = invite(&store, listen, &code).unwrap();
+        let link = invite(&store, Some(listen), &code).unwrap();
+        let relay_only = invite(&store, None, &code).unwrap();
         let secret = devices::b64(&store.offer_secret().unwrap().unwrap());
         let key = devices::b64(&store.gateway_key().unwrap().public);
         std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!(
+            relay_only,
+            format!(
+                "yochi://pair?v=2&code={code}&key={key}&relay=https%3A%2F%2Frelay.example.com&route={}&secret={secret}",
+                config.route
+            )
+        );
         assert_eq!(
             link,
             format!(

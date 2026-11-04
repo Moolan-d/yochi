@@ -180,6 +180,10 @@ final class GatewayClient {
         setQueued(queued, key: key)
     }
 
+    /// The Gateway named a different tailnet address, or none (`""`): its
+    /// tailnet moved, came on, or went off. The owner saves it and reconnects.
+    @ObservationIgnored var onTailnet: ((String) -> Void)?
+
     func connect(_ config: GatewayConfig) {
         disconnect()
         host = config.host
@@ -442,6 +446,10 @@ final class GatewayClient {
             case .relay(let info, let failed):
                 // A failed enrollment keeps what this device had.
                 if info != nil || !failed { RelayKeys.save(info) }
+            case .tailnet(let host):
+                // A phone that paired through the Relay learns the tailnet
+                // here; one whose Gateway left the tailnet stops trying it.
+                if (host ?? "") != self.host { onTailnet?(host ?? "") }
             case .sessions(let core, let connected, let sessions, let spaces):
                 // Every page reads these; an unchanged list redraws nothing.
                 if coreName != core { coreName = core }

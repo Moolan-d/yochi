@@ -209,26 +209,29 @@ final class CompanionUITests: XCTestCase {
     /// watches a terminal through the Relay, end-to-end encrypted.
     @MainActor
     func testPairAndObserveOverRelay() throws {
+        // ui-test.sh turns the Gateway's tailnet off, so the link has only the
+        // Relay; 15 s after pairing it turns the tailnet back on.
         let app = launchUnpaired()
         let link = try XCTUnwrap(URL(string: env("COMPANION_LINK")))
+        XCTAssertFalse(link.absoluteString.contains("host="), "the link still names a tailnet address")
         XCUIDevice.shared.system.open(link)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let open = springboard.buttons.matching(NSPredicate(format: "label IN {'打开', 'Open'}")).firstMatch
-        let address = app.textFields["地址"]
+        let pair = app.buttons["配对"]
         let deadline = Date.now.addingTimeInterval(10)
-        while (address.value as? String)?.hasPrefix("192.0.2.") != true, Date.now < deadline {
+        while !(pair.exists && pair.isEnabled), Date.now < deadline {
             if open.exists { open.tap() }
             RunLoop.current.run(until: .now.addingTimeInterval(0.3))
         }
-        XCTAssertEqual(address.value as? String, "192.0.2.1:7421", "the link did not fill the form")
-        app.buttons["配对"].tap()
+        XCTAssert(pair.isEnabled, "the link did not fill the form")
+        pair.tap()
         XCTAssert(app.buttons["设置"].waitForExistence(timeout: 30), "pairing through the Relay did not finish")
 
         app.buttons["设置"].tap()
         let path = app.descendants(matching: .any)["gateway.path"]
         XCTAssert(path.waitForExistence(timeout: 10), "no connection path in settings")
-        XCTAssert(path.label.contains("Relay") || (path.value as? String)?.contains("Relay") == true,
-                  "not connected through the Relay: \(path.label)")
+        XCTAssert(describes(path, "Relay"), "not connected through the Relay: \(path.label)")
+        XCTAssert(describes(app.descendants(matching: .any)["gateway.host"], "仅经 Relay"), "a tailnet address before the Gateway gave one")
         snapshot("1 settings over relay")
         app.buttons["完成"].tap()
 
@@ -237,7 +240,23 @@ final class CompanionUITests: XCTestCase {
         session.tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 20), "terminal never attached through the Relay")
         snapshot("2 observe over relay")
-        leaveAndUnpair(app)
+        app.navigationBars.buttons.firstMatch.tap()
+        endSearch(app)
+
+        // The Gateway names its tailnet address once the tailnet is back on.
+        app.buttons["设置"].tap()
+        let onTailnet = NSPredicate { _, _ in self.describes(path, "Tailnet") }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: onTailnet, evaluatedWith: nil)], timeout: 40), .completed,
+                       "never moved to the tailnet: \(path.label)")
+        XCTAssertFalse(describes(app.descendants(matching: .any)["gateway.host"], "仅经 Relay"), "no tailnet address learned")
+        snapshot("3 settings back on tailnet")
+        app.buttons["完成"].tap()
+        unpair(app)
+    }
+
+    /// Whether a settings row shows `text`, as its label or its value.
+    private func describes(_ element: XCUIElement, _ text: String) -> Bool {
+        element.exists && (element.label.contains(text) || (element.value as? String)?.contains(text) == true)
     }
 
     @MainActor

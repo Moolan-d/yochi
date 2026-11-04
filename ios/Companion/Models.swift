@@ -146,11 +146,13 @@ enum ServerMessage: Decodable {
     /// The answer to `relay_enroll`: no info when the Gateway has no Relay,
     /// `failed` when it couldn't enroll this device.
     case relay(info: RelayInfo?, failed: Bool)
+    /// The Gateway's tailnet address, nil once its tailnet is off.
+    case tailnet(host: String?)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
         case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path, commands, patch, truncated
-        case available, url, route, gatewayKey = "gateway_key", psk, error
+        case available, url, route, gatewayKey = "gateway_key", psk, error, host
     }
 
     init(from decoder: Decoder) throws {
@@ -229,6 +231,8 @@ enum ServerMessage: Decodable {
             self = try c.decode(String.self, forKey: .type) == "changes_failed"
                 ? .changesFailed(id: id, kind: kind, message: message)
                 : .changeDiffFailed(id: id, kind: kind, message: message)
+        case "tailnet":
+            self = .tailnet(host: try c.decodeIfPresent(String.self, forKey: .host))
         case "relay":
             if try c.decode(Bool.self, forKey: .available) {
                 self = .relay(info: RelayInfo(url: try c.decode(String.self, forKey: .url),

@@ -6,6 +6,8 @@ import Security
 struct GatewayConfig: Equatable {
     static let defaultPort = 7420
 
+    /// The Gateway's tailnet address; empty when it is reached only through
+    /// the Relay.
     var host: String
     var token: String
     /// The Gateway's ID for this device, as `yochi devices` lists it.
@@ -15,12 +17,18 @@ struct GatewayConfig: Equatable {
         Self.endpoint(host: host, path: "/v0/ws")
     }
 
+    /// Without a tailnet address the endpoint names `relayOnlyHost`, which
+    /// `GatewaySocket` reaches only through the Relay.
     static func endpoint(host: String, path: String) -> URL? {
         URL(string: "ws://\(address(host))\(path)")
     }
 
+    /// Never resolves (RFC 6761), so nothing goes to the tailnet by mistake.
+    static let relayOnlyHost = "relay-only.invalid"
+
     private static func address(_ host: String) -> String {
-        host.contains(":") ? host : "\(host):\(defaultPort)"
+        if host.isEmpty { return relayOnlyHost }
+        return host.contains(":") ? host : "\(host):\(defaultPort)"
     }
 
     private static let hostKey = "gateway.host"

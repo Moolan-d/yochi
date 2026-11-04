@@ -83,6 +83,14 @@ struct ContentView: View {
         .onChange(of: config, initial: true) { _, config in
             if let config { client.connect(config) }
         }
+        .onAppear {
+            client.onTailnet = { host in
+                guard var config = self.config, config.host != host else { return }
+                config.host = host
+                config.save()
+                self.config = config
+            }
+        }
         #if DEBUG
         // `simctl launch` can pair without tapping: SIMCTL_CHILD_COMPANION_PAIR=yochi://pair?….
         .task {
@@ -149,15 +157,22 @@ struct PairingView: View {
     @State private var pairing = false
     @State private var error: String?
 
+    /// A scanned link pairs through the Relay while its address is untouched,
+    /// so then neither the address nor the code has to be filled in.
+    private var throughRelay: Bool {
+        invite?.relay != nil && invite?.host == host.trimmingCharacters(in: .whitespaces)
+    }
+
     private var canPair: Bool {
-        !host.trimmingCharacters(in: .whitespaces).isEmpty && !code.trimmingCharacters(in: .whitespaces).isEmpty && !pairing
+        let filled = !host.trimmingCharacters(in: .whitespaces).isEmpty && !code.trimmingCharacters(in: .whitespaces).isEmpty
+        return (filled || throughRelay) && !pairing
     }
 
     var body: some View {
         Form {
             Section {
                 LabeledContent("地址") {
-                    TextField("地址", text: $host, prompt: Text("100.x.y.z"))
+                    TextField("地址", text: $host, prompt: Text(throughRelay ? "仅经 Relay" : "100.x.y.z"))
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -232,7 +247,8 @@ struct GatewaySettingsView: View {
         NavigationStack {
             Form {
                 Section("Gateway") {
-                    LabeledContent("地址", value: config.host)
+                    LabeledContent("地址", value: config.host.isEmpty ? "仅经 Relay" : config.host)
+                        .accessibilityIdentifier("gateway.host")
                     LabeledContent("状态", value: client.statusText)
                     if let path = client.path {
                         LabeledContent("连接方式", value: path == .relay ? "Relay（端到端加密）" : "Tailnet")

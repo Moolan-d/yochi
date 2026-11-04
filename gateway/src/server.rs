@@ -27,11 +27,12 @@ use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::layout::Space;
 use crate::relay::{self, RelayDevice};
+use crate::tailnet;
 use crate::observe::{self, Observer, Output};
 use crate::run;
 use crate::screen::Screen;
 use crate::session::Session;
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use axum::{Extension, Router};
 use axum::extract::{Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -58,12 +59,64 @@ struct AppState {
     changes: Arc<changes::Listed>,
     /// Repositories and to-dos the home page shows beside the sessions.
     about: watch::Receiver<About>,
+    /// Whether phones can reach the Gateway on the tailnet, and where.
+    tailnet: watch::Receiver<tailnet::State>,
+}
+
+/// Who opened a connection, and which way.
+#[derive(Clone, Debug, PartialEq)]
+struct Caller {
+    device: String,
+    /// On the tailnet rather than through the Relay.
+    tailnet: bool,
+}
+
+impl AppState {
+    /// What has to hold for `caller`'s connection to go on.
+    fn access(&self, caller: &Caller) -> Access {
+        Access {
+            devices: self.devices.subscribe(),
+            tailnet: caller.tailnet.then(|| self.tailnet.clone()),
+            device: caller.device.clone(),
+        }
+    }
+}
+
+/// A connection goes on while its device is paired and, on the tailnet,
+/// while the tailnet stays on.
+struct Access {
+    devices: watch::Receiver<Vec<Device>>,
+    tailnet: Option<watch::Receiver<tailnet::State>>,
+    device: String,
+}
+
+impl Access {
+    /// Resolves once the connection has to close.
+    async fn lost(&mut self) {
+        let off = async {
+            let closed = match &mut self.tailnet {
+                Some(tailnet) => tailnet.wait_for(|state| *state == tailnet::State::Off).await.is_err(),
+                None => true,
+            };
+            if closed {
+                std::future::pending::<()>().await;
+            }
+        };
+        tokio::select! {
+            () = unpaired(&mut self.devices, &self.device) => {}
+            () = off => {}
+        }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage<'a> {
     Hello { api: u32, gateway: &'static str },
+    /// Where the phone reaches this Gateway on the tailnet; null once the
+    /// tailnet is off. Sent after `hello` and on each change, so a phone that
+    /// paired through the Relay learns the tailnet too.
+    Tailnet { host: Option<SocketAddr> },
     Sessions { core: Option<&'a str>, connected: bool, sessions: Vec<Session>, spaces: &'a [Space] },
     /// Observing began; render a grid of this size.
     Attached { cols: u16, rows: u16 },
@@ -167,8 +220,7 @@ enum AppMessage {
 /// Where the Gateway listens.
 pub enum Listen {
     At(SocketAddr),
-    /// This Mac's tailnet address, once Tailscale is up. Until then phones
-    /// reach the Gateway only through the relay.
+    /// This Mac's tailnet address, whenever there is one.
     Tailnet,
 }
 
@@ -186,7 +238,8 @@ pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiv
     let hc: Arc<str> = hc.into();
     let (about_sender, about) = watch::channel(About::default());
     tokio::spawn(about::run(hc.clone(), view.clone(), about_sender));
-    let state = AppState { hc, view, store, devices, changes: Arc::default(), about };
+    let (tailnet_state, tailnet) = watch::channel(tailnet::State::Waiting);
+    let state = AppState { hc, view, store, devices, changes: Arc::default(), about, tailnet };
     let app = Router::new()
         .route("/v0/pair", get(pair))
         .route("/v0/ws", get(upgrade))
@@ -197,20 +250,21 @@ pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiv
     let keys = state.store.gateway_key()?;
     let relay = relay::Relay { router: app.clone(), store: state.store.clone(), devices: state.devices.clone(), keys };
     tokio::spawn(relay::run(Arc::new(relay)));
-    let listener = match listen {
-        Listen::At(addr) => tokio::net::TcpListener::bind(addr).await.with_context(|| format!("listening on {addr}"))?,
-        Listen::Tailnet => tokio::select! {
-            listener = bind_when_ready(|| crate::listen_addr(None), TAILNET_RETRY) => listener?,
-            _ = tokio::signal::ctrl_c() => return Ok(()),
-        },
+    let fixed = match listen {
+        Listen::At(addr) => Some(addr),
+        Listen::Tailnet => None,
     };
-    eprintln!("Gateway listening on ws://{}/v0/ws", listener.local_addr()?);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
-    Ok(())
+    let resolve = move || async move {
+        match fixed {
+            Some(addr) => Ok(addr),
+            None => crate::listen_addr(None).await,
+        }
+    };
+    let dir = state.store.dir().to_path_buf();
+    tokio::select! {
+        ran = tailnet::run(dir, resolve, app, tailnet_state, TAILNET_RETRY) => ran,
+        _ = tokio::signal::ctrl_c() => Ok(()),
+    }
 }
 
 /// Picks up `yochi revoke` (and anything else that rewrites the state file).
@@ -347,7 +401,7 @@ fn session_size(view: &CoreView, id: &str) -> Option<(u16, u16)> {
 async fn relay(
     mut socket: WebSocket,
     state: AppState,
-    device: String,
+    caller: Caller,
     id: String,
     (cols, rows): (u16, u16),
     takeover: bool,
@@ -370,7 +424,7 @@ async fn relay(
 
     let mut view = state.view.clone();
     view.mark_unchanged();
-    let mut devices = state.devices.subscribe();
+    let mut access = state.access(&caller);
     loop {
         tokio::select! {
             output = observer.next() => match output {
@@ -407,7 +461,7 @@ async fn relay(
                 }
                 Some(Ok(_)) => {}
             },
-            () = unpaired(&mut devices, &device) => break,
+            () = access.lost() => break,
         }
     }
     observer.detach().await;
@@ -437,7 +491,7 @@ fn working(view: &CoreView, id: &str) -> bool {
 
 /// Keeps the terminal's screen from a read-only attach and sends it once it
 /// has been still for a moment, unless it is what was sent last.
-async fn watch_screen(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
+async fn watch_screen(mut socket: WebSocket, state: AppState, caller: Caller, id: String, (cols, rows): (u16, u16)) {
     const SETTLE: Duration = Duration::from_millis(150);
     let mut observer = match Observer::attach(&state.hc, &id, cols, rows, 0, true).await {
         Ok(observer) => observer,
@@ -455,7 +509,7 @@ async fn watch_screen(mut socket: WebSocket, state: AppState, device: String, id
     let mut view = state.view.clone();
     view.mark_unchanged();
     let mut busy = working(&view.borrow(), &id);
-    let mut devices = state.devices.subscribe();
+    let mut access = state.access(&caller);
     let mut sent = String::new();
     // When the screen last changed; None once it has been sent or found unchanged.
     let mut changed_at: Option<Instant> = Some(Instant::now());
@@ -506,7 +560,7 @@ async fn watch_screen(mut socket: WebSocket, state: AppState, device: String, id
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
-            () = unpaired(&mut devices, &device) => break,
+            () = access.lost() => break,
         }
     }
     observer.detach().await;
@@ -536,7 +590,7 @@ fn watched(view: &CoreView, id: &str) -> Option<(Option<u64>, u64, Option<crate:
 /// Polls the transcript while a phone follows the conversation: every second
 /// while the Agent works or waits and for a few seconds after any change
 /// (Claude Code may finish before its last line is written), else every few.
-async fn follow(mut socket: WebSocket, state: AppState, device: String, id: String) {
+async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: String) {
     let mut client = match Client::connect(&state.hc).await {
         Ok(client) => client,
         Err(err) => {
@@ -547,7 +601,7 @@ async fn follow(mut socket: WebSocket, state: AppState, device: String, id: Stri
     };
     let mut follower = Follower::default();
     let mut view = state.view.clone();
-    let mut devices = state.devices.subscribe();
+    let mut access = state.access(&caller);
     let mut seen = None;
     let mut busy_until = Instant::now();
     loop {
@@ -595,7 +649,7 @@ async fn follow(mut socket: WebSocket, state: AppState, device: String, id: Stri
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
                     Some(Ok(_)) => {}
                 },
-                () = unpaired(&mut devices, &device) => return,
+                () = access.lost() => return,
             }
         }
     }
@@ -603,15 +657,15 @@ async fn follow(mut socket: WebSocket, state: AppState, device: String, id: Stri
 
 /// The paired device whose token the request carries, or that a Relay
 /// stream's handshake proved (only Relay streams carry that extension).
-fn authorize(headers: &HeaderMap, via_relay: Option<Extension<RelayDevice>>, devices: &[Device]) -> Option<String> {
+fn authorize(headers: &HeaderMap, via_relay: Option<Extension<RelayDevice>>, devices: &[Device]) -> Option<Caller> {
     if let Some(Extension(RelayDevice(id))) = via_relay {
-        return devices.iter().any(|device| device.id == id).then_some(id);
+        return devices.iter().any(|device| device.id == id).then_some(Caller { device: id, tailnet: false });
     }
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))?;
-    devices.iter().find(|device| device.holds(token)).map(|device| device.id.clone())
+    devices.iter().find(|device| device.holds(token)).map(|device| Caller { device: device.id.clone(), tailnet: true })
 }
 
 /// Resolves once `device` is no longer paired.
@@ -621,13 +675,27 @@ async fn unpaired(devices: &mut watch::Receiver<Vec<Device>>, device: &str) {
     }
 }
 
-async fn push(mut socket: WebSocket, state: AppState, device: String) {
+async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
+    let device = caller.device.clone();
+    let mut tailnet = state.tailnet.clone();
     let mut view = state.view.clone();
     let mut about = state.about.clone();
-    let mut devices = state.devices.subscribe();
+    let mut access = state.access(&caller);
     let (outgoing, mut responses) = tokio::sync::mpsc::unbounded_channel::<String>();
     let hello = ServerMessage::Hello { api: API_VERSION, gateway: env!("CARGO_PKG_VERSION") };
     if send(&mut socket, &hello).await.is_err() {
+        return;
+    }
+    // While the Gateway waits for its tailnet address the phone keeps the one it knows.
+    let tailnet_message = |state: tailnet::State| match state {
+        tailnet::State::Off => Some(ServerMessage::Tailnet { host: None }),
+        tailnet::State::At(addr) => Some(ServerMessage::Tailnet { host: Some(addr) }),
+        tailnet::State::Waiting => None,
+    };
+    let current = *tailnet.borrow_and_update();
+    if let Some(message) = tailnet_message(current)
+        && send(&mut socket, &message).await.is_err()
+    {
         return;
     }
     // The list goes out at the start and after each change, not again after
@@ -657,6 +725,15 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
             changed = about.changed() => {
                 if changed.is_err() { return }
                 changed_since_sent = true;
+            },
+            changed = tailnet.changed() => {
+                if changed.is_err() { return }
+                let current = *tailnet.borrow_and_update();
+                if let Some(message) = tailnet_message(current)
+                    && send(&mut socket, &message).await.is_err()
+                {
+                    return;
+                }
             },
             response = responses.recv() => {
                 let Some(response) = response else { return };
@@ -791,7 +868,7 @@ async fn push(mut socket: WebSocket, state: AppState, device: String) {
                 },
                 Some(Ok(_)) => {}
             },
-            () = unpaired(&mut devices, &device) => return,
+            () = access.lost() => return,
         }
     }
 }
@@ -802,89 +879,25 @@ async fn send(socket: &mut WebSocket, message: &ServerMessage<'_>) -> Result<()>
     Ok(())
 }
 
-/// Binds where `resolve` says once that address exists on this Mac, trying
-/// again every `every` until then. Any other failure, such as the port being
-/// taken, is an error.
-async fn bind_when_ready<F, Fut>(mut resolve: F, every: Duration) -> Result<tokio::net::TcpListener>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<SocketAddr>>,
-{
-    let mut waiting = false;
-    loop {
-        let unavailable = match resolve().await {
-            Ok(addr) => match tokio::net::TcpListener::bind(addr).await {
-                Ok(listener) => {
-                    if waiting {
-                        eprintln!("On the tailnet now.");
-                    }
-                    return Ok(listener);
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::AddrNotAvailable => {
-                    anyhow::Error::new(err).context(format!("listening on {addr}"))
-                }
-                Err(err) => return Err(err).with_context(|| format!("listening on {addr}")),
-            },
-            Err(err) => err,
-        };
-        if !waiting {
-            eprintln!(
-                "Not on the tailnet ({unavailable:#}); until it is, phones reach this Gateway only through a relay. \
-                 Trying again every {} s.",
-                every.as_secs()
-            );
-            waiting = true;
-        }
-        tokio::time::sleep(every).await;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn the_gateway_listens_once_the_tailnet_address_exists() {
-        // 192.0.2.1 (TEST-NET-1) isn't on this machine, like the tailnet
-        // address while Tailscale is down.
-        let mut tries = 0;
-        let listener = bind_when_ready(
-            || {
-                tries += 1;
-                let ip = if tries < 3 { "192.0.2.1" } else { "127.0.0.1" };
-                std::future::ready(Ok(SocketAddr::new(ip.parse().unwrap(), 0)))
-            },
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap();
-        assert_eq!(tries, 3);
-        assert!(listener.local_addr().unwrap().ip().is_loopback());
-
-        let mut tries = 0;
-        bind_when_ready(
-            || {
-                tries += 1;
-                std::future::ready(if tries < 2 { Err(anyhow::anyhow!("Tailscale is stopped")) } else { Ok("127.0.0.1:0".parse().unwrap()) })
-            },
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap();
-        assert_eq!(tries, 2);
-    }
-
-    #[tokio::test]
-    async fn a_taken_port_is_an_error_not_a_wait() {
-        let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = taken.local_addr().unwrap();
-        let bound = tokio::time::timeout(
-            Duration::from_secs(1),
-            bind_when_ready(|| std::future::ready(Ok(addr)), Duration::from_millis(10)),
-        )
-        .await
-        .expect("gave up waiting");
-        assert!(bound.is_err());
+    async fn turning_the_tailnet_off_closes_only_tailnet_connections() {
+        let device: Device = serde_json::from_value(serde_json::json!({ "id": "d", "name": "iPhone", "paired_at": 0, "token_sha256": "" })).unwrap();
+        let (_devices_sender, devices) = watch::channel(vec![device]);
+        let (tailnet_sender, tailnet) = watch::channel(tailnet::State::At("127.0.0.1:7420".parse().unwrap()));
+        let paired = |tailnet: Option<watch::Receiver<tailnet::State>>| Access { devices: devices.clone(), tailnet, device: "d".into() };
+        let mut on_tailnet = paired(Some(tailnet.clone()));
+        let mut through_relay = paired(None);
+        let quick = Duration::from_millis(100);
+        assert!(tokio::time::timeout(quick, on_tailnet.lost()).await.is_err(), "closed while the tailnet is on");
+        tailnet_sender.send_replace(tailnet::State::Waiting);
+        assert!(tokio::time::timeout(quick, on_tailnet.lost()).await.is_err(), "closed while waiting for the address");
+        tailnet_sender.send_replace(tailnet::State::Off);
+        assert!(tokio::time::timeout(quick, on_tailnet.lost()).await.is_ok(), "still open with the tailnet off");
+        assert!(tokio::time::timeout(quick, through_relay.lost()).await.is_err(), "a Relay connection closed too");
     }
 
     #[test]
@@ -945,7 +958,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         assert_eq!(authorize(&headers, None, &devices), None);
         headers.insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
-        assert_eq!(authorize(&headers, None, &devices), Some(device.id));
+        assert_eq!(authorize(&headers, None, &devices).map(|caller| caller.device), Some(device.id));
         headers.insert(header::AUTHORIZATION, "Bearer wrong".parse().unwrap());
         assert_eq!(authorize(&headers, None, &devices), None);
     }

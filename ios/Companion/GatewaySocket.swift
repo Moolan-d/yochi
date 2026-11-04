@@ -115,7 +115,8 @@ final class GatewaySocket: Sendable {
     }
 
     /// `url` is the endpoint's tailnet address. Without Relay keys it is the
-    /// only path. `tailnetFirst` tries the tailnet first even when the Relay
+    /// only path; without a tailnet address (`GatewayConfig.relayOnlyHost`)
+    /// the Relay is. `tailnetFirst` tries the tailnet first even when the Relay
     /// worked last, so the app's main connection finds its way back.
     init(url: URL, token: String, maximumMessageSize: Int, tailnetFirst: Bool = false) {
         let box = box
@@ -178,8 +179,15 @@ final class GatewaySocket: Sendable {
     }
 
     private static func open(url: URL, token: String, maximumMessageSize: Int, tailnetFirst: Bool) async throws -> any GatewayLink {
+        let relayOnly = url.host() == GatewayConfig.relayOnlyHost
         guard let relay = RelayKeys.info else {
+            if relayOnly { throw URLError(.cannotFindHost) }
             return TailnetLink(url: url, token: token, maximumMessageSize: maximumMessageSize)
+        }
+        if relayOnly {
+            let link = try await RelayLink.connect(relay, request: relayRequest(url))
+            GatewayRoute.preferred = .relay
+            return link
         }
         let order: [GatewayPath] = tailnetFirst || GatewayRoute.preferred == .tailnet ? [.tailnet, .relay] : [.relay, .tailnet]
         var failure: any Error = URLError(.cannotConnectToHost)
