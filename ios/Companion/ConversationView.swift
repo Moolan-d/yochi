@@ -12,6 +12,15 @@ struct ConversationPane: View {
 
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var atBottom = true
+    /// The reader wants the newest item: they are at the bottom or asked to
+    /// go back to it. A lazy list only estimates the rows it hasn't drawn, so
+    /// a scroll to the bottom can stop short of the real end or past it (a
+    /// blank screen) until the rows are measured; while pinned, every change
+    /// of the content's height puts the list back at its end. Dragging unpins.
+    @State private var pinned = true
+    @State private var phase = ScrollPhase.idle
+    /// The content's end below the screen's; negative past it.
+    @State private var offEnd = CGFloat.zero
     /// How far the content's end is below the visible area, and how tall that
     /// area is: the keyboard changes both, and the follow must keep the newest
     /// item above it.
@@ -72,7 +81,8 @@ struct ConversationPane: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 let latestTodos = feed.items.last { $0.kind == .todos }?.id
                 ForEach(feed.items) { item in
-                    ConversationRow(item: item, latestTodos: item.id == latestTodos)
+                    ConversationRow(item: item, latestTodos: item.id == latestTodos,
+                                    arrival: feed.arrivals[item.id])
                 }
                 if working {
                     Label {
@@ -105,16 +115,31 @@ struct ConversationPane: View {
         .onScrollGeometryChange(for: CGPoint.self) { geometry in
             // visibleRect is what the reader sees, so a keyboard-inset bottom
             // counts as the bottom; the system's frame may extend under it.
-            CGPoint(x: max(0, geometry.contentSize.height - geometry.visibleRect.maxY),
-                    y: geometry.visibleRect.height)
+            // Negative: past the end of content taller than the screen.
+            let below = geometry.contentSize.height - geometry.visibleRect.maxY
+            let fits = geometry.contentSize.height <= geometry.visibleRect.height
+            return CGPoint(x: fits ? 0 : below, y: geometry.visibleRect.height)
         } action: { _, metrics in
-            distanceBelow = metrics.x
+            offEnd = metrics.x
+            distanceBelow = max(0, metrics.x)
             viewport = metrics.y
             atBottom = metrics.x < 60
             if atBottom { unseen = false }
+            settle(off: metrics.x)
+        }
+        .onScrollPhaseChange { _, new in
+            phase = new
+            // The reader's finger decides; when it lets go at the end, the
+            // list follows again.
+            if new == .interacting { pinned = false }
+            if new == .idle {
+                if atBottom { pinned = true }
+                // An animated scroll aimed by estimates may end off the end.
+                settle(off: offEnd)
+            }
         }
         .onChange(of: feed.items) { _, _ in
-            if atBottom { follow() } else { unseen = true }
+            if pinned { follow() } else { unseen = true }
         }
         .onChange(of: working) { _, _ in follow() }
         .onChange(of: keyboardShown) { _, _ in followAfterKeyboard() }
@@ -122,20 +147,28 @@ struct ConversationPane: View {
         // After the identifier, which would otherwise name the button too.
         .overlay(alignment: .bottomTrailing) {
             ZStack {
-                if !atBottom {
+                if showsLatest {
                     latestButton.transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
             .padding(.trailing, 16)
             .padding(.bottom, 12)
-            .animation(.snappy(duration: 0.2), value: atBottom)
+            .animation(.snappy(duration: 0.2), value: showsLatest)
         }
     }
 
     /// Back to the newest item; the list follows again from there.
     private var latestButton: some View {
         Button {
-            withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+            pinned = true
+            unseen = false
+            // Far back, the rows between are only estimates: an animated
+            // scroll through them would aim at the wrong end. Jump instead.
+            if distanceBelow > viewport * 2 {
+                position.scrollTo(edge: .bottom)
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+            }
         } label: {
             Image(systemName: "arrow.down")
                 .font(.body.weight(.semibold))
@@ -153,9 +186,20 @@ struct ConversationPane: View {
         .accessibilityIdentifier("scrollToLatest")
     }
 
+    /// Pinned and still, the button stays away while the content grows.
+    private var showsLatest: Bool { !atBottom && !pinned }
+
     private func follow() {
-        guard atBottom else { return }
+        guard pinned else { return }
         withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(edge: .bottom) }
+    }
+
+    /// Pinned, at rest and not at the end: newly measured rows or a reply
+    /// still revealing moved it. Back to the end without animation, so a
+    /// short or overshooting scroll never shows as a jump or a blank page.
+    private func settle(off distance: CGFloat) {
+        guard pinned, phase == .idle, abs(distance) > 1 else { return }
+        position.scrollTo(edge: .bottom)
     }
 
     /// The keyboard shortens the viewport without moving the list: the newest
@@ -163,6 +207,7 @@ struct ConversationPane: View {
     /// a screen of it, and leave someone reading further back where they are.
     private func followAfterKeyboard() {
         guard distanceBelow < viewport else { return }
+        pinned = true
         withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
     }
 }
@@ -171,6 +216,8 @@ struct ConversationRow: View {
     let item: ConversationItem
     /// The newest to-do list opens; earlier ones fold.
     var latestTodos = false
+    /// An Agent reply that just came in, to reveal.
+    var arrival: Arrival?
 
     var body: some View {
         switch item.kind {
@@ -187,7 +234,7 @@ struct ConversationRow: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("你：\(item.text ?? "")")
         case .agent:
-            MarkdownText(text: item.text ?? "")
+            AgentReply(text: item.text ?? "", arrival: arrival)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
             if let edit = item.edit {
@@ -214,6 +261,70 @@ struct ConversationRow: View {
         case .other:
             EmptyView()
         }
+    }
+}
+
+/// An Agent reply. One that just arrived appears over a moment from where
+/// it was, as the desktop app streams it; the transcript only ever has it
+/// whole. Rows scrolled away and back go by the arrival's time, so a reveal
+/// never starts again.
+struct AgentReply: View {
+    let text: String
+    let arrival: Arrival?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var finished = false
+
+    var body: some View {
+        Group {
+            if let reveal, !finished {
+                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                    MarkdownText(text: text, shown: reveal.shown(at: context.date))
+                }
+                .task(id: reveal.end) {
+                    try? await Task.sleep(for: .seconds(max(0, reveal.end.timeIntervalSinceNow)))
+                    if !Task.isCancelled { finished = true }
+                }
+                // VoiceOver reads the reply whole, not part-way.
+                .accessibilityRepresentation { MarkdownText(text: text) }
+            } else {
+                MarkdownText(text: text)
+            }
+        }
+        // The reply grew again: reveal the rest.
+        .onChange(of: arrival) { _, _ in finished = false }
+    }
+
+    private var reveal: Reveal? {
+        guard let arrival, !reduceMotion else { return nil }
+        let reveal = Reveal(text: text, arrival: arrival)
+        return reveal.end > .now ? reveal : nil
+    }
+}
+
+/// How fast a reply appears: about 250 characters a second, a long one
+/// quicker so it never takes more than a couple of seconds.
+struct Reveal: Equatable {
+    let from: Int
+    let total: Int
+    let start: Date
+    let duration: TimeInterval
+
+    init(text: String, arrival: Arrival) {
+        total = MarkdownBlock.revealLength(of: MarkdownBlock.cachedParse(text))
+        let before = arrival.previous.map { MarkdownBlock.revealLength(of: MarkdownBlock.cachedParse($0)) } ?? 0
+        from = min(before, total)
+        let length = total - from
+        duration = length <= 0 ? 0 : min(2.5, max(0.4, Double(length) / 250))
+        start = arrival.at
+    }
+
+    var end: Date { start.addingTimeInterval(duration) }
+
+    func shown(at date: Date) -> Int {
+        guard duration > 0 else { return total }
+        let progress = min(1, max(0, date.timeIntervalSince(start) / duration))
+        return from + Int((Double(total - from) * progress).rounded(.up))
     }
 }
 

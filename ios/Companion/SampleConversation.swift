@@ -3,8 +3,10 @@ import SwiftUI
 
 /// A made-up conversation with every kind of card, for UI tests and
 /// screenshots without a running Agent: SIMCTL_CHILD_COMPANION_SAMPLE_CONVERSATION=1.
+/// `=long` is a long one with long replies, and more replies arriving.
 struct SampleConversationView: View {
     static var requested: Bool { ProcessInfo.processInfo.environment["COMPANION_SAMPLE_CONVERSATION"] != nil }
+    static var long: Bool { ProcessInfo.processInfo.environment["COMPANION_SAMPLE_CONVERSATION"] == "long" }
 
     @State private var feed = ConversationFeed()
 
@@ -23,11 +25,51 @@ struct SampleConversationView: View {
                 .navigationBarTitleDisplayMode(.inline)
         }
         .task {
+            if Self.long {
+                await playLong()
+                return
+            }
             let data = Data(Self.json(now: .now).utf8)
             if let message = try? JSONDecoder().decode(ConversationMessage.self, from: data) {
                 feed.apply(message)
             }
         }
+    }
+
+    /// Forty turns, then a new reply every few seconds, as an Agent at work.
+    private func playLong() async {
+        var items: [[String: Any]] = []
+        for turn in 0..<40 {
+            items.append(["kind": "user", "id": "u\(turn)", "text": "第 \(turn + 1) 个问题：这一段怎么改？"])
+            items.append(["kind": "tool", "id": "r\(turn)", "name": "Read", "summary": "ios/Companion/File\(turn).swift", "state": "done"])
+            items.append(["kind": "agent", "id": "a\(turn)", "text": Self.reply(turn, paragraphs: 3 + turn % 6)])
+        }
+        apply(["type": "conversation", "supported": true, "items": items])
+        for turn in 40..<46 {
+            try? await Task.sleep(for: .seconds(4))
+            apply(["type": "items", "items": [["kind": "agent", "id": "a\(turn)", "text": Self.reply(turn, paragraphs: 8)]]])
+        }
+    }
+
+    private func apply(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let message = try? JSONDecoder().decode(ConversationMessage.self, from: data) else { return }
+        feed.apply(message)
+    }
+
+    static func reply(_ turn: Int, paragraphs: Int) -> String {
+        var parts = ["## 第 \(turn + 1) 段回复"]
+        for paragraph in 0..<paragraphs {
+            switch paragraph % 4 {
+            case 1:
+                parts.append("- 先看 `ConversationPane` 的滚动位置\n- 再看列表是怎样按需排版的\n- 最后确认键盘弹出时最新一条仍在上方")
+            case 3:
+                parts.append("```swift\nposition.scrollTo(edge: .bottom)\nlet rows = feed.items.count\nprint(rows)\n```")
+            default:
+                parts.append("这是第 \(paragraph + 1) 段。为了让这一条足够长，这里写了很多字：列表里的每一行高度都不一样，按需排版的列表只能先估计没出现的行有多高，等它们真的出现在屏幕上才知道准确的高度。回到最新时，如果估计偏差太大，滚动就会停在内容之外。")
+            }
+        }
+        return parts.joined(separator: "\n\n")
     }
 
     static func json(now: Date) -> String {

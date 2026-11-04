@@ -53,6 +53,42 @@ extension MarkdownBlock {
         return cache
     }()
 
+    /// How much there is to reveal: a block's characters, a table or rule as one.
+    var revealLength: Int {
+        switch kind {
+        case .table, .rule: 1
+        default: max(1, content.characters.count)
+        }
+    }
+
+    /// The first `length` of a message, as it would read part-way through
+    /// arriving: whole blocks, then the start of the next. The message is
+    /// parsed once whole, so a reveal costs no parsing per frame; a table or
+    /// rule shows whole.
+    static func revealed(_ blocks: [MarkdownBlock], upTo length: Int) -> [MarkdownBlock] {
+        var left = length
+        var out: [MarkdownBlock] = []
+        for block in blocks {
+            guard left > 0 else { break }
+            let size = block.revealLength
+            if size <= left {
+                out.append(block)
+            } else {
+                var part = block
+                let characters = block.content.characters
+                let end = characters.index(characters.startIndex, offsetBy: left)
+                part.content = AttributedString(block.content[block.content.startIndex..<end])
+                out.append(part)
+            }
+            left -= size
+        }
+        return out
+    }
+
+    static func revealLength(of blocks: [MarkdownBlock]) -> Int {
+        blocks.reduce(0) { $0 + $1.revealLength }
+    }
+
     /// `parse`, kept for the next time the same text is drawn.
     static func cachedParse(_ markdown: String) -> [MarkdownBlock] {
         let key = markdown as NSString
@@ -204,6 +240,9 @@ extension MarkdownBlock {
 /// An Agent message's Markdown, laid out block by block.
 struct MarkdownText: View {
     let text: String
+    /// Draw only this much of the message, as `MarkdownBlock.revealed` counts
+    /// it; nil draws all of it.
+    var shown: Int?
 
     @ScaledMetric(relativeTo: .body) private var blockGap: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var itemGap: CGFloat = 6
@@ -211,7 +250,8 @@ struct MarkdownText: View {
 
     var body: some View {
         let _ = Perf.count("MarkdownText")
-        let blocks = MarkdownBlock.cachedParse(text)
+        let parsed = MarkdownBlock.cachedParse(text)
+        let blocks = shown.map { MarkdownBlock.revealed(parsed, upTo: $0) } ?? parsed
         VStack(alignment: .leading, spacing: 0) {
             ForEach(blocks.indices, id: \.self) { index in
                 MarkdownBlockView(block: blocks[index])

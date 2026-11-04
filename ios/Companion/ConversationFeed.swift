@@ -267,6 +267,11 @@ final class ConversationFeed {
     /// transcript has none or names one the app doesn't know.
     private(set) var mode: PermissionMode?
 
+    /// Agent replies that arrived while following, by item id. Claude Code
+    /// writes a reply to its transcript only once it is whole, so the page
+    /// reveals it from what was there before, as a stream would have.
+    private(set) var arrivals: [String: Arrival] = [:]
+
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
 
@@ -346,7 +351,10 @@ final class ConversationFeed {
             // Coming back to a kept conversation, the Gateway sends it whole
             // again; unchanged, the page has nothing to redraw.
             let fresh = items.filter { $0.kind != .other }
-            if fresh != self.items { self.items = fresh }
+            if fresh != self.items {
+                self.items = fresh
+                if !arrivals.isEmpty { arrivals = [:] }
+            }
             // The Gateway says the mode again after a fresh conversation.
             if mode != nil { mode = nil }
             let phase: Phase = supported ? .following : .unsupported
@@ -355,14 +363,24 @@ final class ConversationFeed {
             // One change for the whole batch, so the page redraws once.
             var updated = items
             var index = Dictionary(updated.indices.map { (updated[$0].id, $0) }, uniquingKeysWith: { _, last in last })
+            var arrived: [String: Arrival] = [:]
+            let now = Date.now
             for item in changed where item.kind != .other {
                 if let at = index[item.id] {
+                    let before = updated[at].text
+                    if item.kind == .agent, item.text != before, let text = item.text, !text.isEmpty {
+                        arrived[item.id] = Arrival(previous: before, at: now)
+                    }
                     updated[at] = item
                 } else {
                     index[item.id] = updated.count
                     updated.append(item)
+                    if item.kind == .agent, let text = item.text, !text.isEmpty {
+                        arrived[item.id] = Arrival(previous: nil, at: now)
+                    }
                 }
             }
+            if !arrived.isEmpty { arrivals.merge(arrived) { _, new in new } }
             if updated != items { items = updated }
         case .pending(let pending):
             if self.pending != pending { self.pending = pending }
@@ -376,6 +394,13 @@ final class ConversationFeed {
             break
         }
     }
+}
+
+/// An Agent reply that came in while the page followed the conversation.
+struct Arrival: Equatable {
+    /// The reply's text before, when this replaced it; nil for a new reply.
+    let previous: String?
+    let at: Date
 }
 
 enum ConversationMessage: Decodable {
