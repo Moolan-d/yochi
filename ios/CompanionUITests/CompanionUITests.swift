@@ -179,16 +179,17 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         RunLoop.current.run(until: .now.addingTimeInterval(2))
         let terminal = app.descendants(matching: .any)["terminalGrid"]
-        let before = try viewportNumbers(app, terminal)
-        XCTAssertEqual(before.max(), 400, "the program did not start at its newest line")
         snapshot("1 bottom")
 
+        // Drag before anything else touches the terminal: a tap or long press
+        // places Ghostty's pointer, and a finger's scroll must not need one.
         for _ in 0..<3 {
             terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
                 .press(forDuration: 0.05, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
         }
         RunLoop.current.run(until: .now.addingTimeInterval(1))
         snapshot("2 dragged")
+        // The program starts at its newest line, 400.
         let after = try viewportNumbers(app, terminal)
         XCTAssertLessThan(after.max() ?? .max, 400, "dragging did not scroll the program's history: \(after)")
         app.navigationBars.buttons.firstMatch.tap()

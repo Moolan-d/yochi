@@ -33,7 +33,7 @@ def main():
     saved = termios.tcgetattr(fd)
     tty.setraw(fd)
     # Alternate screen, button tracking, SGR encoding.
-    os.write(1, b"\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+    os.write(1, b"\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1004h\x1b[?1006h\x1b[?2004h")
     signal.signal(signal.SIGWINCH, lambda *_: draw())
     draw()
     pending = b""

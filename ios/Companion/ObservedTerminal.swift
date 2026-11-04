@@ -629,6 +629,19 @@ private final class SelectionOnlyTerminalView: UITerminalView {
     override var canBecomeFirstResponder: Bool { false }
 
     override func toggleSoftwareKeyboard() {}
+
+    /// Ghostty's mouse starts outside the terminal, and it reports no wheel
+    /// from there. A finger's scroll never moves it (only a tap, long press
+    /// or hover does), so dragging a full-screen program sent it nothing:
+    /// the simulator worked only because the Mac's pointer hovered over it.
+    /// The finger's position comes first, as a mouse's would.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let touch = touches.first(where: { $0.type == .direct }) {
+            let at = touch.location(in: self)
+            sendMousePos(x: at.x, y: at.y)
+        }
+        super.touchesBegan(touches, with: event)
+    }
 }
 
 /// Ghostty's first surface in a process pays once for what every later one
