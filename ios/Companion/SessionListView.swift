@@ -427,15 +427,21 @@ private struct AgentMark: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(.quaternary)
+            if let brand {
+                Circle().fill(brand.opacity(0.16))
+            } else {
+                Circle().fill(.quaternary)
+            }
             glyph
                 .font(.system(size: size * 0.45, weight: .semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(brand.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary))
             ring
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
+
+    private var brand: Color? { AgentBrand.color(for: session) }
 
     @ViewBuilder
     private var glyph: some View {
@@ -468,6 +474,27 @@ private struct AgentMark: View {
             EmptyView()
         }
     }
+}
+
+/// Each conversation Agent's brand color, a shade darker in light mode so
+/// the mark keeps 3:1 against the row.
+enum AgentBrand {
+    /// Only an Agent whose page is the conversation wears its maker's color;
+    /// terminals and the other Agents keep the plain mark.
+    static func color(for session: Session) -> Color? {
+        guard session.showsConversation else { return nil }
+        switch session.program?.lowercased() {
+        case "claude": return claude
+        default: return nil
+        }
+    }
+
+    /// Anthropic's Claude orange.
+    static let claude = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255, alpha: 1)
+            : UIColor(red: 0xC1 / 255, green: 0x5F / 255, blue: 0x3C / 255, alpha: 1)
+    })
 }
 
 /// The working ring's turning arc. Core Animation turns it in the render
