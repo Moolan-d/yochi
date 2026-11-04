@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Companion
 
@@ -116,6 +117,11 @@ final class ConversationTests: XCTestCase {
         XCTAssertFalse(shell.showsConversation)
         let server = try session(program: "node", command: "zsh")
         XCTAssertFalse(server.isAgent, "a dev server is a plain terminal")
+
+        XCTAssertEqual(AgentBrand.color(for: started), AgentBrand.claude, "a conversation Agent wears its brand color")
+        for plain in [typed, unreported, pi, shell, server] {
+            XCTAssertNil(AgentBrand.color(for: plain), "\(plain.program ?? "-") keeps the plain mark")
+        }
     }
 
     func testMarkdownBlocks() {
