@@ -246,8 +246,10 @@ final class SessionFeedsTests: XCTestCase {
     }
 
     func testLeavingDuringTheFirstPaintAttachesAfreshNextTime() {
+        TerminalCell.forget()
         let model = TerminalModel()
         let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 600))
         model.resume(config, session: "t1", fontSize: 9)
         XCTAssertEqual(model.attempt, 1)
         // No surface has shown the first paint yet.
@@ -259,11 +261,68 @@ final class SessionFeedsTests: XCTestCase {
     }
 
     func testAnotherFontSizeAttachesAfresh() {
+        TerminalCell.forget()
         let model = TerminalModel()
         let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 600))
         model.resume(config, session: "t1", fontSize: 9)
         model.resume(config, session: "t1", fontSize: 12)
         XCTAssertEqual(model.attempt, 2)
+        model.stop()
+    }
+
+    func testAttachWaitsForThePagesSize() {
+        TerminalCell.forget()
+        let model = TerminalModel()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.resume(config, session: "t1", fontSize: 9)
+        XCTAssertEqual(model.attempt, 0, "no grid to ask for before the first layout")
+        model.pageSize(CGSize(width: 402, height: 600))
+        XCTAssertEqual(model.attempt, 1)
+        XCTAssertNil(model.takeover, "no cell measured yet: watch first")
+        model.stop()
+    }
+
+    func testTakeoverAsksForThePhonesGridAndLetsGoOnLeaving() {
+        TerminalCell.forget()
+        TerminalCell.remember(CGSize(width: 5.5, height: 11), fontSize: 9)
+        defer { TerminalCell.forget() }
+        let model = TerminalModel()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 600))
+        model.resume(config, session: "t1", fontSize: 9)
+        XCTAssertEqual(model.takeover, TerminalGrid(cols: 70, rows: 53))
+        XCTAssertEqual(model.attempt, 1)
+        // Inactive and back (Control Center): still holding it.
+        model.resume(config, session: "t1", fontSize: 9)
+        XCTAssertEqual(model.attempt, 1)
+        // Leaving lets go; coming back takes over afresh.
+        model.pause()
+        model.resume(config, session: "t1", fontSize: 9)
+        XCTAssertEqual(model.attempt, 2)
+        XCTAssertNotNil(model.takeover)
+        model.stop()
+    }
+
+    /// A page coming back measures its surface before core answers the
+    /// attach; once it answers, core is asked for the grid on screen.
+    func testSurfaceGridFromBeforeTheAttachIsAskedFor() async throws {
+        TerminalCell.forget()
+        TerminalCell.remember(CGSize(width: 5.5, height: 11), fontSize: 9)
+        defer { TerminalCell.forget() }
+        let model = TerminalModel()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 760))
+        model.resume(config, session: "t1", fontSize: 9)
+        let asked = try XCTUnwrap(model.takeover)
+        let onScreen = TerminalGrid(cols: asked.cols, rows: asked.rows - 9)
+        model.surfaceGrid(onScreen)
+        XCTAssertEqual(model.observer.resizes, [], "nothing to resize before core answers")
+        model.observer.attached(cols: asked.cols, rows: asked.rows)
+        model.phaseChanged()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(model.observer.resizes, [onScreen])
+        XCTAssertEqual(model.takeover, onScreen)
         model.stop()
     }
 }

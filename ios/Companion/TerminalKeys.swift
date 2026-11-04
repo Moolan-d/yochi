@@ -139,11 +139,6 @@ private struct KeyCapStyle: ButtonStyle {
 enum QuickCommand {
     static let phrases = ["继续", "好的，按你的建议做", "先停下，说明你接下来的计划"]
 
-    /// By its own status report, or by the command it was started with.
-    static func isClaudeCode(_ session: Session) -> Bool {
-        session.status?.app == "claude-code" || session.program?.localizedCaseInsensitiveContains("claude") == true
-    }
-
     static func insert(_ command: String, into draft: String) -> String {
         if draft.isEmpty { return command }
         return draft.hasSuffix(" ") || draft.hasSuffix("\n") ? draft + command : draft + " " + command

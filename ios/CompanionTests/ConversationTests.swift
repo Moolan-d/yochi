@@ -90,16 +90,32 @@ final class ConversationTests: XCTestCase {
         XCTAssertNil(feed.mode)
     }
 
-    func testClaudeCodeIsRecognisedByStatusOrCommand() throws {
-        func session(_ program: String, app: String?) throws -> Session {
-            let status = app.map { #"{"state":"idle","app":"\#($0)"}"# } ?? "null"
-            return try JSONDecoder().decode(Session.self, from: Data(#"""
-            {"id":"t1","machine":null,"title":"x","program":"\#(program)","cwd":"/","status":\#(status)}
-            """#.utf8))
+    /// An Agent by what runs; its page by what the terminal started with.
+    func testAgentAndPageForm() throws {
+        func session(program: String?, command: String?, state: String? = nil) throws -> Session {
+            var json: [String: Any] = ["id": "t1", "title": "x", "cwd": "/"]
+            json["program"] = program
+            json["command"] = command
+            json["status"] = state.map { ["state": $0] }
+            return try JSONDecoder().decode(Session.self, from: JSONSerialization.data(withJSONObject: json))
         }
-        XCTAssertTrue(QuickCommand.isClaudeCode(try session("2.1.316", app: "claude-code")))
-        XCTAssertTrue(QuickCommand.isClaudeCode(try session("claude", app: nil)))
-        XCTAssertFalse(QuickCommand.isClaudeCode(try session("pi", app: "pi")))
+        let started = try session(program: "claude", command: "claude", state: "idle")
+        XCTAssertTrue(started.isAgent)
+        XCTAssertTrue(started.showsConversation, "a terminal started as Claude Code is its conversation")
+        let typed = try session(program: "claude", command: "zsh", state: "working")
+        XCTAssertTrue(typed.isAgent)
+        XCTAssertFalse(typed.showsConversation, "Claude Code typed into a shell shows the terminal")
+        let unreported = try session(program: "codex", command: nil)
+        XCTAssertTrue(unreported.isAgent, "a known Agent CLI before (or without) a status")
+        XCTAssertFalse(unreported.showsConversation)
+        let pi = try session(program: "pi", command: "pi", state: "done")
+        XCTAssertTrue(pi.isAgent)
+        XCTAssertFalse(pi.showsConversation, "only Claude Code has a conversation page")
+        let shell = try session(program: "zsh", command: nil)
+        XCTAssertFalse(shell.isAgent)
+        XCTAssertFalse(shell.showsConversation)
+        let server = try session(program: "node", command: "zsh")
+        XCTAssertFalse(server.isAgent, "a dev server is a plain terminal")
     }
 
     func testMarkdownBlocks() {

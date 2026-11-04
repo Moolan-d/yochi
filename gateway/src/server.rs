@@ -3,8 +3,9 @@
 //! need `Authorization: Bearer <device token>`:
 //! - `/v0/ws` pushes `hello`, then the whole session list whenever it changes.
 //!   The app may send Agent Messages, key presses, or `unpair` to remove itself.
-//! - `/v0/observe?session=<id>` streams one terminal read-only: control as text,
-//!   terminal bytes as binary messages.
+//! - `/v0/observe?session=<id>` streams one terminal: control as text,
+//!   terminal bytes as binary messages. With `takeover=1&cols=&rows=` the
+//!   terminal takes the phone's size while it is watched.
 //! - `/v0/conversation?session=<id>` follows the conversation of the Agent in
 //!   one terminal, read from its transcript.
 //! - `/v0/screen?session=<id>` sends one terminal's screen as styled text while
@@ -264,6 +265,24 @@ async fn upgrade(State(state): State<AppState>, headers: HeaderMap, ws: WebSocke
 #[derive(Deserialize)]
 struct ObserveQuery {
     session: String,
+    /// 1 takes the terminal over: it is resized to `cols` × `rows` while this
+    /// viewer stays attached, so its program draws for the phone.
+    takeover: Option<u8>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+}
+
+/// What the app may send on a takeover stream.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ObserveMessage {
+    /// The phone's grid changed, e.g. its keyboard came up.
+    Resize { cols: u16, rows: u16 },
+}
+
+/// A grid core can draw: neither empty nor absurd.
+fn valid_grid(cols: u16, rows: u16) -> bool {
+    (1..=1000).contains(&cols) && (1..=1000).contains(&rows)
 }
 
 async fn observe(
@@ -275,18 +294,34 @@ async fn observe(
     let Some(device) = authorize(&headers, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(size) = session_size(&state.view.borrow(), &query.session) else {
+    let Some(observed) = session_size(&state.view.borrow(), &query.session) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size))
+    let (size, takeover) = match query.takeover.unwrap_or(0) == 1 {
+        true => match (query.cols, query.rows) {
+            (Some(cols), Some(rows)) if valid_grid(cols, rows) => ((cols, rows), true),
+            _ => return (StatusCode::BAD_REQUEST, "takeover needs cols and rows").into_response(),
+        },
+        false => (observed, false),
+    };
+    ws.on_upgrade(move |socket| relay(socket, state, device, query.session, size, takeover))
 }
 
 fn session_size(view: &CoreView, id: &str) -> Option<(u16, u16)> {
     view.sessions.iter().find(|s| s.id == id).map(|s| (s.cols, s.rows))
 }
 
-async fn relay(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
-    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, observe::HISTORY).await {
+/// Streams one terminal. An observer only watches; a takeover viewer also
+/// sets the terminal's size, and resizes it when the phone's grid changes.
+async fn relay(
+    mut socket: WebSocket,
+    state: AppState,
+    device: String,
+    id: String,
+    (cols, rows): (u16, u16),
+    takeover: bool,
+) {
+    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, observe::HISTORY, !takeover).await {
         Ok(observer) => observer,
         Err(err) => {
             let reason = Value::String(format!("{err:#}"));
@@ -331,6 +366,14 @@ async fn relay(mut socket: WebSocket, state: AppState, device: String, id: Strin
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(Message::Text(text))) if takeover => {
+                    if let Ok(ObserveMessage::Resize { cols, rows }) = serde_json::from_str(&text)
+                        && valid_grid(cols, rows)
+                        && observer.resize(cols, rows).await.is_err()
+                    {
+                        break;
+                    }
+                }
                 Some(Ok(_)) => {}
             },
             () = unpaired(&mut devices, &device) => break,
@@ -364,7 +407,7 @@ fn working(view: &CoreView, id: &str) -> bool {
 /// has been still for a moment, unless it is what was sent last.
 async fn watch_screen(mut socket: WebSocket, state: AppState, device: String, id: String, (cols, rows): (u16, u16)) {
     const SETTLE: Duration = Duration::from_millis(150);
-    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, 0).await {
+    let mut observer = match Observer::attach(&state.hc, &id, cols, rows, 0, true).await {
         Ok(observer) => observer,
         Err(err) => {
             let reason = Value::String(format!("{err:#}"));
@@ -742,6 +785,15 @@ mod tests {
         assert!(matches!(message, AppMessage::Commands { id, session } if id == "c1" && session == "t1"));
         let message: AppMessage = serde_json::from_str(r#"{"type":"change_diff","id":"g2","session":"t1","path":"a b.txt"}"#).unwrap();
         assert!(matches!(message, AppMessage::ChangeDiff { path, .. } if path == "a b.txt"));
+    }
+
+    #[test]
+    fn parses_resize_and_checks_the_grid() {
+        let message: ObserveMessage = serde_json::from_str(r#"{"type":"resize","cols":49,"rows":45}"#).unwrap();
+        assert!(matches!(message, ObserveMessage::Resize { cols: 49, rows: 45 }));
+        assert!(serde_json::from_str::<ObserveMessage>(r#"{"type":"resize","cols":-1,"rows":45}"#).is_err());
+        assert!(valid_grid(1, 1) && valid_grid(1000, 1000));
+        assert!(!valid_grid(0, 45) && !valid_grid(49, 0) && !valid_grid(1001, 45));
     }
 
     #[test]

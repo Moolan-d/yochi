@@ -1,13 +1,14 @@
 import Foundation
 import Observation
 
-/// A read-only stream of one terminal from the Gateway (`/v0/observe`).
-/// Text messages carry control, binary messages the terminal's bytes.
+/// A stream of one terminal from the Gateway (`/v0/observe`): watched as
+/// it is, or taken over at the phone's grid. Text messages carry control,
+/// binary messages the terminal's bytes. Nothing is ever typed through it.
 @MainActor @Observable
 final class TerminalObserver {
     enum Phase: Equatable {
         case connecting
-        /// Render a grid of this size; it changes when another client resizes the terminal.
+        /// Render a grid of this size; it changes when the terminal is resized.
         case observing(cols: Int, rows: Int)
         /// The core ended the stream (`exited`, `killed`, …) or attaching failed.
         case closed(reason: String)
@@ -21,9 +22,11 @@ final class TerminalObserver {
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
 
-    func start(_ config: GatewayConfig, session: String) {
+    /// With `takeover`, the terminal takes that grid while this stream is
+    /// open; core gives the desktop its size back once it closes.
+    func start(_ config: GatewayConfig, session: String, takeover: TerminalGrid? = nil) {
         stop()
-        guard let url = config.observeURL(session: session) else {
+        guard let url = config.observeURL(session: session, takeover: takeover) else {
             phase = .failed("地址无效：\(config.host)")
             return
         }
@@ -36,6 +39,27 @@ final class TerminalObserver {
         socket.resume()
         loop = Task { await follow(socket) }
     }
+
+    /// A taken-over terminal follows the phone's grid, e.g. as the keyboard
+    /// comes up. Ignored by the Gateway on a stream that only watches.
+    func resize(_ grid: TerminalGrid) {
+        #if DEBUG
+        resizes.append(grid)
+        #endif
+        guard let socket else { return }
+        let message = #"{"type":"resize","cols":\#(grid.cols),"rows":\#(grid.rows)}"#
+        Task { try? await socket.send(.string(message)) }
+    }
+
+    #if DEBUG
+    /// Every grid asked for, for tests.
+    private(set) var resizes: [TerminalGrid] = []
+
+    /// Core answered the attach with this grid, for tests.
+    func attached(cols: Int, rows: Int) {
+        phase = .observing(cols: cols, rows: rows)
+    }
+    #endif
 
     func stop() {
         loop?.cancel()
@@ -125,12 +149,18 @@ private struct ObserveMessage: Decodable {
 }
 
 extension GatewayConfig {
-    func observeURL(session: String) -> URL? {
+    func observeURL(session: String, takeover: TerminalGrid? = nil) -> URL? {
         guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
             return nil
         }
         components.path = "/v0/observe"
-        components.queryItems = [URLQueryItem(name: "session", value: session)]
+        var items = [URLQueryItem(name: "session", value: session)]
+        if let takeover {
+            items += [URLQueryItem(name: "takeover", value: "1"),
+                      URLQueryItem(name: "cols", value: String(takeover.cols)),
+                      URLQueryItem(name: "rows", value: String(takeover.rows))]
+        }
+        components.queryItems = items
         return components.url
     }
 }

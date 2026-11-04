@@ -44,9 +44,9 @@ xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINA
     -only-testing:CompanionTests \
     -resultBundlePath "$RESULTS/unit-tests.xcresult" || failed=1
 
-# A terminal on the alternate screen, for the full-screen test: its absolute
-# cursor positions are what a phone-width reflow cannot keep. It prints its
-# rows and columns, one per line, whenever its size changes.
+# A terminal on the alternate screen, for the full-screen test: taken over,
+# it must draw at the phone's grid. It prints its rows and columns, one per
+# line, whenever its size changes.
 start_alt_session() {
     hc run --bg --rm --no-parent --no-notify --name companion-uitest-alt --json \
         -- /bin/sh -c 'tput smcup; size() { clear; stty size | tr " " "\n"; }; trap size WINCH; size; while :; do sleep 0.2; done' |
@@ -118,9 +118,10 @@ start_changes_repo() {
 # TESTS="testA testB" runs a subset; testDialogFromScreen,
 # testPickerFromScreen, testPermissionModeFromScreen and
 # testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
-# testChangesPage run only when named, as do testTabMenu and the testPerf*
+# testChangesPage run only when named, as do testTabMenu, testClaudeStartedInTerminal
+# (starts Claude Code without sending it anything) and the testPerf*
 # measurements (scripts/perf-test.sh).
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testHomeSample}; do
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testConversationCards testHomeSample}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
@@ -128,16 +129,25 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
 
     echo "== $test"
     extra=
-    if [ "$test" = testFullScreenShownAsDrawn ]; then
+    if [ "$test" = testFullScreenDrawsForThePhone ]; then
         alt_session=$(start_alt_session)
         extra="TEST_RUNNER_COMPANION_ALT_SESSION_NAME=companion-uitest-alt"
     fi
-    if [ "$test" = testShellCommandsRun ]; then
+    if [ "$test" = testShellCommandsRun ] || [ "$test" = testClaudeStartedInTerminal ]; then
         start_shell_session
         extra="TEST_RUNNER_COMPANION_SHELL_SESSION_NAME=companion-uitest-shell"
     fi
+    if [ "$test" = testClaudeStartedInTerminal ]; then
+        # What runs in the terminal and at which width, every half second.
+        ( while :; do
+            hc get companion-uitest-shell --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); f=d.get("foreground") or {}; a=f.get("argv") or [f.get("name")]; print(str(a[0]).rsplit("/",1)[-1], d["cols"])' || true
+            sleep 0.5
+        done ) > "$state/claude-sizes.log" &
+        sampler=$!
+    fi
     if [ "$test" = testTerminalScrollsHistory ]; then
-        # HISTORY_SESSION_NAME points it at an existing session instead, read-only.
+        # HISTORY_SESSION_NAME points it at an existing session instead; opening
+        # it takes that terminal over at the phone's grid while the test runs.
         [ -n "${HISTORY_SESSION_NAME:-}" ] || start_history_session
         extra="TEST_RUNNER_COMPANION_HISTORY_SESSION_NAME=${HISTORY_SESSION_NAME:-companion-uitest-history}"
     fi
@@ -182,6 +192,41 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
             printf '%s\n' "$screen" | tail -20 >&2
             failed=1
         fi
+        # Opening the terminal took it over at the phone's grid (`stty size`
+        # prints rows then columns); leaving gave the base size back.
+        phone_cols=$(printf '%s\n' "$screen" | grep -E '^[0-9]+ [0-9]+$' | tail -1 | cut -d' ' -f2)
+        if [ -z "$phone_cols" ] || [ "$phone_cols" -gt 100 ]; then
+            echo "the terminal was not taken over at the phone's grid (stty saw ${phone_cols:-nothing} columns)" >&2
+            failed=1
+        fi
+        sleep 1
+        base=$(hc get companion-uitest-shell --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["cols"])' || true)
+        if [ "${base:-0}" -le 100 ]; then
+            echo "leaving the terminal did not give its size back (${base:-?} columns)" >&2
+            failed=1
+        fi
+        hc kill companion-uitest-shell >/dev/null 2>&1 || true
+    fi
+    if [ "$test" = testClaudeStartedInTerminal ]; then
+        # Claude Code ran at the phone's grid on the terminal page, and
+        # carries on at the desktop's width once the page left.
+        kill "$sampler" 2>/dev/null || true
+        sleep 1
+        hc read companion-uitest-shell > "$SHOTS/claude-terminal.txt" 2>/dev/null || true
+        if ! grep -qE '^claude [0-9]+$' "$state/claude-sizes.log"; then
+            echo "Claude Code never ran in the terminal:" >&2
+            tail -5 "$state/claude-sizes.log" >&2
+            failed=1
+        elif ! grep -E '^claude [0-9]+$' "$state/claude-sizes.log" | awk '$2 <= 100 { found = 1 } END { exit !found }'; then
+            echo "Claude Code never ran at the phone's grid:" >&2
+            uniq "$state/claude-sizes.log" >&2
+            failed=1
+        elif [ "$(grep -E '^claude [0-9]+$' "$state/claude-sizes.log" | tail -1 | cut -d' ' -f2)" -le 100 ]; then
+            echo "Claude Code was left at the phone's grid:" >&2
+            uniq "$state/claude-sizes.log" >&2
+            failed=1
+        fi
+        echo "terminal sizes while Claude Code started:"; uniq "$state/claude-sizes.log" | sed 's/^/  /'
         hc kill companion-uitest-shell >/dev/null 2>&1 || true
     fi
     hc kill companion-uitest-history >/dev/null 2>&1 || true
@@ -189,6 +234,13 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     hc kill companion-uitest-picker >/dev/null 2>&1 || true
     hc kill companion-uitest-perf >/dev/null 2>&1 || true
     if [ -n "${alt_session:-}" ]; then
+        # Leaving the page gave the base size back.
+        sleep 1
+        base=$(hc get companion-uitest-alt --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["cols"])' || true)
+        if [ "${base:-0}" -le 100 ]; then
+            echo "leaving the full-screen terminal did not give its size back (${base:-?} columns)" >&2
+            failed=1
+        fi
         hc kill companion-uitest-alt >/dev/null 2>&1 || true
         alt_session=
     fi

@@ -6,6 +6,39 @@ import UIKit
 struct TerminalGrid: Equatable {
     var cols: Int
     var rows: Int
+
+    /// The whole cells that fit in `size` inside the surface's padding, as
+    /// Ghostty divides it; nil when not even one does.
+    static func fitting(_ size: CGSize, cell: CGSize, padding: CGSize) -> TerminalGrid? {
+        guard cell.width > 0, cell.height > 0 else { return nil }
+        // A hair over, so a size that holds exactly n cells isn't floored to n − 1.
+        let cols = Int(((size.width - 2 * padding.width) / cell.width + 0.001).rounded(.down))
+        let rows = Int(((size.height - 2 * padding.height) / cell.height + 0.001).rounded(.down))
+        guard cols > 0, rows > 0 else { return nil }
+        return TerminalGrid(cols: min(cols, 1000), rows: min(rows, 1000))
+    }
+}
+
+/// One cell's size in points per font size, as Ghostty measured it. The
+/// launch warmup measures the remembered size, so the first terminal opened
+/// can already ask core for the phone's grid.
+@MainActor
+enum TerminalCell {
+    private static var measured: [Float: CGSize] = [:]
+
+    static func remember(_ cell: CGSize, fontSize: Float) {
+        measured[fontSize] = cell
+    }
+
+    /// The grid a page of `size` shows at `fontSize`; nil until measured.
+    static func grid(fitting size: CGSize, fontSize: Double) -> TerminalGrid? {
+        guard let cell = measured[Float(fontSize)] else { return nil }
+        return .fitting(size, cell: cell, padding: ObservedTerminalView.padding)
+    }
+
+    #if DEBUG
+    static func forget() { measured = [:] }
+    #endif
 }
 
 /// The font size the phone draws a terminal at, remembered between visits.
@@ -156,6 +189,9 @@ struct ObservedTerminal: UIViewRepresentable {
     /// Core paints at the desktop grid; the surface starts there so the first
     /// paint lands on the rows and columns it was drawn for.
     let desktopGrid: TerminalGrid
+    /// Core resized the terminal to the phone: everything, full-screen
+    /// programs too, is drawn at the phone's grid.
+    let takeover: Bool
     /// The grid on screen, for the title: the phone's, or the desktop's for a
     /// full-screen program.
     @Binding var grid: TerminalGrid?
@@ -179,7 +215,7 @@ struct ObservedTerminal: UIViewRepresentable {
             DispatchQueue.main.async { Perf.shown("terminal", since: start, cached: true) }
             return kept.view
         }
-        let view = ObservedTerminalView(feed: feed, fontSize: fontSize, desktopGrid: desktopGrid)
+        let view = ObservedTerminalView(feed: feed, fontSize: fontSize, desktopGrid: desktopGrid, takeover: takeover)
         model.surface = (attempt, view)
         updateUIView(view, context: context)
         return view
@@ -194,11 +230,12 @@ struct ObservedTerminal: UIViewRepresentable {
 }
 
 /// The terminal on the phone. Core's paint arrives at the desktop grid and
-/// Ghostty takes it there. Line output is then reflowed into however many
-/// columns the phone fits, and live output read at that grid. A full-screen
-/// program draws at absolute positions that no reflow keeps, so it stays as
-/// the desktop drew it: the whole grid fitted to the phone's width, which a
-/// pinch zooms and a drag pans.
+/// Ghostty takes it there. Taken over, that grid is already the phone's, and
+/// the surface simply follows the page. Only watched, line output is then
+/// reflowed into however many columns the phone fits, and live output read
+/// at that grid; a full-screen program draws at absolute positions that no
+/// reflow keeps, so it stays as the desktop drew it: the whole grid fitted
+/// to the phone's width, which a pinch zooms and a drag pans.
 final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate,
     TerminalSurfaceTextSelectionRequestDelegate, TerminalSurfaceScrollbarDelegate {
     var onGridChange: ((TerminalGrid) -> Void)?
@@ -208,6 +245,8 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
 
     private let feed: TerminalFeed
     private let desktop: TerminalGrid
+    private let fontSize: Float
+    private let takeover: Bool
     private let zoom = UIScrollView()
     private let terminal = SelectionOnlyTerminalView(frame: .zero)
     private let controller: TerminalController
@@ -228,9 +267,11 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
     private var frameBody: (() -> Void)?
     private var displayLink: CADisplayLink?
 
-    init(feed: TerminalFeed, fontSize: Float, desktopGrid: TerminalGrid) {
+    init(feed: TerminalFeed, fontSize: Float, desktopGrid: TerminalGrid, takeover: Bool = false) {
         self.feed = feed
         self.desktop = desktopGrid
+        self.fontSize = fontSize
+        self.takeover = takeover
         self.controller = TerminalController {
             $0.withFontSize(fontSize)
             $0.withWindowPaddingX(Int(Self.padding.width))
@@ -264,10 +305,13 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
         accessibilityIdentifier = "terminalGrid"
-        accessibilityHint = "终端画面按手机宽度排版，全屏程序按桌面原样显示、可双指缩放；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
+        accessibilityHint = takeover
+            ? "终端按手机尺寸排版，查看期间桌面上的终端会变小；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
+            : "终端画面按手机宽度排版，全屏程序按桌面原样显示、可双指缩放；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
 
         feed.onFullScreenChange = { [weak self] fullScreen in
-            guard let self, !preparing, fullScreen != asDrawn else { return }
+            // Taken over, a full-screen program draws for the phone like anything else.
+            guard let self, !takeover, !preparing, fullScreen != asDrawn else { return }
             onScreenModeChange?()
         }
     }
@@ -278,7 +322,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
     }
 
     /// Around the grid on each side, in points.
-    private static let padding = CGSize(width: 6, height: 4)
+    static let padding = CGSize(width: 6, height: 4)
 
     /// Ghostty's default theme backgrounds (Alabaster, Afterglow), so the area
     /// around the text reads as part of the terminal.
@@ -318,6 +362,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         // Metrics measured before Ghostty took the surface's current size say
         // nothing about it.
         let current = abs(CGFloat(size.widthPixels) / traitCollection.displayScale - terminal.bounds.width) < 1
+        if current { TerminalCell.remember(measured, fontSize: fontSize) }
         if preparing, paintStarted, !feed.isOpen, current {
             let missingCols = desktop.cols - Int(size.columns)
             let missingRows = desktop.rows - Int(size.rows)
@@ -387,7 +432,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         }
         // Safe on the main thread: it parses the queued first paint first.
         feed.session.waitForPendingOutput()
-        if feed.isFullScreen { showAsDrawn() } else { reflowToPhone() }
+        if feed.isFullScreen && !takeover { showAsDrawn() } else { reflowToPhone() }
     }
 
     private func reflowToPhone() {
@@ -419,7 +464,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         UIView.animate(withDuration: 0.15) { self.terminal.alpha = 1 }
         if let pendingMetrics { report(pendingMetrics) }
         // A switch during the first paint came before the screen was chosen.
-        if feed.isFullScreen != asDrawn { onScreenModeChange?() }
+        if !takeover, feed.isFullScreen != asDrawn { onScreenModeChange?() }
     }
 
     // MARK: Zoom

@@ -7,7 +7,10 @@ struct Session: Decodable, Identifiable, Hashable {
     /// The machine it runs on; nil for the Gateway's own Mac.
     let machine: String?
     let title: String
+    /// What runs in the terminal now.
     let program: String?
+    /// What the terminal itself was started with; nil for the default shell.
+    let command: String?
     let cwd: String
     let status: Status?
     /// The last completed Agent turn, or zero when none has been reported.
@@ -26,7 +29,7 @@ struct Session: Decodable, Identifiable, Hashable {
     let todo: TodoNow?
 
     private enum CodingKeys: String, CodingKey {
-        case id, machine, title, program, cwd, status, turn, statusMs = "status_ms", parent, pinned, seen, repo, todo
+        case id, machine, title, program, command, cwd, status, turn, statusMs = "status_ms", parent, pinned, seen, repo, todo
     }
 
     init(from decoder: Decoder) throws {
@@ -35,6 +38,7 @@ struct Session: Decodable, Identifiable, Hashable {
         machine = try c.decodeIfPresent(String.self, forKey: .machine)
         title = try c.decode(String.self, forKey: .title)
         program = try c.decodeIfPresent(String.self, forKey: .program)
+        command = try c.decodeIfPresent(String.self, forKey: .command)
         cwd = try c.decode(String.self, forKey: .cwd)
         status = try c.decodeIfPresent(Status.self, forKey: .status)
         // A Gateway older than the Agent Message feature sends no turn.
@@ -53,8 +57,25 @@ struct Session: Decodable, Identifiable, Hashable {
         return parts.last.map(String.init) ?? (cwd.isEmpty ? "" : "/")
     }
 
-    /// An Agent reports a status; a plain terminal (zsh, a dev server) doesn't.
-    var isAgent: Bool { status != nil }
+    /// An Agent CLI runs in it: core reports its status, or the command is a
+    /// known Agent's (one that hasn't reported yet, or never does). Anything
+    /// else (zsh, a dev server) is a plain terminal. How its page shows it is
+    /// another matter.
+    var isAgent: Bool { status != nil || program.map(Self.isAgentProgram) == true }
+
+    static let agentPrograms: Set<String> = [
+        "claude", "codex", "pi", "gemini", "opencode", "amp", "aider", "cursor-agent",
+        "droid", "qwen", "crush", "goose", "kimi", "copilot", "kiro-cli", "auggie",
+    ]
+
+    static func isAgentProgram(_ program: String) -> Bool {
+        agentPrograms.contains(program.lowercased())
+    }
+
+    /// Its page is the conversation (GUI): the terminal itself is Claude
+    /// Code, the one Agent the app has a conversation page for. Claude Code
+    /// typed into a shell, and every other Agent, show the terminal (TUI).
+    var showsConversation: Bool { command?.lowercased() == "claude" }
 
     /// 「工作中 · 12s」 while the Agent works and the Gateway says since when.
     func working(at now: Date) -> String? {

@@ -1,5 +1,7 @@
-//! A read-only view of one terminal: its own framed `hc connect`, then
-//! `terminal.attach` with `observe`, so it never types into or resizes the terminal.
+//! A view of one terminal: its own framed `hc connect`, then `terminal.attach`.
+//! Observing never types into or resizes the terminal. Taking it over sets
+//! its size to the phone's while attached (and still never types); core
+//! gives the size back to the desktop once the phone detaches.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -12,6 +14,7 @@ use tokio::sync::mpsc;
 const DATA: u8 = 0;
 const CREDIT: u8 = 1;
 const CLOSE: u8 = 2;
+const RESIZE: u8 = 3;
 const HEADER: usize = 9;
 /// Scrollback the terminal page's first paint carries, so it can scroll back a little.
 pub const HISTORY: u32 = 1000;
@@ -40,7 +43,7 @@ enum Frame {
 }
 
 impl Observer {
-    pub async fn attach(hc: &str, terminal: &str, cols: u16, rows: u16, history: u32) -> Result<Self> {
+    pub async fn attach(hc: &str, terminal: &str, cols: u16, rows: u16, history: u32, observe: bool) -> Result<Self> {
         let mut child = Command::new(hc)
             .arg("connect")
             .stdin(Stdio::piped())
@@ -61,8 +64,9 @@ impl Observer {
         }
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "terminal.attach", "params": {
-            // An observer never resizes, so its own size only matters to the core's bookkeeping.
-            "terminal": terminal, "cols": cols, "rows": rows, "observe": true, "history": history,
+            // An observer's size is only bookkeeping; a takeover viewer's is the
+            // terminal's new size while it is the most recently attached viewer.
+            "terminal": terminal, "cols": cols, "rows": rows, "observe": observe, "history": history,
         }});
         write_frame(&mut stdin, 0, DATA, request.to_string().as_bytes()).await?;
 
@@ -117,9 +121,21 @@ impl Observer {
         write_frame(&mut self.stdin, self.channel, CREDIT, &(bytes as u32).to_le_bytes()).await
     }
 
+    /// A takeover viewer's new size, e.g. the phone's keyboard came up.
+    pub async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        write_frame(&mut self.stdin, self.channel, RESIZE, &resize_payload(cols, rows)).await
+    }
+
     pub async fn detach(mut self) {
         let _ = write_frame(&mut self.stdin, self.channel, CLOSE, &[]).await;
     }
+}
+
+/// Core's RESIZE frame: columns then rows, little-endian u16 each.
+fn resize_payload(cols: u16, rows: u16) -> [u8; 4] {
+    let [c0, c1] = cols.to_le_bytes();
+    let [r0, r1] = rows.to_le_bytes();
+    [c0, c1, r0, r1]
 }
 
 fn output(kind: u8, payload: Vec<u8>) -> Option<Output> {
@@ -166,4 +182,15 @@ async fn write_frame(stdin: &mut ChildStdin, channel: u32, kind: u8, payload: &[
     stdin.write_all(&frame).await?;
     stdin.flush().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resize_payload_is_cols_then_rows() {
+        assert_eq!(resize_payload(60, 30), [60, 0, 30, 0]);
+        assert_eq!(resize_payload(300, 1), [44, 1, 1, 0]);
+    }
 }

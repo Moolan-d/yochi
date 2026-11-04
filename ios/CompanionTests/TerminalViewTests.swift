@@ -8,6 +8,42 @@ final class TerminalViewTests: XCTestCase {
         XCTAssertEqual(TerminalTextSize.clamped(11), 11)
     }
 
+    func testPhoneGridIsTheWholeCellsInsideThePadding() {
+        let padding = CGSize(width: 6, height: 4)
+        let cell = CGSize(width: 5.5, height: 11)
+        // 402 − 12 = 390 points: 70.9 cells across; 600 − 8 = 592: 53.8 rows.
+        XCTAssertEqual(TerminalGrid.fitting(CGSize(width: 402, height: 600), cell: cell, padding: padding),
+                       TerminalGrid(cols: 70, rows: 53))
+        // Exactly 70 cells must not be floored to 69 by rounding.
+        XCTAssertEqual(TerminalGrid.fitting(CGSize(width: 12 + 70 * 5.5, height: 8 + 3 * 11), cell: cell, padding: padding),
+                       TerminalGrid(cols: 70, rows: 3))
+        XCTAssertNil(TerminalGrid.fitting(CGSize(width: 15, height: 600), cell: cell, padding: padding))
+        XCTAssertNil(TerminalGrid.fitting(CGSize(width: 402, height: 600), cell: .zero, padding: padding))
+    }
+
+    @MainActor
+    func testPhoneGridWaitsForAMeasuredCell() {
+        TerminalCell.forget()
+        XCTAssertNil(TerminalCell.grid(fitting: CGSize(width: 402, height: 600), fontSize: 9))
+        TerminalCell.remember(CGSize(width: 5.5, height: 11), fontSize: 9)
+        XCTAssertEqual(TerminalCell.grid(fitting: CGSize(width: 402, height: 600), fontSize: 9),
+                       TerminalGrid(cols: 70, rows: 53))
+        XCTAssertNil(TerminalCell.grid(fitting: CGSize(width: 402, height: 600), fontSize: 10))
+        TerminalCell.forget()
+    }
+
+    func testTakeoverAsksForThePhonesGrid() throws {
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        let watch = try XCTUnwrap(config.observeURL(session: "t1"))
+        XCTAssertEqual(URLComponents(url: watch, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "session", value: "t1")])
+        let take = try XCTUnwrap(config.observeURL(session: "t1", takeover: TerminalGrid(cols: 49, rows: 45)))
+        XCTAssertEqual(URLComponents(url: take, resolvingAgainstBaseURL: false)?.queryItems, [
+            URLQueryItem(name: "session", value: "t1"), URLQueryItem(name: "takeover", value: "1"),
+            URLQueryItem(name: "cols", value: "49"), URLQueryItem(name: "rows", value: "45"),
+        ])
+    }
+
     @MainActor
     func testFullScreenFollowsTheAlternateScreenSwitches() {
         let feed = TerminalFeed()

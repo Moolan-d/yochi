@@ -32,7 +32,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
 // 随后立即发送，并在会话列表变化时整表重发
 {"type": "sessions", "core": "my-mac", "connected": true, "sessions": [
-  {"id": "vps-us/t1", "machine": "vps-us", "title": "claude", "program": "claude",
+  {"id": "vps-us/t1", "machine": "vps-us", "title": "claude", "program": "claude", "command": "claude",
    "cwd": "/root/app", "turn": 7, "status_ms": 1762156800000, "parent": "vps-us/t0",
    "pinned": true, "seen": 6, "repo": {"name": "app", "worktree": "fix-login"},
    "todo": {"text": "写测试中", "done": 3, "total": 7},
@@ -41,6 +41,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 ```
 
 - `id`：core 的地址，对 App 不透明。`machine`：远端机器名，主 Mac 本机为 `null`。
+- `program`：终端里现在跑的程序；`command`：终端本身启动的命令，在 shell 里换程序时不变，用默认 shell 启动时省略。两者都取命令名，解释器跑的脚本取脚本名（`node …/gemini.js` 为 `gemini`）。App 据 `command` 定会话形式：`claude` 走对话页，其余走终端页；据 `program` 和 `status` 判断是不是 Agent。旧版 Gateway 不发送 `command`。
 - `status`：Agent 自报状态，`state` 为 idle / working / done / blocked / error；未上报时为 `null`。
 - `status_ms`：状态上次变化的时刻（Mac 的时钟，毫秒）；App 据此显示「工作中 · 12s」。没有时省略。
 - `parent`：启动它的终端（子 Agent 的父 Agent）；没有时省略。
@@ -286,14 +287,16 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。
 - Gateway 在有 App 订阅时才读取：Agent 工作或等待时、以及状态变化后几秒内每秒一次，其余每 4 秒。core 的 `file.read` 每次读取整个文件，超过 64 MB 的 transcript 读取失败。
 
-### 只读查看终端（Observer）
+### 查看终端（Observer）
 
-`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并以 `observe` 模式 attach，因此手机不会向终端输入，也不会改变终端尺寸。
+`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach，手机从不经这个连接向终端输入。默认以 `observe` 模式 attach，不改变终端尺寸。
+
+**按手机尺寸接管。** 加 `takeover=1&cols=<列>&rows=<行>` 时改以非 observe 的方式 attach，core 把终端改成这个网格，`attached` 和首屏都按它；列数、行数缺少或不在 1…1000 之内时返回 `400`。查看期间桌面上的终端跟着变小；连接断开后 core 把尺寸还原成仍在 attach 的桌面窗口的大小，没有窗口时还原成基础尺寸。接管的连接上 App 可以发 `{"type": "resize", "cols": 49, "rows": 30}`（键盘弹出收起、转屏），Gateway 转成 core 的 RESIZE 帧；只读连接上的这类消息被忽略。桌面再次操作这个终端时尺寸回到桌面的，`size` 帧会报出来，App 据此改回只读显示（ADR 0001 的 2026-11-04 修订）。
 
 - **文本帧**（控制）：
   ```jsonc
-  {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸收下首屏后再重排
-  {"type": "size", "cols": 160, "rows": 48}       // 其他客户端改变了终端尺寸
+  {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸收下首屏（只读时再重排）
+  {"type": "size", "cols": 160, "rows": 48}       // 终端尺寸变了（其他客户端，或接管后自己的 resize）
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
   {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
   ```

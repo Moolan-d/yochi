@@ -315,6 +315,7 @@ mod tests {
                 machine: None,
                 title: "agent".into(),
                 program: Some("claude".into()),
+                command: Some("claude".into()),
                 cwd: "/".into(),
                 status: None,
                 status_ms: None,

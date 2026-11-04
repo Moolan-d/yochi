@@ -79,11 +79,11 @@ final class CompanionUITests: XCTestCase {
         snapshot("6 unpaired")
     }
 
-    /// A full-screen program draws with absolute positions, so reflowing it to
-    /// the phone scrambles the screen: it is shown as the desktop drew it, and
-    /// watching never resizes the terminal.
+    /// Opening the terminal takes it over at the phone's grid, so a
+    /// full-screen program draws for the phone itself instead of being shown
+    /// as the desktop drew it; coming back takes it over again.
     @MainActor
-    func testFullScreenShownAsDrawn() throws {
+    func testFullScreenDrawsForThePhone() throws {
         let app = launchUnpaired()
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app)
@@ -93,24 +93,24 @@ final class CompanionUITests: XCTestCase {
         session.tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         RunLoop.current.run(until: .now.addingTimeInterval(2))
-        snapshot("1 as drawn")
-        // The program prints its own size whenever it changes: still the
-        // grid it had, which is also the one on screen.
+        snapshot("1 drawn for the phone")
+        // The program prints its own size whenever it changes: the phone's
+        // grid, which is also the one on screen.
         let terminal = app.descendants(matching: .any)["terminalGrid"]
         let grid = try XCTUnwrap(titleGrid(app), "no grid in the title")
+        XCTAssertLessThan(grid.cols, 100, "the terminal kept the desktop's grid")
         XCTAssertEqual(try viewportNumbers(app, terminal), [grid.rows, grid.cols],
-                       "the full-screen program was not shown at its own grid")
+                       "the full-screen program did not draw at the phone's grid")
+        XCTAssertFalse(app.buttons["terminalTakeOver"].exists, "the desktop seemed to take the terminal back")
 
-        // A pinch zooms in; coming back shows the same, unresized terminal.
-        terminal.pinch(withScale: 3, velocity: 2)
-        snapshot("2 zoomed")
+        // Leaving lets go; coming back takes it over at the same grid again.
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssert(session.waitForExistence(timeout: 10))
         session.tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached again")
         RunLoop.current.run(until: .now.addingTimeInterval(2))
         XCTAssertEqual(try viewportNumbers(app, terminal), [grid.rows, grid.cols],
-                       "viewing resized the terminal")
+                       "coming back did not take the terminal over again")
         leaveAndUnpair(app)
     }
 
@@ -258,6 +258,44 @@ final class CompanionUITests: XCTestCase {
         XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 3))
         run(app, "echo stopped-$((1+1))")
         snapshot("3 interrupted, then ran again")
+        // Taken over at the phone's grid while the page shows; the script
+        // reads the size the shell saw, and that leaving gave it back.
+        run(app, "stty size")
+        XCTAssertFalse(app.buttons["terminalTakeOver"].exists, "the desktop seemed to take the terminal back")
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
+    /// Claude Code started by hand in a terminal page keeps the page its
+    /// terminal: Claude Code draws at the phone's grid there, and leaving
+    /// gives the desktop its size back (the script samples both). Its first
+    /// dialog, if any, is only looked at, never answered.
+    @MainActor
+    func testClaudeStartedInTerminal() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_SHELL_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no shell session")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        snapshot("1 shell")
+        run(app, "~/.local/bin/claude")
+        // Claude Code starts and the core reports it; the page stays.
+        RunLoop.current.run(until: .now.addingTimeInterval(10))
+        snapshot("2 claude in the terminal")
+        XCTAssertFalse(app.descendants(matching: .any)["agentMessageField"].exists,
+                       "the page turned into the conversation")
+        XCTAssert(app.descendants(matching: .any)["terminalCommandField"].exists, "the terminal composer is gone")
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        terminal.press(forDuration: 1.0)
+        let view = app.textViews.firstMatch
+        XCTAssert(view.waitForExistence(timeout: 5), "no selection sheet")
+        XCTAssert(((view.value as? String) ?? "").contains("Claude Code"), "Claude Code is not on the terminal")
+        app.buttons["取消"].tap()
+        XCTAssert(view.waitForNonExistence(timeout: 5), "selection sheet did not close")
+        XCTAssertFalse(app.buttons["terminalTakeOver"].exists, "the desktop seemed to take the terminal back")
         app.navigationBars.buttons.firstMatch.tap()
         unpair(app)
     }

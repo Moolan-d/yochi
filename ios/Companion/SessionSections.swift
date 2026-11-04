@@ -191,7 +191,8 @@ extension HomeRow {
         case "done": unseen ? "完成，未看过" : "已完成"
         case "error": "出错"
         case "idle": "空闲"
-        default: nil
+        // A known Agent CLI that reports nothing (yet).
+        default: session.status == nil && session.isAgent ? "运行中" : nil
         }
     }
 

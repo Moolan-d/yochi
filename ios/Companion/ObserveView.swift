@@ -1,10 +1,11 @@
 import PhotosUI
 import SwiftUI
 
-/// One session on one page: an Agent's conversation, or for a shell its
-/// terminal in Observer mode. Agent Messages, key presses and answers never
-/// attach, so the phone never becomes the active viewer or resizes the
-/// desktop's grid.
+/// One session on one page: a terminal started as Claude Code shows its
+/// conversation; any other, an Agent typed into a shell included, its
+/// terminal, taken over at the phone's grid while shown. Agent Messages,
+/// key presses and answers never attach; only the terminal page resizes
+/// the desktop's grid.
 struct ObserveView: View {
     let session: Session
     let config: GatewayConfig
@@ -118,13 +119,10 @@ struct ObserveView: View {
         return screen.result
     }
 
-    /// Claude Code always has the conversation page, even before its first
-    /// message: its dialogs show there from the screen. Other programs have
-    /// it only once the Gateway follows a transcript for them; a shell shows
-    /// its terminal.
-    private var isConversation: Bool {
-        QuickCommand.isClaudeCode(currentSession) || conversation.phase == .following
-    }
+    /// A terminal started as Claude Code has the conversation page, even
+    /// before its first message: its dialogs show there from the screen.
+    /// Anything else, an Agent typed into a shell included, has its terminal.
+    private var isConversation: Bool { session.showsConversation }
 
     var body: some View {
         let _ = Perf.count("ObserveView")
@@ -197,24 +195,13 @@ struct ObserveView: View {
         .onChange(of: delivery) { _, delivery in
             if case .sent(let text, _, _, _) = delivery, draft == text { draft = "" }
         }
-        // A session can turn out to be Claude Code after it opens: one just
-        // started from the phone, or a shell that started it. The page then
-        // turns to the conversation.
-        .onChange(of: QuickCommand.isClaudeCode(currentSession)) { _, isClaudeCode in
-            guard isClaudeCode else { return }
-            screen.start(config, session: session.id)
-        }
-        // The terminal gave way to the conversation; its stream ends.
-        .onChange(of: isConversation) { _, isConversation in
-            if isConversation { feeds.terminal.stop() }
-        }
         // A dialog card needs the room the keyboard takes. The composer can
         // take the keyboard back once sending enables it again, which can
         // be after the card appeared, so both moments count.
         .onChange(of: screenResult.fingerprint) { _, _ in makeRoomForDialog() }
         .onChange(of: isSending) { _, _ in makeRoomForDialog() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, case .failed = conversation.phase {
+            if isConversation, phase == .active, case .failed = conversation.phase {
                 conversation.start(config, session: session.id)
             }
         }
@@ -222,8 +209,8 @@ struct ObserveView: View {
             client.feedStore.cache.acquire(cacheKey, feeds)
             // Kept streams carry on; the Gateway sends a kept conversation
             // whole again on a new connection, which replaces it in place.
-            if conversation.needsStart { conversation.start(config, session: session.id) }
-            if QuickCommand.isClaudeCode(currentSession), screen.needsStart { screen.start(config, session: session.id) }
+            if isConversation, conversation.needsStart { conversation.start(config, session: session.id) }
+            if isConversation, screen.needsStart { screen.start(config, session: session.id) }
         }
         .onDisappear {
             // The streams stay open while the cache keeps them.
@@ -378,8 +365,8 @@ struct ObserveView: View {
         }
     }
 
-    /// The terminal's text size is a per-install preference, not a takeover:
-    /// only this phone's rendering changes, and core's grid is untouched.
+    /// The terminal's text size is a per-install preference; a taken-over
+    /// terminal is attached again at the grid the new size fits.
     private var textSizeMenu: some View {
         Menu {
             Section("字号 \(Int(terminalFontSize))") {
@@ -542,7 +529,7 @@ struct ObserveView: View {
             .accessibilityElement(children: .combine)
             .accessibilityHint(isConversation
                 ? "可查看对话、批准或回答 Agent 的请求、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。"
-                : "可查看终端、运行 shell 命令、按常用按键，都不会改变桌面上的终端尺寸。")
+                : "可查看终端、运行 shell 命令、按常用按键。查看期间终端按手机尺寸排版，桌面上的终端会暂时变小，离开即还原。")
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             tabMenu
@@ -574,7 +561,7 @@ struct ObserveView: View {
     }
 
     private var changesPage: some View {
-        let ask: (() -> Void)? = QuickCommand.isClaudeCode(currentSession) ? { askToCommit() } : nil
+        let ask: (() -> Void)? = isConversation ? { askToCommit() } : nil
         return ChangesView(session: session.id, client: client, askToCommit: ask)
     }
 

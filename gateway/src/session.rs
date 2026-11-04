@@ -13,6 +13,10 @@ pub struct Session {
     pub title: String,
     /// What runs in the terminal now (`claude`, `zsh`).
     pub program: Option<String>,
+    /// What the terminal itself was started with (`claude`, `zsh`), which
+    /// stays while programs come and go in a shell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     pub cwd: String,
     pub status: Option<Status>,
     /// When the status word last changed, in ms since the epoch by the Mac's clock.
@@ -56,6 +60,27 @@ pub struct Status {
     pub kind: Option<String>,
 }
 
+/// The program an argv runs, by name: a script run by its interpreter
+/// (`node /usr/local/bin/gemini`) is named after the script.
+fn command_name(argv: &Value) -> Option<String> {
+    let first = base_name(&argv[0])?;
+    let interpreter = matches!(first, "node" | "bun" | "deno" | "python" | "python3");
+    let script = argv[1].as_str().filter(|arg| interpreter && !arg.starts_with('-')).and_then(|_| base_name(&argv[1]));
+    let name = match script {
+        Some(script) => [".js", ".mjs", ".cjs", ".ts", ".py"]
+            .iter()
+            .fold(script, |name, ext| name.strip_suffix(ext).unwrap_or(name)),
+        None => first,
+    };
+    Some(name.to_owned())
+}
+
+/// An argument's last path component, without a login shell's leading `-`.
+fn base_name(arg: &Value) -> Option<&str> {
+    let name = arg.as_str()?.rsplit('/').next()?.trim_start_matches('-');
+    (!name.is_empty()).then_some(name)
+}
+
 impl Session {
     /// The app's view of a live core terminal; None for finished ones.
     pub fn from_record(record: &Value) -> Option<Self> {
@@ -67,14 +92,8 @@ impl Session {
         let foreground = &record["foreground"];
         // The command as started: Claude Code's process is named after its version (`2.1.316`).
         // A terminal just started has no foreground yet; the core's argv names it.
-        let program = foreground["argv"][0]
-            .as_str()
-            .or_else(|| foreground.is_null().then(|| record["argv"][0].as_str()).flatten())
-            .and_then(|argv0| argv0.rsplit('/').next())
-            .map(|name| name.trim_start_matches('-'))
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .or_else(|| text(&foreground["name"]));
+        let argv = if foreground.is_null() { &record["argv"] } else { &foreground["argv"] };
+        let program = command_name(argv).or_else(|| text(&foreground["name"]));
         let title = text(&record["name"])
             .or_else(|| text(&record["title"]).map(|title| without_spinner(&title)))
             .or_else(|| program.clone())
@@ -94,6 +113,7 @@ impl Session {
             machine,
             title,
             program,
+            command: command_name(&record["argv"]),
             cwd,
             status,
             status_ms: record["status_ms"].as_u64(),
@@ -179,11 +199,31 @@ mod tests {
         assert_eq!(program(json!({"name": "zsh", "argv": ["-zsh"]})).as_deref(), Some("zsh"));
         assert_eq!(program(json!({"name": "zsh", "argv": ["/bin/zsh", "-l"]})).as_deref(), Some("zsh"));
         assert_eq!(program(json!({"name": "pi"})).as_deref(), Some("pi"));
+        // A script is named after itself, not its interpreter.
+        assert_eq!(program(json!({"name": "node", "argv": ["node", "/usr/local/bin/gemini"]})).as_deref(), Some("gemini"));
+        assert_eq!(program(json!({"name": "node", "argv": ["/usr/bin/node", "/opt/codex/bin/codex.js"]})).as_deref(), Some("codex"));
+        assert_eq!(program(json!({"name": "node", "argv": ["node", "--inspect"]})).as_deref(), Some("node"));
+        assert_eq!(program(json!({"name": "node", "argv": ["node"]})).as_deref(), Some("node"));
         // Just started, before core reports the foreground.
         let started = json!({"address": "t1", "state": "live", "cwd": "/", "argv": ["/Users/me/.local/bin/claude"]});
         assert_eq!(Session::from_record(&started).unwrap().program.as_deref(), Some("claude"));
         let shell = json!({"address": "t1", "state": "live", "cwd": "/", "argv": []});
         assert_eq!(Session::from_record(&shell).unwrap().program, None);
+    }
+
+    #[test]
+    fn command_is_what_the_terminal_started_with() {
+        let session = |argv: Value| {
+            let record = json!({"address": "t1", "state": "live", "cwd": "/", "argv": argv,
+                                "foreground": {"name": "2.1.317", "argv": ["claude"]}});
+            Session::from_record(&record).unwrap()
+        };
+        // Claude Code typed into a login shell: it runs, but the terminal is the shell's.
+        let typed = session(json!(["/bin/zsh", "-l"]));
+        assert_eq!((typed.program.as_deref(), typed.command.as_deref()), (Some("claude"), Some("zsh")));
+        let started = session(json!(["/Users/me/.local/bin/claude"]));
+        assert_eq!(started.command.as_deref(), Some("claude"));
+        assert!(serde_json::to_value(session(json!([]))).unwrap().get("command").is_none());
     }
 
     #[test]
