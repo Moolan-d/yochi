@@ -631,11 +631,13 @@ final class CompanionUITests: XCTestCase {
 
             let remote = app.buttons.matching(identifier: "groupHeader").matching(NSPredicate(format: "label == %@", "运维，vps")).firstMatch
             scrollUntilHittable(remote, in: app, up: true)
+            clearOfSearchBar(remote, in: app)
             XCTAssertEqual(remote.value as? String, "已展开")
             remote.tap()
             XCTAssertEqual(remote.value as? String, "已收起，2 个 Agent，有未看过的完成")
             XCTAssertFalse(app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "升级 Caddy 配置")).firstMatch.exists)
             snapshot("home-collapsed\(suffix)")
+            clearOfSearchBar(remote, in: app)
             remote.tap()
             XCTAssertEqual(remote.value as? String, "已展开")
 
@@ -690,6 +692,19 @@ final class CompanionUITests: XCTestCase {
             XCTAssertTrue(added.waitForExistence(timeout: 5), "the edit's diff did not open")
             snapshot("cards-edit\(suffix)")
             app.terminate()
+        }
+    }
+
+    /// The search bar floats over the bottom of the home list, and a row
+    /// under it counts as hittable while the bar takes its taps: drag the
+    /// list up a little until the row is clear of it.
+    @MainActor
+    private func clearOfSearchBar(_ element: XCUIElement, in app: XCUIApplication) {
+        let bar = app.searchFields.firstMatch
+        for _ in 0..<3 where bar.exists && element.frame.maxY > bar.frame.minY - 12 {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -160)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
         }
     }
 
@@ -1120,7 +1135,13 @@ final class CompanionUITests: XCTestCase {
     /// A search left from finding a row hides the toolbar.
     @MainActor
     private func endSearch(_ app: XCUIApplication) {
-        if !app.buttons["设置"].exists, app.buttons["close"].exists { app.buttons["close"].tap() }
+        guard !app.buttons["设置"].exists, app.buttons["close"].exists else { return }
+        // Coming back to the list gives the search field its focus again,
+        // and the keyboard slides up under where close was: let it settle.
+        if app.keyboards.firstMatch.waitForExistence(timeout: 2) {
+            RunLoop.current.run(until: .now.addingTimeInterval(0.6))
+        }
+        app.buttons["close"].tap()
     }
 
     @MainActor
