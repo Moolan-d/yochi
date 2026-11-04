@@ -27,7 +27,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -57,6 +57,13 @@ start_alt_session() {
 start_history_session() {
     hc run --bg --rm --no-parent --no-notify --name companion-uitest-history --json \
         -- /bin/sh -c 'seq 1 400; exec /bin/cat' > /dev/null
+}
+
+# A terminal with a long history that keeps printing, for the perf tests:
+# scrolling while output arrives is what the frame meter measures.
+start_perf_session() {
+    hc run --bg --rm --no-parent --no-notify --name companion-uitest-perf --json \
+        -- /bin/sh -c 'seq 1 1000; while :; do date; sleep 0.05; done' > /dev/null
 }
 
 # Claude Code in a new, empty folder, for the dialog test: it opens on the
@@ -104,7 +111,8 @@ start_changes_repo() {
 # TESTS="testA testB" runs a subset; testDialogFromScreen,
 # testPickerFromScreen, testPermissionModeFromScreen and
 # testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
-# testChangesPage run only when named, as does testTabMenu.
+# testChangesPage run only when named, as do testTabMenu and the testPerf*
+# measurements (scripts/perf-test.sh).
 for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testHomeSample}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
@@ -122,6 +130,10 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         [ -n "${HISTORY_SESSION_NAME:-}" ] || start_history_session
         extra="TEST_RUNNER_COMPANION_HISTORY_SESSION_NAME=${HISTORY_SESSION_NAME:-companion-uitest-history}"
     fi
+    case "$test" in testPerf*)
+        start_perf_session
+        extra="TEST_RUNNER_COMPANION_PERF_SESSION_NAME=companion-uitest-perf TEST_RUNNER_COMPANION_CONVERSATION_SESSION=${CONVERSATION_SESSION:-}"
+    esac
     if [ "$test" = testTabMenu ]; then
         # An existing session whose Herdr tab holds more, opened read only: TAB_SESSION=<id>.
         extra="TEST_RUNNER_COMPANION_TAB_SESSION=${TAB_SESSION:-}"
@@ -153,6 +165,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     hc kill companion-uitest-history >/dev/null 2>&1 || true
     hc kill companion-uitest-dialog >/dev/null 2>&1 || true
     hc kill companion-uitest-picker >/dev/null 2>&1 || true
+    hc kill companion-uitest-perf >/dev/null 2>&1 || true
     if [ -n "${alt_session:-}" ]; then
         hc kill companion-uitest-alt >/dev/null 2>&1 || true
         alt_session=

@@ -78,6 +78,8 @@ final class GatewayClient {
     private(set) var queued: [String: QueuedMessage] = AgentMessageStore.allQueued()
     /// The Gateway this client follows, which queued messages belong to.
     private var host: String?
+    /// Session pages' streams, kept a while after a page leaves.
+    @ObservationIgnored let feedStore = SessionFeedStore()
 
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
@@ -377,6 +379,8 @@ final class GatewayClient {
             try? await socket.send(.string(#"{"type":"unpair"}"#))
         }
         disconnect()
+        // What this device saw is no longer its to show.
+        feedStore.cache.dropUnused()
     }
 
     private func run(_ config: GatewayConfig) async {
@@ -428,10 +432,11 @@ final class GatewayClient {
             case .hello:
                 phase = .connected
             case .sessions(let core, let connected, let sessions, let spaces):
-                coreName = core
-                coreConnected = connected
-                self.sessions = sessions
-                self.spaces = spaces
+                // Every page reads these; an unchanged list redraws nothing.
+                if coreName != core { coreName = core }
+                if coreConnected != connected { coreConnected = connected }
+                if self.sessions != sessions { self.sessions = sessions }
+                if self.spaces != spaces { self.spaces = spaces }
                 releaseQueued()
             case .sent(let id, let turn, let status, let started):
                 complete(id: id, with: .sent(turn: turn, status: status, started: started))

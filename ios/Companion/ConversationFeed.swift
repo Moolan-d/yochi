@@ -272,6 +272,15 @@ final class ConversationFeed {
 
     var todoProgress: TodoProgress? { TodoProgress(items: items) }
 
+    /// Nothing streams now: never started, stopped, failed or closed. A
+    /// page coming back starts it again, keeping the items it has.
+    var needsStart: Bool {
+        switch phase {
+        case .failed, .closed: true
+        case .connecting, .following, .unsupported: socket == nil
+        }
+    }
+
     /// The tool call a pending question is about, when the transcript shows it.
     var pendingTool: ConversationItem? {
         guard let id = pending?.tool else { return nil }
@@ -323,22 +332,32 @@ final class ConversationFeed {
     func apply(_ message: ConversationMessage) {
         switch message {
         case .conversation(let supported, let items):
-            self.items = items.filter { $0.kind != .other }
+            // Coming back to a kept conversation, the Gateway sends it whole
+            // again; unchanged, the page has nothing to redraw.
+            let fresh = items.filter { $0.kind != .other }
+            if fresh != self.items { self.items = fresh }
             // The Gateway says the mode again after a fresh conversation.
-            mode = nil
-            phase = supported ? .following : .unsupported
+            if mode != nil { mode = nil }
+            let phase: Phase = supported ? .following : .unsupported
+            if self.phase != phase { self.phase = phase }
         case .items(let changed):
+            // One change for the whole batch, so the page redraws once.
+            var updated = items
+            var index = Dictionary(updated.indices.map { (updated[$0].id, $0) }, uniquingKeysWith: { _, last in last })
             for item in changed where item.kind != .other {
-                if let index = items.firstIndex(where: { $0.id == item.id }) {
-                    items[index] = item
+                if let at = index[item.id] {
+                    updated[at] = item
                 } else {
-                    items.append(item)
+                    index[item.id] = updated.count
+                    updated.append(item)
                 }
             }
+            if updated != items { items = updated }
         case .pending(let pending):
-            self.pending = pending
+            if self.pending != pending { self.pending = pending }
         case .mode(let mode):
-            self.mode = PermissionMode(rawValue: mode)
+            let mode = PermissionMode(rawValue: mode)
+            if self.mode != mode { self.mode = mode }
         case .closed(let reason):
             pending = nil
             phase = .closed(reason: reason == "finished" ? "会话已结束" : reason)

@@ -15,9 +15,15 @@ final class ScreenFeed {
 
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
+    /// The session ended or refused the phone; nothing reconnects.
+    @ObservationIgnored private var ended = false
+
+    /// Nothing streams now; a page coming back starts it again.
+    var needsStart: Bool { loop == nil || ended }
 
     func start(_ config: GatewayConfig, session: String) {
         stop()
+        ended = false
         guard let url = config.screenURL(session: session) else { return }
         loop = Task { await follow(url, token: config.token) }
     }
@@ -58,6 +64,7 @@ final class ScreenFeed {
                         delay = .seconds(1)
                     case "closed":
                         clear()
+                        ended = true
                         return
                     default:
                         break
@@ -67,7 +74,10 @@ final class ScreenFeed {
                 if Task.isCancelled { return }
                 clear()
                 let status = (socket.response as? HTTPURLResponse)?.statusCode
-                if status == 401 || status == 404 { return }
+                if status == 401 || status == 404 {
+                    ended = true
+                    return
+                }
             }
             try? await Task.sleep(for: delay)
             delay = min(delay * 2, .seconds(30))

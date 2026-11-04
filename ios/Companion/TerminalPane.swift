@@ -7,34 +7,34 @@ import SwiftUI
 struct TerminalPane: View {
     let session: String
     let config: GatewayConfig
+    /// Kept by the session cache, so the page shows its last screen again
+    /// when it comes back soon after leaving.
+    let model: TerminalModel
     /// The grid on screen, for the title; nil until the first paint is shown.
     @Binding var grid: TerminalGrid?
 
-    @State private var observer = TerminalObserver()
-    @State private var feed = TerminalFeed()
-    /// Core's desktop grid, which the first paint is taken at.
-    @State private var desktop: TerminalGrid?
-    @State private var attempt = 0
-    @State private var resizeRestart: Task<Void, Never>?
     @State private var selection: TerminalTextSelection?
     @State private var copiedNotice = false
     @AppStorage(TerminalTextSize.key) private var fontSize = TerminalTextSize.standard
     @Environment(\.scenePhase) private var scenePhase
 
+    private var observer: TerminalObserver { model.observer }
+
     var body: some View {
+        let _ = Perf.count("TerminalPane")
         ZStack {
-            if let desktop {
+            if let desktop = model.desktop, let feed = model.feed {
                 // A program entering or leaving full screen is shown the other
                 // way; a fresh attach takes core's exact screen for it.
-                ObservedTerminal(feed: feed, fontSize: Float(fontSize), desktopGrid: desktop,
-                                 grid: $grid, selection: $selection,
-                                 onScreenModeChange: restartAfterResize)
-                    .id(attempt)
+                ObservedTerminal(model: model, feed: feed, attempt: model.attempt, fontSize: Float(fontSize),
+                                 desktopGrid: desktop, grid: $grid, selection: $selection,
+                                 onScreenModeChange: model.restartAfterResize)
+                    .id(model.attempt)
             }
             switch observer.phase {
-            case .connecting where desktop == nil:
+            case .connecting where model.desktop == nil:
                 ProgressView("正在连接…")
-            case .failed(let reason) where desktop == nil:
+            case .failed(let reason) where model.desktop == nil:
                 ContentUnavailableView {
                     Label("无法查看终端", systemImage: "exclamationmark.triangle")
                 } description: {
@@ -43,7 +43,7 @@ struct TerminalPane: View {
                     Button("重试", action: start)
                         .buttonStyle(.borderedProminent)
                 }
-            case .closed(let reason) where desktop == nil:
+            case .closed(let reason) where model.desktop == nil:
                 ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
             default:
                 EmptyView()
@@ -66,34 +66,22 @@ struct TerminalPane: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: copiedNotice)
-        .onChange(of: observer.phase) { _, phase in
-            guard case .observing(let cols, let rows) = phase else { return }
-            let size = TerminalGrid(cols: cols, rows: rows)
-            if desktop == nil {
-                desktop = size
-            } else if desktop != size {
-                // The program now draws for a new desktop width; take a fresh
-                // paint rather than mix grids.
-                restartAfterResize()
-            }
-        }
+        .onChange(of: observer.phase) { _, _ in model.phaseChanged() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, case .failed = observer.phase { start() }
         }
         // The surface's font is fixed when it is built, and bytes already
         // drawn would reflow; attach again for core's exact screen.
         .onChange(of: fontSize) { _, _ in start() }
-        .task { start() }
-        .onDisappear {
-            resizeRestart?.cancel()
-            observer.stop()
-        }
+        .onAppear { model.resume(config, session: session, fontSize: fontSize) }
+        // The stream stays open while the cache keeps the model.
+        .onDisappear { model.pause() }
     }
 
     /// When a terminal is already on screen, problems show below it instead of replacing it.
     @ViewBuilder
     private var banner: some View {
-        if desktop != nil {
+        if model.desktop != nil {
             Group {
                 switch observer.phase {
                 case .closed(let reason):
@@ -124,26 +112,102 @@ struct TerminalPane: View {
     }
 
     private func start() {
+        selection = nil
+        grid = nil
+        model.start(config, session: session, fontSize: fontSize)
+    }
+}
+
+/// One session's terminal stream and the surface drawing it. The session
+/// cache keeps it after the page leaves: the stream stays open and its bytes
+/// wait, and the surface shows its screen again at once when the page
+/// returns, then catches up.
+@MainActor @Observable
+final class TerminalModel {
+    let observer = TerminalObserver()
+    /// The current attach's bytes; nil before the first.
+    private(set) var feed: TerminalFeed?
+    /// Core's desktop grid, which the first paint is taken at.
+    private(set) var desktop: TerminalGrid?
+    /// Counts attaches; each draws on a surface of its own.
+    private(set) var attempt = 0
+
+    /// The surface for `attempt`, kept so a page coming back can show it.
+    @ObservationIgnored var surface: (attempt: Int, view: ObservedTerminalView)?
+    @ObservationIgnored private var target: (config: GatewayConfig, session: String, fontSize: Double)?
+    @ObservationIgnored private var resizeRestart: Task<Void, Never>?
+
+    /// A page opened: carry on from what is kept, or attach afresh when
+    /// nothing is, the stream failed, the font changed, the desktop grid
+    /// changed, or too much output piled up while away.
+    func resume(_ config: GatewayConfig, session: String, fontSize: Double) {
+        let failed = if case .failed = observer.phase { true } else { false }
+        let resized = if case .observing(let cols, let rows) = observer.phase, let desktop {
+            desktop != TerminalGrid(cols: cols, rows: rows)
+        } else { false }
+        guard let target, let feed, target.session == session, target.config == config,
+              target.fontSize == fontSize, !failed, !resized, !feed.overflowed else {
+            start(config, session: session, fontSize: fontSize)
+            return
+        }
+        feed.resume()
+    }
+
+    /// The page left; output waits in the feed until one comes back.
+    func pause() {
+        resizeRestart?.cancel()
+        guard surface?.view.hasShown == true else {
+            // Left during the first paint, which needs its page: attach
+            // afresh next time.
+            observer.stop()
+            feed = nil
+            desktop = nil
+            surface = nil
+            return
+        }
+        feed?.pause()
+    }
+
+    func start(_ config: GatewayConfig, session: String, fontSize: Double) {
+        resizeRestart?.cancel()
+        target = (config, session, fontSize)
         let feed = TerminalFeed()
         self.feed = feed
         desktop = nil
-        grid = nil
-        selection = nil
+        surface = nil
         attempt += 1
         observer.onBytes = { feed.receive($0) }
         observer.start(config, session: session)
     }
 
+    func stop() {
+        resizeRestart?.cancel()
+        observer.stop()
+        surface = nil
+    }
+
+    func phaseChanged() {
+        guard case .observing(let cols, let rows) = observer.phase else { return }
+        let size = TerminalGrid(cols: cols, rows: rows)
+        if desktop == nil {
+            desktop = size
+        } else if desktop != size {
+            // The program now draws for a new desktop width; take a fresh
+            // paint rather than mix grids.
+            restartAfterResize()
+        }
+    }
+
     /// Core now draws for another desktop width, or the program entered or
     /// left full screen; the screen held here was laid out for the old one. A
     /// fresh attach starts from core's exact screen and shows it the right way.
-    private func restartAfterResize() {
+    func restartAfterResize() {
         resizeRestart?.cancel()
-        resizeRestart = Task {
+        resizeRestart = Task { [weak self] in
             // Dragging a desktop split resizes many times; attach once it settles.
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            start()
+            guard !Task.isCancelled, let self, let target else { return }
+            start(target.config, session: target.session, fontSize: target.fontSize)
         }
     }
 }

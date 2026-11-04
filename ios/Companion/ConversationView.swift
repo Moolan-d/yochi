@@ -20,13 +20,25 @@ struct ConversationPane: View {
     /// Items arrived while the reader was further back.
     @State private var unseen = false
 
+    /// When the page opened, for the time to its first items.
+    @State private var opened = ContinuousClock.now
+
     private var working: Bool { status?.state == "working" }
 
     var body: some View {
-        if feed.items.isEmpty {
-            placeholder
-        } else {
-            list
+        Group {
+            if feed.items.isEmpty {
+                placeholder
+            } else {
+                list
+            }
+        }
+        .onAppear {
+            opened = .now
+            if !feed.items.isEmpty { Perf.shown("conversation", since: opened, cached: true) }
+        }
+        .onChange(of: feed.items.isEmpty) { _, empty in
+            if !empty { Perf.shown("conversation", since: opened, cached: false) }
         }
     }
 

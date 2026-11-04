@@ -19,6 +19,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        let _ = Perf.count("ContentView")
         NavigationStack(path: $path) {
             Group {
                 if let config {

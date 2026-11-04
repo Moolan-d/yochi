@@ -12,8 +12,10 @@ struct ObserveView: View {
     /// Opens another session on top of this one.
     var open: (Session) -> Void
 
-    @State private var conversation = ConversationFeed()
-    @State private var screen = ScreenFeed()
+    /// The page's streams, kept by the client's cache for a while after the
+    /// page leaves: coming back shows the last conversation and terminal at
+    /// once and carries on from there.
+    @State private var feeds: SessionFeeds
     @State private var grid: TerminalGrid?
     /// The page between the navigation bar and the bottom, keyboard excluded.
     @State private var pageHeight: CGFloat = 0
@@ -47,7 +49,12 @@ struct ObserveView: View {
         self.client = client
         self.open = open
         _draft = State(initialValue: AgentMessageStore.draft(host: config.host, session: session.id))
+        _feeds = State(initialValue: client.feedStore.feeds(host: config.host, session: session.id))
     }
+
+    private var conversation: ConversationFeed { feeds.conversation }
+    private var screen: ScreenFeed { feeds.screen }
+    private var cacheKey: String { SessionFeedStore.key(host: config.host, session: session.id) }
 
     private var currentSession: Session {
         client.sessions.first { $0.id == session.id } ?? session
@@ -120,6 +127,7 @@ struct ObserveView: View {
     }
 
     var body: some View {
+        let _ = Perf.count("ObserveView")
         Group {
             if isConversation {
                 ConversationPane(feed: conversation, status: currentSession.status,
@@ -127,7 +135,7 @@ struct ObserveView: View {
                     conversation.start(config, session: session.id)
                 }
             } else {
-                TerminalPane(session: session.id, config: config, grid: $grid)
+                TerminalPane(session: session.id, config: config, model: feeds.terminal, grid: $grid)
             }
         }
         // Tapping the conversation or the terminal puts the keyboard away, as
@@ -196,6 +204,10 @@ struct ObserveView: View {
             guard isClaudeCode else { return }
             screen.start(config, session: session.id)
         }
+        // The terminal gave way to the conversation; its stream ends.
+        .onChange(of: isConversation) { _, isConversation in
+            if isConversation { feeds.terminal.stop() }
+        }
         // A dialog card needs the room the keyboard takes. The composer can
         // take the keyboard back once sending enables it again, which can
         // be after the card appeared, so both moments count.
@@ -206,13 +218,16 @@ struct ObserveView: View {
                 conversation.start(config, session: session.id)
             }
         }
-        .task {
-            conversation.start(config, session: session.id)
-            if QuickCommand.isClaudeCode(session) { screen.start(config, session: session.id) }
+        .onAppear {
+            client.feedStore.cache.acquire(cacheKey, feeds)
+            // Kept streams carry on; the Gateway sends a kept conversation
+            // whole again on a new connection, which replaces it in place.
+            if conversation.needsStart { conversation.start(config, session: session.id) }
+            if QuickCommand.isClaudeCode(currentSession), screen.needsStart { screen.start(config, session: session.id) }
         }
         .onDisappear {
-            conversation.stop()
-            screen.stop()
+            // The streams stay open while the cache keeps them.
+            client.feedStore.cache.release(cacheKey, feeds)
         }
     }
 

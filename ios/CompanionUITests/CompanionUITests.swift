@@ -941,6 +941,83 @@ final class CompanionUITests: XCTestCase {
         unpair(app)
     }
 
+    /// Not a check: scrolls a terminal with live output for the app's frame
+    /// meter, which logs `frames scroll …` (scripts/perf-test.sh reads it).
+    @MainActor
+    func testPerfTerminalScroll() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+        let session = sessionCell(app, name: env("COMPANION_PERF_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no perf session")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        RunLoop.current.run(until: .now.addingTimeInterval(2))
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        for round in 0..<5 {
+            // Flicks back into history, then towards the bottom; each window
+            // ends two seconds after its last touch.
+            for _ in 0..<3 {
+                terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+                    .press(forDuration: 0.02, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)),
+                           withVelocity: .fast, thenHoldForDuration: 0)
+            }
+            for _ in 0..<2 {
+                terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+                    .press(forDuration: 0.02, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)),
+                           withVelocity: .fast, thenHoldForDuration: 0)
+            }
+            RunLoop.current.run(until: .now.addingTimeInterval(2.5))
+            snapshot("scroll \(round)")
+        }
+        leaveAndUnpair(app)
+    }
+
+    /// Not a check: opens a session, leaves it and opens it again soon after,
+    /// for the app's `shown …` log lines (scripts/perf-test.sh reads them).
+    @MainActor
+    func testPerfReenter() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+        let session = sessionCell(app, name: env("COMPANION_PERF_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no perf session")
+        for round in 0..<3 {
+            session.tap()
+            XCTAssert(app.descendants(matching: .any)["terminalGrid"].waitForExistence(timeout: 15))
+            RunLoop.current.run(until: .now.addingTimeInterval(0.25))
+            snapshot("terminal \(round)")
+            RunLoop.current.run(until: .now.addingTimeInterval(2.5))
+            app.navigationBars.buttons.firstMatch.tap()
+            XCTAssert(session.waitForExistence(timeout: 10))
+            RunLoop.current.run(until: .now.addingTimeInterval(3))
+        }
+        unpair(app)
+    }
+
+    /// The same for an Agent's conversation: an existing session, read only.
+    @MainActor
+    func testPerfReenterConversation() throws {
+        guard let id = ProcessInfo.processInfo.environment["COMPANION_CONVERSATION_SESSION"], !id.isEmpty else {
+            throw XCTSkip("COMPANION_CONVERSATION_SESSION is not set")
+        }
+        let app = launchUnpaired(observing: id)
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+        let agent = app.buttons.matching(identifier: "session-\(id)").firstMatch
+        for round in 0..<4 {
+            XCTAssert(app.scrollViews["conversation"].waitForExistence(timeout: 15), "no conversation")
+            RunLoop.current.run(until: .now.addingTimeInterval(0.25))
+            snapshot("conversation \(round)")
+            RunLoop.current.run(until: .now.addingTimeInterval(2.5))
+            app.navigationBars.buttons.firstMatch.tap()
+            XCTAssert(agent.waitForExistence(timeout: 10), "no row for the session")
+            RunLoop.current.run(until: .now.addingTimeInterval(3))
+            if round < 3 { agent.tap() }
+        }
+        unpair(app)
+    }
+
     // MARK: - Helpers
 
     @MainActor

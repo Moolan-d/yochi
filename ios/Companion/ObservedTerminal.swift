@@ -44,12 +44,22 @@ final class TerminalFeed {
     // Observing never types or resizes, so nothing flows back to the Gateway.
     let session = InMemoryTerminalSession(write: { _ in }, resize: { _ in })
     private var held: [Data] = []
+    private(set) var heldBytes = 0
     private(set) var isOpen = false
+    /// The page left: bytes wait here instead of reaching a surface that
+    /// draws nothing, until it comes back.
+    private(set) var isPaused = false
+    /// More output arrived while paused than is worth replaying; the page
+    /// attaches afresh instead.
+    private(set) var overflowed = false
+    static let pausedLimit = 4 << 20
     /// Whether any remote output has arrived; until then the caret means nothing.
     private(set) var hasOutput = false
     /// When the last bytes arrived, so the first paint's chunks can be told
     /// apart from the live output that follows.
     private(set) var lastReceiveAt: Date?
+    /// When this feed began, for the time to the first paint.
+    let created = ContinuousClock.now
 
     /// Whether the program is on the alternate screen, which is what a full
     /// screen TUI uses; such a screen cannot be reflowed without misplacing it.
@@ -63,7 +73,35 @@ final class TerminalFeed {
         hasOutput = true
         lastReceiveAt = Date()
         noteScreenMode(data)
-        if isOpen { session.receive(data) } else { held.append(data) }
+        if isOpen, !isPaused {
+            session.receive(data)
+            return
+        }
+        guard !overflowed else { return }
+        held.append(data)
+        heldBytes += data.count
+        if isPaused, heldBytes > Self.pausedLimit {
+            overflowed = true
+            held = []
+            heldBytes = 0
+        }
+    }
+
+    func pause() {
+        isPaused = true
+    }
+
+    /// The page is back: what arrived meanwhile goes to the surface.
+    func resume() {
+        guard isPaused else { return }
+        isPaused = false
+        if isOpen { flush() }
+    }
+
+    private func flush() {
+        held.forEach(session.receive)
+        held = []
+        heldBytes = 0
     }
 
     /// Follows the alternate-screen switches programs emit. The core's first
@@ -104,13 +142,16 @@ final class TerminalFeed {
     func open() {
         guard !isOpen else { return }
         isOpen = true
-        held.forEach(session.receive)
-        held = []
+        if !isPaused { flush() }
     }
 }
 
 struct ObservedTerminal: UIViewRepresentable {
+    /// Keeps the surface, so a page coming back shows it again.
+    let model: TerminalModel
     let feed: TerminalFeed
+    /// The attach this surface draws.
+    let attempt: Int
     let fontSize: Float
     /// Core paints at the desktop grid; the surface starts there so the first
     /// paint lands on the rows and columns it was drawn for.
@@ -124,7 +165,19 @@ struct ObservedTerminal: UIViewRepresentable {
     var onScreenModeChange: () -> Void = {}
 
     func makeUIView(context: Context) -> ObservedTerminalView {
+        // The kept surface, unless another page still shows it.
+        if let kept = model.surface, kept.attempt == attempt, kept.view.window == nil {
+            kept.view.removeFromSuperview()
+            updateUIView(kept.view, context: context)
+            kept.view.reportGridAgain()
+            // From the page asking for its terminal to the frame that shows
+            // the kept screen.
+            let start = ContinuousClock.now
+            DispatchQueue.main.async { Perf.shown("terminal", since: start, cached: true) }
+            return kept.view
+        }
         let view = ObservedTerminalView(feed: feed, fontSize: fontSize, desktopGrid: desktopGrid)
+        model.surface = (attempt, view)
         updateUIView(view, context: context)
         return view
     }
@@ -159,6 +212,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
 
     /// True until the first paint is taken and shown.
     private var preparing = true
+    var hasShown: Bool { !preparing }
     private var paintStarted = false
     /// Whether the screen is shown as the desktop drew it (a full-screen
     /// program), decided by the first paint.
@@ -196,6 +250,10 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         }
         terminal.alpha = 0
         zoom.addSubview(terminal)
+
+        #if DEBUG
+        terminal.addGestureRecognizer(TouchWatcher { FrameMeter.shared.touch() })
+        #endif
 
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
@@ -272,6 +330,13 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         report(size)
     }
 
+    /// A page showing this surface again has no grid in its title yet.
+    func reportGridAgain() {
+        guard let lastGrid else { return }
+        let report = onGridChange
+        DispatchQueue.main.async { report?(lastGrid) }
+    }
+
     private func report(_ size: TerminalGridMetrics) {
         let grid = TerminalGrid(cols: Int(size.columns), rows: Int(size.rows))
         guard grid != lastGrid else { return }
@@ -344,6 +409,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
 
     private func reveal() {
         preparing = false
+        Perf.shown("terminal", since: feed.created, cached: false)
         UIView.animate(withDuration: 0.15) { self.terminal.alpha = 1 }
         if let pendingMetrics { report(pendingMetrics) }
         // A switch during the first paint came before the screen was chosen.

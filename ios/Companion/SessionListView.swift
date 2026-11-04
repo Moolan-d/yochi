@@ -8,6 +8,7 @@ struct SessionListView: View {
     var newSession: () -> Void
 
     var body: some View {
+        let _ = Perf.count("SessionListView")
         HomeList(
             home: makeHome(sessions: client.sessions, spaces: client.spaces, seen: seen.turns),
             queued: { client.queuedMessage(session: $0) != nil },
@@ -133,6 +134,7 @@ struct HomeList<Banner: View>: View {
     }
 
     var body: some View {
+        let _ = Perf.count("HomeList")
         List {
             banner
             if searching {
@@ -207,6 +209,7 @@ struct HomeList<Banner: View>: View {
                 TerminalRow(row: row, awayFromSpace: awayFromSpace)
             }
         }
+        .accessibilityIdentifier("session-\(row.id)")
     }
 
     private func terminalsToggle(_ group: HomeGroup) -> some View {
