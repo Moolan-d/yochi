@@ -157,7 +157,14 @@ pub struct Relay {
 
 /// Keeps a connection to the configured relay, redialling when it drops and
 /// picking up `relay.json` changes. Without a configuration it waits for one.
+/// rustls panics on the first `wss://` connection unless a crypto backend is
+/// chosen; tokio-tungstenite leaves that to the program.
+pub fn install_tls() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub async fn run(relay: Arc<Relay>) {
+    install_tls();
     let dir = relay.store.dir().to_owned();
     let mut backoff = Duration::from_secs(1);
     loop {
@@ -529,6 +536,14 @@ pub fn enrollment(store: &Store, device: &str, static_key: &str) -> Result<serde
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_secure_relay_can_be_reached() {
+        super::install_tls();
+        // The builder is what panics without a backend.
+        let roots = rustls::RootCertStore::empty();
+        let _ = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+    }
+
     use super::*;
 
     #[test]

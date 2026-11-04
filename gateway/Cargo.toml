@@ -17,6 +17,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io
 vt100 = "0.18.1"
 hyper-util = { version = "0.1.21", features = ["server", "http1", "tokio", "service"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+# tokio-tungstenite leaves rustls without a crypto backend; wss:// needs one.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink"] }
 snow = "0.10.0"
 hyper = { version = "1", features = ["server", "http1"] }
