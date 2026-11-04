@@ -174,4 +174,36 @@ final class ConversationTests: XCTestCase {
         let longer = first + "\n- three"
         XCTAssertEqual(MarkdownBlock.cachedParse(longer).count, 4)
     }
+
+    /// A reply that comes in while following is revealed from what was
+    /// there; the whole conversation, sent again, reveals nothing.
+    func testLiveRepliesAreRevealedFromWhatWasThere() throws {
+        let feed = ConversationFeed()
+        feed.apply(try decode(#"{"type":"conversation","supported":true,"items":[{"kind":"agent","id":"a1","text":"old"}]}"#))
+        XCTAssertTrue(feed.arrivals.isEmpty)
+        feed.apply(try decode(#"{"type":"items","items":[{"kind":"agent","id":"a2","text":"new"},{"kind":"tool","id":"t1","name":"Bash"}]}"#))
+        XCTAssertEqual(feed.arrivals.keys.sorted(), ["a2"])
+        XCTAssertNil(feed.arrivals["a2"]?.previous)
+        feed.apply(try decode(#"{"type":"items","items":[{"kind":"agent","id":"a1","text":"old and more"}]}"#))
+        XCTAssertEqual(feed.arrivals["a1"]?.previous, "old")
+        feed.apply(try decode(#"{"type":"conversation","supported":true,"items":[{"kind":"agent","id":"a3","text":"x"}]}"#))
+        XCTAssertTrue(feed.arrivals.isEmpty)
+    }
+
+    /// Part-way through, whole blocks come first and then the start of the
+    /// next, with its styles; a table shows whole.
+    func testMarkdownRevealsBlockByBlock() throws {
+        let blocks = MarkdownBlock.parse("# Title\n\nSome **bold** words\n\n| a | b |\n|---|---|\n| 1 | 2 |")
+        XCTAssertEqual(MarkdownBlock.revealLength(of: blocks), 5 + 15 + 1)
+        XCTAssertEqual(MarkdownBlock.revealed(blocks, upTo: 3).map(\.text), ["Tit"])
+        let part = MarkdownBlock.revealed(blocks, upTo: 5 + 7)
+        XCTAssertEqual(part.map(\.text), ["Title", "Some bo"])
+        XCTAssertEqual(part[1].content.runs.last?.inlinePresentationIntent, .stronglyEmphasized)
+        XCTAssertEqual(MarkdownBlock.revealed(blocks, upTo: 21), blocks)
+
+        let reveal = Reveal(text: "Some **bold** words", arrival: Arrival(previous: "Some", at: .distantPast))
+        XCTAssertEqual(reveal.from, 4)
+        XCTAssertEqual(reveal.shown(at: .distantPast), 4)
+        XCTAssertEqual(reveal.shown(at: .now), 15)
+    }
 }

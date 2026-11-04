@@ -956,6 +956,44 @@ final class CompanionUITests: XCTestCase {
         unpair(app)
     }
 
+    /// The DEBUG long sample: forty long turns, then a reply every four
+    /// seconds. Back to latest from far up lands on the real end, never past
+    /// it on a blank page, and new replies keep the list at the end.
+    @MainActor
+    func testConversationSampleBackToLatest() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["COMPANION_SAMPLE_CONVERSATION"] = "long"
+        app.launch()
+        let conversation = app.scrollViews["conversation"]
+        XCTAssert(conversation.waitForExistence(timeout: 10), "no conversation")
+        let latest = app.buttons["scrollToLatest"]
+
+        func showsText() -> Bool {
+            conversation.staticTexts.allElementsBoundByIndex.contains {
+                $0.isHittable && conversation.frame.intersects($0.frame)
+            }
+        }
+
+        for (round, flicks) in [2, 6, 12].enumerated() {
+            for _ in 0..<flicks { conversation.swipeDown(velocity: .fast) }
+            XCTAssert(latest.waitForExistence(timeout: 3), "no back-to-latest after reading back")
+            // The flicks may still be gliding: a tap then only stops them.
+            RunLoop.current.run(until: .now.addingTimeInterval(1.5))
+            latest.tap()
+            XCTAssert(latest.waitForNonExistence(timeout: 3), "round \(round): back-to-latest did not reach the end")
+            RunLoop.current.run(until: .now.addingTimeInterval(0.5))
+            XCTAssert(showsText(), "round \(round): blank after back to latest")
+            snapshot("latest \(round)")
+        }
+
+        // The last reply arrives and is revealed with the list at its end.
+        XCTAssert(text(app, containing: "第 46 段回复").waitForExistence(timeout: 30), "the last reply never came")
+        RunLoop.current.run(until: .now.addingTimeInterval(3))
+        XCTAssertFalse(latest.exists, "left behind by an arriving reply")
+        XCTAssert(showsText(), "blank after replies arrived")
+        snapshot("latest after replies")
+    }
+
     /// Not a check: scrolls a terminal with live output for the app's frame
     /// meter, which logs `frames scroll …` (scripts/perf-test.sh reads it).
     @MainActor
