@@ -53,7 +53,7 @@ struct ContentView: View {
                         invite = nil
                         self.config = config
                     }
-                    .navigationTitle("Companion")
+                    .navigationTitle("Yochi")
                 }
             }
         }
@@ -84,7 +84,7 @@ struct ContentView: View {
             if let config { client.connect(config) }
         }
         #if DEBUG
-        // `simctl launch` can pair without tapping: SIMCTL_CHILD_COMPANION_PAIR=companion://pair?….
+        // `simctl launch` can pair without tapping: SIMCTL_CHILD_COMPANION_PAIR=yochi://pair?….
         .task {
             guard config == nil, let raw = ProcessInfo.processInfo.environment["COMPANION_PAIR"],
                   let url = URL(string: raw), let opened = PairingInvite(url: url) else { return }
@@ -173,7 +173,7 @@ struct PairingView: View {
             } header: {
                 Text("Gateway")
             } footer: {
-                Text("在主 Mac 上运行 companion-gateway pair，用相机扫描显示的二维码，或在此填写地址和配对码。")
+                Text("在主 Mac 上运行 yochi pair，用相机扫描显示的二维码，或在此填写地址和配对码。")
             }
             Section {
                 if let error {
@@ -241,13 +241,13 @@ struct GatewaySettingsView: View {
                         LabeledContent("设备 ID", value: device)
                             .textSelection(.enabled)
                     } footer: {
-                        Text("在主 Mac 上运行 companion-gateway devices 可查看所有已配对的设备。")
+                        Text("在主 Mac 上运行 yochi devices 可查看所有已配对的设备。")
                     }
                 }
                 Section {
                     Button("取消配对", role: .destructive) { confirmingForget = true }
                 } footer: {
-                    Text("此 iPhone 将删除与该 Gateway 的配对。已连接时 Gateway 会同时移除这台设备，否则请在主 Mac 上运行 companion-gateway revoke。")
+                    Text("此 iPhone 将删除与该 Gateway 的配对。已连接时 Gateway 会同时移除这台设备，否则请在主 Mac 上运行 yochi revoke。")
                 }
             }
             .navigationTitle("设置")
@@ -264,7 +264,7 @@ struct GatewaySettingsView: View {
                 }
                 Button("保留配对") {}
             } message: {
-                Text("之后需要在主 Mac 上重新运行 companion-gateway pair 才能再次连接。")
+                Text("之后需要在主 Mac 上重新运行 yochi pair 才能再次连接。")
             }
         }
     }

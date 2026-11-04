@@ -8,7 +8,7 @@ struct GatewayConfig: Equatable {
 
     var host: String
     var token: String
-    /// The Gateway's ID for this device, as `companion-gateway devices` lists it.
+    /// The Gateway's ID for this device, as `yochi devices` lists it.
     var device: String?
 
     var url: URL? {

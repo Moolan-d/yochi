@@ -10,7 +10,7 @@
 //! - `/v0/screen?session=<id>` sends one terminal's screen as styled text while
 //!   its Agent isn't working, for the app to find dialogs in (ADR 0005).
 //!
-//! Unpairing a device (by itself or with `companion-gateway revoke`) closes its connections.
+//! Unpairing a device (by itself or with `yochi revoke`) closes its connections.
 
 use crate::about::{self, About};
 use crate::agent;
@@ -159,7 +159,7 @@ enum AppMessage {
 pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Receiver<CoreView>) -> Result<()> {
     let devices = store.devices()?;
     if devices.is_empty() {
-        eprintln!("No paired devices yet; pair a phone with `companion-gateway pair`.");
+        eprintln!("No paired devices yet; pair a phone with `yochi pair`.");
     }
     let store = Arc::new(store);
     let devices = Arc::new(watch::Sender::new(devices));
@@ -187,7 +187,7 @@ pub async fn serve(listen: SocketAddr, store: Store, hc: String, view: watch::Re
     Ok(())
 }
 
-/// Picks up `companion-gateway revoke` (and anything else that rewrites the state file).
+/// Picks up `yochi revoke` (and anything else that rewrites the state file).
 async fn reload_devices(store: Arc<Store>, devices: Arc<watch::Sender<Vec<Device>>>) {
     let modified = || std::fs::metadata(store.path()).and_then(|meta| meta.modified()).ok();
     let mut seen: Option<SystemTime> = modified();

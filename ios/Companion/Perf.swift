@@ -4,10 +4,10 @@ import UIKit
 
 /// Performance marks: signposts for Instruments (Points of Interest) and, in
 /// debug builds, a log line per measured window that the perf UI tests read
-/// with `log stream --predicate 'subsystem == "dev.companion.perf"'`.
+/// with `log stream --predicate 'subsystem == "dev.yochi.perf"'`.
 enum Perf {
-    static let log = Logger(subsystem: "dev.companion.perf", category: "perf")
-    static let signposter = OSSignposter(subsystem: "dev.companion.perf", category: .pointsOfInterest)
+    static let log = Logger(subsystem: "dev.yochi.perf", category: "perf")
+    static let signposter = OSSignposter(subsystem: "dev.yochi.perf", category: .pointsOfInterest)
 
     /// Counts a body evaluation (or any event) for the window the frame meter
     /// is measuring. Debug only; `let _ = Perf.count("…")` inside a body.

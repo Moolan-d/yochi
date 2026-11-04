@@ -373,7 +373,7 @@ final class GatewayClient {
     }
 
     /// Asks the Gateway to forget this device, then disconnects. Only possible
-    /// while connected; otherwise `companion-gateway revoke` cleans up.
+    /// while connected; otherwise `yochi revoke` cleans up.
     func unpair() async {
         if phase == .connected, let socket {
             try? await socket.send(.string(#"{"type":"unpair"}"#))

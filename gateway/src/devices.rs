@@ -49,15 +49,31 @@ struct State {
     offer: Option<Offer>,
 }
 
+fn resolve_dir(home: &std::path::Path, legacy_agent: bool) -> Result<PathBuf> {
+    let dir = home.join("Library/Application Support/Yochi");
+    let legacy = home.join("Library/Application Support/Companion Gateway");
+    if !dir.exists() && legacy.is_dir() {
+        if legacy_agent {
+            return Ok(legacy);
+        }
+        fs::rename(&legacy, &dir).with_context(|| format!("moving {} to {}", legacy.display(), dir.display()))?;
+    }
+    Ok(dir)
+}
+
 pub struct Store {
     dir: PathBuf,
 }
 
 impl Store {
-    /// `~/Library/Application Support/Companion Gateway`.
+    /// `~/Library/Application Support/Yochi`. Pairings kept under the
+    /// codename's old directory move here, unless the old LaunchAgent is still
+    /// installed: that Gateway keeps writing there until `service install`
+    /// replaces it.
     pub fn default_dir() -> Result<PathBuf> {
-        let home = std::env::var_os("HOME").context("HOME is not set")?;
-        Ok(PathBuf::from(home).join("Library/Application Support/Companion Gateway"))
+        let home = PathBuf::from(std::env::var_os("HOME").context("HOME is not set")?);
+        let legacy_agent = crate::service::plist_path(crate::service::LEGACY_LABEL)?.exists();
+        resolve_dir(&home, legacy_agent)
     }
 
     pub fn open(dir: PathBuf) -> Result<Self> {
@@ -198,6 +214,23 @@ mod tests {
     fn store() -> Store {
         let dir = std::env::temp_dir().join(format!("companion-devices-{}", hex(&random_bytes::<6>().unwrap())));
         Store::open(dir).unwrap()
+    }
+
+    #[test]
+    fn pairings_move_from_the_old_directory_once_its_agent_is_gone() {
+        let home = std::env::temp_dir().join(format!("companion-home-{}", hex(&random_bytes::<6>().unwrap())));
+        let legacy = home.join("Library/Application Support/Companion Gateway");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("state.json"), "{}").unwrap();
+
+        assert_eq!(resolve_dir(&home, true).unwrap(), legacy);
+        let dir = resolve_dir(&home, false).unwrap();
+        assert_eq!(dir, home.join("Library/Application Support/Yochi"));
+        assert!(dir.join("state.json").exists());
+        assert!(!legacy.exists());
+        // Once moved, a reinstalled old agent no longer pulls it back.
+        assert_eq!(resolve_dir(&home, true).unwrap(), dir);
+        fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

@@ -30,9 +30,11 @@ BUNDLE_ID_SUFFIX = .yourname
 
 ```sh
 cargo install --path gateway        # 装到 ~/.cargo/bin，不随 cargo build 变化
-companion-gateway service install   # 写入 ~/Library/LaunchAgents/dev.companion.gateway.plist 并启动
-companion-gateway service status    # 是否在运行、监听地址、日志位置
-companion-gateway service uninstall
+yochi service install               # 写入 ~/Library/LaunchAgents/dev.yochi.gateway.plist 并启动
+yochi service status                # 是否在运行、监听地址、日志位置
+yochi service uninstall
 ```
 
-安装时会记下当前 `hc` 和 `tailscale` 的绝对路径（launchd 不继承 shell 的 PATH），以及显式传入的 `--listen`、`--state-dir`。日志在 `~/Library/Logs/Companion Gateway/gateway.log`。已有 Gateway 占着端口时安装会拒绝，先停掉它。
+安装时会记下当前 `hc` 和 `tailscale` 的绝对路径（launchd 不继承 shell 的 PATH），以及显式传入的 `--listen`、`--state-dir`。日志在 `~/Library/Logs/Yochi/gateway.log`。已有 Gateway 占着端口时安装会拒绝，先停掉它。
+
+从改名前的版本（`companion-gateway`）升级：`yochi service install` 会先停掉并移除旧的 `dev.companion.gateway`，配对记录随后从 `~/Library/Application Support/Companion Gateway` 迁到 `~/Library/Application Support/Yochi`。iOS 的 bundle ID 也改成了 `dev.yochi.app`，手机上会装成一个新 App，需要重新配对，旧 App 可以删掉。

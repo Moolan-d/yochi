@@ -1,8 +1,8 @@
 import Foundation
 import UIKit
 
-/// What `companion-gateway pair` shows: the Gateway's address and a single-use
-/// code, typed in or opened from its QR code (`companion://pair?host=…&code=…`).
+/// What `yochi pair` shows: the Gateway's address and a single-use
+/// code, typed in or opened from its QR code (`yochi://pair?host=…&code=…`).
 struct PairingInvite: Equatable {
     var host: String
     var code: String
@@ -13,7 +13,7 @@ struct PairingInvite: Equatable {
     }
 
     init?(url: URL) {
-        guard url.scheme == "companion", url.host() == "pair",
+        guard url.scheme == "yochi", url.host() == "pair",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
               let host = items.first(where: { $0.name == "host" })?.value, !host.isEmpty,
               let code = items.first(where: { $0.name == "code" })?.value, !code.isEmpty
@@ -62,7 +62,7 @@ enum PairingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .badAddress: "地址无效"
-        case .rejected: "配对码不正确或已过期。请在主 Mac 上重新运行 companion-gateway pair。"
+        case .rejected: "配对码不正确或已过期。请在主 Mac 上重新运行 yochi pair。"
         case .unexpected: "Gateway 返回了无法识别的响应"
         }
     }

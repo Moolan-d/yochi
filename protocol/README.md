@@ -12,7 +12,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 
 ### 配对（Device Pairing）
 
-`ws://<host>:7420/v0/pair`，不需要认证。配对码由主 Mac 上的 `companion-gateway pair` 生成：8 位，5 分钟内有效，单次使用，输错 5 次即作废。生成时同时显示二维码 `companion://pair?host=<host:port>&code=<code>`。比对配对码时不区分大小写，忽略 `-` 和空格，并把 O 视为 0、I 和 L 视为 1。
+`ws://<host>:7420/v0/pair`，不需要认证。配对码由主 Mac 上的 `yochi pair` 生成：8 位，5 分钟内有效，单次使用，输错 5 次即作废。生成时同时显示二维码 `yochi://pair?host=<host:port>&code=<code>`。比对配对码时不区分大小写，忽略 `-` 和空格，并把 O 视为 0、I 和 L 视为 1。
 
 ```jsonc
 // App → Gateway，连接后 10 秒内发送

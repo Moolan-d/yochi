@@ -26,22 +26,22 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(version, about = "Companion Gateway: serves herdr-core sessions to the Companion App over the tailnet")]
+#[command(version, about = "Yochi: serves herdr-core sessions to the Yochi iPhone app over the tailnet")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
 
     /// Address to listen on (and to give phones when pairing). Defaults to this
     /// Mac's tailnet IPv4, port 7420.
-    #[arg(long, global = true, env = "COMPANION_LISTEN")]
+    #[arg(long, global = true, env = "YOCHI_LISTEN")]
     listen: Option<SocketAddr>,
 
-    /// Where paired devices are kept. Defaults to ~/Library/Application Support/Companion Gateway.
-    #[arg(long, global = true, env = "COMPANION_STATE_DIR")]
+    /// Where paired devices are kept. Defaults to ~/Library/Application Support/Yochi.
+    #[arg(long, global = true, env = "YOCHI_STATE_DIR")]
     state_dir: Option<PathBuf>,
 
     /// The hc binary used to reach the local herdr-core.
-    #[arg(long, global = true, env = "COMPANION_HC", default_value = "hc")]
+    #[arg(long, global = true, env = "YOCHI_HC", default_value = "hc")]
     hc: String,
 }
 
@@ -100,11 +100,14 @@ async fn main() -> Result<()> {
                 println!("Unpaired {} ({}). Its open connections close within seconds.", device.name, device.id);
                 Ok(())
             }
-            None => bail!("no paired device {id:?}; see `companion-gateway devices`"),
+            None => bail!("no paired device {id:?}; see `yochi devices`"),
         },
         Command::Service { action, label } => match action {
             ServiceAction::Install => install(&label, args.listen, args.state_dir, &args.hc).await,
             ServiceAction::Uninstall => {
+                if label == service::LABEL && service::uninstall(service::LEGACY_LABEL)? {
+                    println!("Stopped and removed the old LaunchAgent {}.", service::LEGACY_LABEL);
+                }
                 if service::uninstall(&label)? {
                     println!("Stopped and removed the LaunchAgent {label}.");
                 } else {
@@ -128,6 +131,16 @@ async fn install(label: &str, listen: Option<SocketAddr>, state_dir: Option<Path
         log: service::default_log()?,
     };
     let addr = listen_addr(listen).await?;
+    if label == service::LABEL && service::uninstall(service::LEGACY_LABEL)? {
+        println!("Stopped and removed the old LaunchAgent {}.", service::LEGACY_LABEL);
+        // bootout returns before the old Gateway lets go of the port.
+        for _ in 0..20 {
+            if !answering(addr).await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
     // The LaunchAgent would only crash-loop on a port another Gateway holds.
     if service::status(label)?.running.is_none() && answering(addr).await {
         bail!("a Gateway is already listening at {addr}; stop it first, then install");
@@ -151,7 +164,7 @@ async fn install(label: &str, listen: Option<SocketAddr>, state_dir: Option<Path
 async fn status(label: &str, listen: Option<SocketAddr>) -> Result<()> {
     let status = service::status(label)?;
     let Some(plist) = status.plist else {
-        println!("The LaunchAgent {label} is not installed; `companion-gateway service install` installs it.");
+        println!("The LaunchAgent {label} is not installed; `yochi service install` installs it.");
         return Ok(());
     };
     println!("Installed  {}", plist.display());
@@ -177,19 +190,19 @@ async fn answering(addr: SocketAddr) -> bool {
 
 async fn pair(store: &Store, listen: SocketAddr) -> Result<()> {
     if !answering(listen).await {
-        eprintln!("Note: no Gateway is answering at {listen}; start it (`companion-gateway`) before the phone pairs.\n");
+        eprintln!("Note: no Gateway is answering at {listen}; start it (`yochi`) before the phone pairs.\n");
     }
     let before: HashSet<String> = store.devices()?.into_iter().map(|device| device.id).collect();
     let code = store.offer()?;
-    let invite = format!("companion://pair?host={listen}&code={code}");
+    let invite = format!("yochi://pair?host={listen}&code={code}");
 
     println!("{}", qr(&invite)?);
-    println!("Scan with the iPhone camera, or enter these in Companion:");
+    println!("Scan with the iPhone camera, or enter these in Yochi:");
     println!("  Address  {listen}");
     println!("  Code     {}\n", devices::display_code(&code));
     println!("A paired phone can watch and type into every session this Gateway serves,");
     println!("which means running anything your account can on this Mac and its machines.");
-    println!("Unpair later with `companion-gateway revoke <id>`.\n");
+    println!("Unpair later with `yochi revoke <id>`.\n");
     println!("Waiting up to {} minutes…", devices::OFFER_TTL.as_secs() / 60);
 
     loop {
@@ -205,7 +218,7 @@ async fn pair(store: &Store, listen: SocketAddr) -> Result<()> {
             return Ok(());
         }
         if !store.offer_pending()? {
-            bail!("the code expired or took too many wrong attempts; run `companion-gateway pair` again");
+            bail!("the code expired or took too many wrong attempts; run `yochi pair` again");
         }
     }
 }
@@ -234,7 +247,7 @@ fn qr(text: &str) -> Result<String> {
 
 fn list(devices: &[Device]) {
     if devices.is_empty() {
-        println!("No paired devices. Pair one with `companion-gateway pair`.");
+        println!("No paired devices. Pair one with `yochi pair`.");
         return;
     }
     let width = devices.iter().map(|device| device.name.chars().count()).max().unwrap_or(0).max(4);

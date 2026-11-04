@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-pub const LABEL: &str = "dev.companion.gateway";
+pub const LABEL: &str = "dev.yochi.gateway";
+/// The LaunchAgent installed before the rename; installing or uninstalling the
+/// default agent removes it too.
+pub const LEGACY_LABEL: &str = "dev.companion.gateway";
 /// Seconds launchd waits before starting the Gateway again after it exits.
 const RETRY_INTERVAL: u32 = 10;
 
@@ -29,12 +32,12 @@ impl Agent {
             "PATH",
             format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.tailscale.parent().unwrap_or(Path::new("/")).display()),
         )];
-        env.push(("COMPANION_HC", self.hc.display().to_string()));
+        env.push(("YOCHI_HC", self.hc.display().to_string()));
         if let Some(listen) = self.listen {
-            env.push(("COMPANION_LISTEN", listen.to_string()));
+            env.push(("YOCHI_LISTEN", listen.to_string()));
         }
         if let Some(dir) = &self.state_dir {
-            env.push(("COMPANION_STATE_DIR", dir.display().to_string()));
+            env.push(("YOCHI_STATE_DIR", dir.display().to_string()));
         }
         let env: String = env
             .iter()
@@ -84,7 +87,7 @@ pub fn plist_path(label: &str) -> Result<PathBuf> {
 }
 
 pub fn default_log() -> Result<PathBuf> {
-    Ok(home()?.join("Library/Logs/Companion Gateway/gateway.log"))
+    Ok(home()?.join("Library/Logs/Yochi/gateway.log"))
 }
 
 fn home() -> Result<PathBuf> {
@@ -190,23 +193,23 @@ mod tests {
     fn agent() -> Agent {
         Agent {
             label: LABEL.into(),
-            exe: "/opt/demo/.cargo/bin/companion-gateway".into(),
+            exe: "/opt/demo/.cargo/bin/yochi".into(),
             hc: "/opt/demo/.local/bin/hc".into(),
             tailscale: "/usr/local/bin/tailscale".into(),
             listen: None,
             state_dir: None,
-            log: "/opt/demo/Library/Logs/Companion Gateway/gateway.log".into(),
+            log: "/opt/demo/Library/Logs/Yochi/gateway.log".into(),
         }
     }
 
     #[test]
     fn the_plist_carries_what_launchd_does_not() {
         let plist = agent().plist();
-        assert!(plist.contains("<string>/opt/demo/.cargo/bin/companion-gateway</string>\n\t\t<string>serve</string>"));
+        assert!(plist.contains("<string>/opt/demo/.cargo/bin/yochi</string>\n\t\t<string>serve</string>"));
         assert!(plist.contains("<key>PATH</key>\n\t\t<string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>"));
-        assert!(plist.contains("<key>COMPANION_HC</key>\n\t\t<string>/opt/demo/.local/bin/hc</string>"));
-        assert!(!plist.contains("COMPANION_LISTEN"));
-        assert!(!plist.contains("COMPANION_STATE_DIR"));
+        assert!(plist.contains("<key>YOCHI_HC</key>\n\t\t<string>/opt/demo/.local/bin/hc</string>"));
+        assert!(!plist.contains("YOCHI_LISTEN"));
+        assert!(!plist.contains("YOCHI_STATE_DIR"));
         assert!(plist.contains("<key>KeepAlive</key>\n\t<true/>"));
     }
 
@@ -218,7 +221,7 @@ mod tests {
             ..agent()
         }
         .plist();
-        assert!(plist.contains("<key>COMPANION_LISTEN</key>\n\t\t<string>100.64.0.1:7422</string>"));
+        assert!(plist.contains("<key>YOCHI_LISTEN</key>\n\t\t<string>100.64.0.1:7422</string>"));
         assert!(plist.contains("<string>/tmp/a&amp;b&lt;c&gt;</string>"));
     }
 }

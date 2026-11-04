@@ -177,7 +177,7 @@ final class CompanionUITests: XCTestCase {
         waitUntilPaired(app)
 
         // Through the system, as a scanned QR code would (`app.open` relaunches the app).
-        XCUIDevice.shared.system.open(URL(string: "companion://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
+        XCUIDevice.shared.system.open(URL(string: "yochi://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
         // iOS may first ask whether to open the link in Companion.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let open = springboard.buttons.matching(NSPredicate(format: "label IN {'打开', 'Open'}")).firstMatch
@@ -185,7 +185,7 @@ final class CompanionUITests: XCTestCase {
         app.buttons["保留当前配对"].tap()
         XCTAssert(app.buttons["设置"].waitForExistence(timeout: 5), "keeping the pairing dropped it")
         XCTAssert(app.cells.buttons.firstMatch.exists, "sessions gone after keeping the pairing")
-        XCUIDevice.shared.system.open(URL(string: "companion://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
+        XCUIDevice.shared.system.open(URL(string: "yochi://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
         waitForReplacePrompt(app, open: open)
         snapshot("1 replace prompt")
         confirm(app, "配对新的 Gateway")

@@ -10,7 +10,7 @@ SIM=${SIM:-iPhone 17 Pro}
 sim_id=$(xcrun simctl list devices available | grep -m1 "    $SIM (" | grep -oE '[0-9A-F-]{36}') || {
     echo "no simulator named $SIM" >&2; exit 1; }
 DESTINATION="id=$sim_id"
-GATEWAY=../gateway/target/debug/companion-gateway
+GATEWAY=../gateway/target/debug/yochi
 RESULTS=build/ui-test-results
 SHOTS=build/ui-test-shots
 
@@ -18,8 +18,8 @@ SHOTS=build/ui-test-shots
 xcodegen generate -q
 
 state=$(mktemp -d)
-export COMPANION_STATE_DIR="$state"
-export COMPANION_LISTEN="$(tailscale ip -4 | head -1):7421"
+export YOCHI_STATE_DIR="$state"
+export YOCHI_LISTEN="$(tailscale ip -4 | head -1):7421"
 "$GATEWAY" > "$state/gateway.log" 2>&1 &
 gateway=$!
 pairing=
@@ -156,7 +156,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         extra="TEST_RUNNER_COMPANION_PICKER_SESSION_NAME=companion-uitest-picker"
     fi
     env $extra \
-        TEST_RUNNER_COMPANION_HOST="$COMPANION_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
+        TEST_RUNNER_COMPANION_HOST="$YOCHI_LISTEN" TEST_RUNNER_COMPANION_CODE="$code" \
         TEST_RUNNER_COMPANION_SESSION="$test_session" \
         xcodebuild -project Companion.xcodeproj -scheme Companion -destination "$DESTINATION" \
         -derivedDataPath build -quiet test-without-building \

@@ -1,6 +1,6 @@
 name: Companion
 options:
-  bundleIdPrefix: dev.companion
+  bundleIdPrefix: dev.yochi
   deploymentTarget:
     iOS: "18.0"
 settings:
@@ -32,14 +32,14 @@ targets:
         # scrolling.
         CADisableMinimumFrameDurationOnPhone: true
         CFBundleURLTypes:
-          # `companion://pair?…` from the QR code `companion-gateway pair` shows.
-          - CFBundleURLName: dev.companion.app
-            CFBundleURLSchemes: [companion]
+          # `yochi://pair?…` from the QR code `yochi pair` shows.
+          - CFBundleURLName: dev.yochi.app
+            CFBundleURLSchemes: [yochi]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.companion.app$(BUNDLE_ID_SUFFIX)
-        # Home-screen name; the project, bundle ID and URL scheme stay "companion".
-        INFOPLIST_KEY_CFBundleDisplayName: Hau
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yochi.app$(BUNDLE_ID_SUFFIX)
+        # Home-screen name; the Xcode project and targets keep the codename "Companion".
+        INFOPLIST_KEY_CFBundleDisplayName: Yochi
         INFOPLIST_KEY_NSCameraUsageDescription: 拍照发给 Agent。
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
@@ -66,7 +66,7 @@ targets:
       - target: Companion
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.companion.tests$(BUNDLE_ID_SUFFIX)
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yochi.tests$(BUNDLE_ID_SUFFIX)
         GENERATE_INFOPLIST_FILE: YES
   CompanionUITests:
     # Run through scripts/ui-test.sh, which starts a throwaway Gateway.
@@ -80,6 +80,6 @@ targets:
       - target: Companion
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.companion.uitests$(BUNDLE_ID_SUFFIX)
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yochi.uitests$(BUNDLE_ID_SUFFIX)
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"

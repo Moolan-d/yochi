@@ -13,7 +13,7 @@ mkdir -p build
 SIM=${SIM:-iPhone 17 Pro}
 sim_id=$(xcrun simctl list devices available | grep -m1 "    $SIM (" | grep -oE '[0-9A-F-]{36}')
 xcrun simctl spawn "$sim_id" log stream --style compact --level info \
-    --predicate 'subsystem == "dev.companion.perf"' > "$out" 2>&1 &
+    --predicate 'subsystem == "dev.yochi.perf"' > "$out" 2>&1 &
 stream=$!
 trap 'kill $stream 2>/dev/null || true' EXIT
 status=0
