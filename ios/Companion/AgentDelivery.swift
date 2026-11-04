@@ -107,6 +107,17 @@ enum AgentDelivery: Equatable {
         }
     }
 
+    /// For a shell command: delivered or why not. A shell has no turns, and
+    /// core's quiet rule is all `terminal.send` waits for.
+    var shellState: String {
+        switch self {
+        case .sending: "发送中…"
+        case .sent, .turnCompleted: "已送达"
+        case .failed(_, let kind, let message): Self.failure(kind: kind, message: message)
+        case .unknown: "结果未知，请看终端确认"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .sending: "ellipsis.circle"

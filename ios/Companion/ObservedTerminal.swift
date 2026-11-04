@@ -161,6 +161,8 @@ struct ObservedTerminal: UIViewRepresentable {
     @Binding var grid: TerminalGrid?
     /// Set by a long press; the page presents the selection sheet.
     @Binding var selection: TerminalTextSelection?
+    /// Scrolled up into the history, off the newest output.
+    @Binding var awayFromBottom: Bool
     /// The program entered or left the alternate screen after the first paint.
     var onScreenModeChange: () -> Void = {}
 
@@ -170,6 +172,7 @@ struct ObservedTerminal: UIViewRepresentable {
             kept.view.removeFromSuperview()
             updateUIView(kept.view, context: context)
             kept.view.reportGridAgain()
+            kept.view.reportScrollAgain()
             // From the page asking for its terminal to the frame that shows
             // the kept screen.
             let start = ContinuousClock.now
@@ -185,6 +188,7 @@ struct ObservedTerminal: UIViewRepresentable {
     func updateUIView(_ view: ObservedTerminalView, context: Context) {
         view.onGridChange = { grid = $0 }
         view.onTextSelection = { selection = $0 }
+        view.onAwayFromBottom = { awayFromBottom = $0 }
         view.onScreenModeChange = onScreenModeChange
     }
 }
@@ -196,9 +200,10 @@ struct ObservedTerminal: UIViewRepresentable {
 /// the desktop drew it: the whole grid fitted to the phone's width, which a
 /// pinch zooms and a drag pans.
 final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate,
-    TerminalSurfaceTextSelectionRequestDelegate {
+    TerminalSurfaceTextSelectionRequestDelegate, TerminalSurfaceScrollbarDelegate {
     var onGridChange: ((TerminalGrid) -> Void)?
     var onTextSelection: ((TerminalTextSelection) -> Void)?
+    var onAwayFromBottom: ((Bool) -> Void)?
     var onScreenModeChange: (() -> Void)?
 
     private let feed: TerminalFeed
@@ -209,6 +214,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
     /// One cell in points, once Ghostty has measured it.
     private var cell: CGSize?
     private var lastGrid: TerminalGrid?
+    private var awayFromBottom = false
 
     /// True until the first paint is taken and shown.
     private var preparing = true
@@ -258,7 +264,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         isAccessibilityElement = true
         accessibilityLabel = "终端画面"
         accessibilityIdentifier = "terminalGrid"
-        accessibilityHint = "终端画面只读，按手机宽度排版，全屏程序按桌面原样显示、可双指缩放；长按可选取文字复制，拖动查看历史，可用下方按键栏按键，或发送 Agent 消息。"
+        accessibilityHint = "终端画面按手机宽度排版，全屏程序按桌面原样显示、可双指缩放；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
 
         feed.onFullScreenChange = { [weak self] fullScreen in
             guard let self, !preparing, fullScreen != asDrawn else { return }
@@ -467,6 +473,29 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         let body = frameBody
         frameBody = nil
         body?()
+    }
+
+    // MARK: History
+
+    /// Ghostty keeps the viewport where the user left it while output
+    /// arrives; the page offers the way back down. A full-screen program
+    /// has no history, so it never counts as scrolled away.
+    func terminalDidUpdateScrollbar(_ scrollbar: TerminalScrollbar) {
+        let away = !asDrawn && scrollbar.offset + scrollbar.len < scrollbar.total
+        guard away != awayFromBottom else { return }
+        awayFromBottom = away
+        let report = onAwayFromBottom
+        DispatchQueue.main.async { report?(away) }
+    }
+
+    /// A page showing this surface again starts without the button.
+    func reportScrollAgain() {
+        let away = awayFromBottom, report = onAwayFromBottom
+        DispatchQueue.main.async { report?(away) }
+    }
+
+    func scrollToBottom() {
+        terminal.performBindingAction("scroll_to_bottom")
     }
 
     // MARK: Text selection

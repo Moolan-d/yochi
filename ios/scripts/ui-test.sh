@@ -27,7 +27,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -57,6 +57,13 @@ start_alt_session() {
 start_history_session() {
     hc run --bg --rm --no-parent --no-notify --name companion-uitest-history --json \
         -- /bin/sh -c 'seq 1 400; exec /bin/cat' > /dev/null
+}
+
+# A plain shell, for the shell command test. In the throwaway state
+# directory, so nothing it runs touches the repository.
+start_shell_session() {
+    hc run --bg --rm --no-parent --no-notify --name companion-uitest-shell --cwd "$state" --json \
+        -- /bin/sh > /dev/null
 }
 
 # A terminal with a long history that keeps printing, for the perf tests:
@@ -113,7 +120,7 @@ start_changes_repo() {
 # testMessageQueuedWhileWorking, testImageSentToAgent, testSlashCompletion and
 # testChangesPage run only when named, as do testTabMenu and the testPerf*
 # measurements (scripts/perf-test.sh).
-for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testTerminalKeysArePressed testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testHomeSample}; do
+for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenShownAsDrawn testTerminalScrollsHistory testConversationCards testHomeSample}; do
     "$GATEWAY" pair > "$state/pair.log" 2>&1 &
     pairing=$!
     until grep -q "Code " "$state/pair.log"; do sleep 0.2; done
@@ -124,6 +131,10 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     if [ "$test" = testFullScreenShownAsDrawn ]; then
         alt_session=$(start_alt_session)
         extra="TEST_RUNNER_COMPANION_ALT_SESSION_NAME=companion-uitest-alt"
+    fi
+    if [ "$test" = testShellCommandsRun ]; then
+        start_shell_session
+        extra="TEST_RUNNER_COMPANION_SHELL_SESSION_NAME=companion-uitest-shell"
     fi
     if [ "$test" = testTerminalScrollsHistory ]; then
         # HISTORY_SESSION_NAME points it at an existing session instead, read-only.
@@ -162,6 +173,17 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
         -derivedDataPath build -quiet test-without-building \
         -only-testing:"CompanionUITests/CompanionUITests/$test" \
         -resultBundlePath "$RESULTS/$test.xcresult" || failed=1
+    # The UI test only saw "已送达"; the shell must have run each command:
+    # the echo twice (sent, then ↑ ⏎), and the last one only after Ctrl+C.
+    if [ "$test" = testShellCommandsRun ]; then
+        screen=$(hc read companion-uitest-shell 2>/dev/null || true)
+        if [ "$(printf '%s\n' "$screen" | grep -c '^yochi-42$')" -lt 2 ] || ! printf '%s\n' "$screen" | grep -q '^stopped-2$'; then
+            echo "the shell did not run the commands and keys:" >&2
+            printf '%s\n' "$screen" | tail -20 >&2
+            failed=1
+        fi
+        hc kill companion-uitest-shell >/dev/null 2>&1 || true
+    fi
     hc kill companion-uitest-history >/dev/null 2>&1 || true
     hc kill companion-uitest-dialog >/dev/null 2>&1 || true
     hc kill companion-uitest-picker >/dev/null 2>&1 || true
@@ -172,17 +194,10 @@ for test in ${TESTS:-testPairObserveAndUnpair testInviteLinkReplacesPairing test
     fi
     xcrun xcresulttool export attachments --path "$RESULTS/$test.xcresult" \
         --output-path "$SHOTS/$test" > /dev/null || true
-    # The UI test only saw "已发送"; confirm the message really reached the terminal.
+    # The UI test only saw "已送达"; confirm the command really reached the terminal.
     if [ "$test" = testAgentMessageIsAccepted ]; then
         if [ -z "$test_session" ] || ! hc read "$test_session" | grep -q "Companion UI test"; then
             echo "test terminal did not receive the Agent Message" >&2
-            failed=1
-        fi
-    fi
-    # Likewise for keys: cat echoes the pressed "2", then prints it again after Enter.
-    if [ "$test" = testTerminalKeysArePressed ]; then
-        if [ -z "$test_session" ] || [ "$(hc read "$test_session" | grep -c '^2$')" -lt 2 ]; then
-            echo "test terminal did not receive the pressed keys" >&2
             failed=1
         fi
     fi

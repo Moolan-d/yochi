@@ -23,6 +23,6 @@ final class TerminalKeysTests: XCTestCase {
     }
 
     func testKeyBarUsesCoreKeyNames() {
-        XCTAssertEqual(TerminalKey.bar.map(\.id), ["up", "down", "enter", "esc", "1", "2", "3", "shift+tab"])
+        XCTAssertEqual(TerminalKey.bar.map(\.id), ["ctrl+c", "tab", "up", "down", "enter", "esc"])
     }
 }

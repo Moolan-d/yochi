@@ -151,6 +151,14 @@ final class CompanionUITests: XCTestCase {
         let after = try viewportNumbers(app, terminal)
         XCTAssertLessThan(after.max() ?? .max, before.min() ?? 0,
                           "dragging did not scroll into history: \(before.min() ?? -1)… → \(after.max() ?? -1)")
+        // Off the bottom, one tap goes back to the newest output.
+        let latest = app.buttons["terminalScrollToLatest"]
+        XCTAssert(latest.waitForExistence(timeout: 5), "no way back to the newest output")
+        snapshot("3 back to latest offered")
+        latest.tap()
+        XCTAssert(latest.waitForNonExistence(timeout: 5), "still away from the newest output")
+        XCTAssertGreaterThanOrEqual(try viewportNumbers(app, terminal).max() ?? 0, before.min() ?? .max,
+                                    "did not return to the newest output")
         app.navigationBars.buttons.firstMatch.tap()
         unpair(app)
     }
@@ -203,11 +211,12 @@ final class CompanionUITests: XCTestCase {
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app, observing: true)
 
+        // /bin/cat is a terminal, not an Agent: what is sent is a command.
         let field = composer(app)
         field.tap()
         field.typeText("Companion UI test")
-        app.buttons["发送消息"].tap()
-        XCTAssert(text(app, containing: "已发送").waitForExistence(timeout: 20))
+        app.buttons["发送命令"].tap()
+        XCTAssert(text(app, containing: "已送达").waitForExistence(timeout: 20))
         XCTAssertTrue(waitUntilCleared(field), "composer kept the sent message")
         snapshot("1 accepted")
 
@@ -216,37 +225,53 @@ final class CompanionUITests: XCTestCase {
         let session = testSession(app)
         XCTAssert(session.waitForExistence(timeout: 10))
         session.tap()
-        XCTAssert(text(app, containing: "已发送").waitForExistence(timeout: 10))
+        XCTAssert(text(app, containing: "已送达").waitForExistence(timeout: 10))
         let composerAfterReturn = composer(app)
         XCTAssertTrue(waitUntilCleared(composerAfterReturn), "sent message returned as a draft")
         snapshot("2 sent message did not return as a draft")
-        // /bin/cat echoes input but reports no Agent turns. The following
-        // transition to "Agent 已回应" needs a real Claude Code session.
         leaveAndUnpair(app)
     }
 
+    /// A shell runs what the composer sends; the key bar recalls the last
+    /// command and stops a running one. ui-test.sh checks the shell's output.
     @MainActor
-    func testTerminalKeysArePressed() throws {
-        let app = launchUnpaired(observing: env("COMPANION_SESSION"))
+    func testShellCommandsRun() throws {
+        let app = launchUnpaired()
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
-        waitUntilPaired(app, observing: true)
+        waitUntilPaired(app)
 
-        _ = composer(app)
-        snapshot("1 key bar and composer")
-        // /bin/cat echoes "2" and prints it back after Enter; ui-test.sh checks the screen.
-        let two = app.buttons["key-2"]
-        XCTAssert(two.waitForExistence(timeout: 10))
-        two.tap()
+        let session = sessionCell(app, name: env("COMPANION_SHELL_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no shell session")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        XCTAssertFalse(app.buttons["composerMenu"].exists, "the terminal offers the Agent's images and phrases")
+        snapshot("1 key bar and command field")
+
+        run(app, "echo yochi-$((6*7))")
+        snapshot("2 command delivered")
+        app.buttons["key-up"].tap()
         app.buttons["key-enter"].tap()
         XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 3))
 
-        app.buttons["composerMenu"].tap()
-        XCTAssert(app.buttons["继续"].waitForExistence(timeout: 5))
-        snapshot("2 quick commands")
-        app.buttons["继续"].tap()
-        XCTAssertEqual(composer(app).value as? String, "继续")
-        snapshot("3 filled draft")
-        leaveAndUnpair(app)
+        run(app, "sleep 30")
+        app.buttons["key-ctrl+c"].tap()
+        XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 3))
+        run(app, "echo stopped-$((1+1))")
+        snapshot("3 interrupted, then ran again")
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
+    /// Sends one command and waits until it is delivered: the field clears
+    /// only then, and core waits ~3 s of quiet before it pastes.
+    @MainActor
+    private func run(_ app: XCUIApplication, _ command: String) {
+        let field = composer(app)
+        field.tap()
+        field.typeText(command)
+        app.buttons["发送命令"].tap()
+        XCTAssertTrue(waitUntilCleared(field, timeout: 25), "\(command) was not delivered")
+        XCTAssert(text(app, containing: "已送达").exists, "\(command): no delivery shown")
     }
 
     @MainActor
@@ -1168,7 +1193,9 @@ final class CompanionUITests: XCTestCase {
 
     @MainActor
     private func composer(_ app: XCUIApplication) -> XCUIElement {
-        let field = app.descendants(matching: .any).matching(identifier: "agentMessageField").firstMatch
+        // The Agent's message field, or a terminal's command field.
+        let field = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier IN %@", ["agentMessageField", "terminalCommandField"])).firstMatch
         XCTAssert(field.waitForExistence(timeout: 15))
         return field
     }

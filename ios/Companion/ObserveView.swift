@@ -78,7 +78,7 @@ struct ObserveView: View {
 
     /// While the Agent works a message waits on the phone for the turn to end.
     private var queuesMessage: Bool {
-        currentSession.status?.state == "working"
+        isConversation && currentSession.status?.state == "working"
     }
 
     private var canSend: Bool {
@@ -106,7 +106,7 @@ struct ObserveView: View {
     /// With nothing to send while the Agent works, the send button stops it.
     /// Not while it waits: Esc would cancel the dialog, which its card does.
     private var showsStop: Bool {
-        currentSession.status?.state == "working" && !isSending
+        isConversation && currentSession.status?.state == "working" && !isSending
             && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -276,7 +276,7 @@ struct ObserveView: View {
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier("stopNotice")
             }
-            if let delivery { DeliveryBanner(delivery: delivery) }
+            if let delivery { DeliveryBanner(delivery: delivery, shell: !isConversation) }
             if let queued {
                 QueuedBanner(message: queued,
                              release: queued.release(state: currentSession.status?.state, turn: currentSession.turn),
@@ -308,7 +308,8 @@ struct ObserveView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            composerMenu
+            // Images and quick phrases are for the Agent.
+            if isConversation { composerMenu }
 
             VStack(alignment: .leading, spacing: 0) {
                 // Attachments sit inside the field, as in Messages, so the
@@ -318,14 +319,16 @@ struct ObserveView: View {
                         .padding(.horizontal, 6)
                 }
                 HStack(alignment: .bottom, spacing: 4) {
-                    TextField("给 Agent 发消息", text: $draft, axis: .vertical)
+                    TextField(isConversation ? "给 Agent 发消息" : "输入命令", text: $draft, axis: .vertical)
                         .lineLimit(1...6)
                         .font(.body)
                         .padding(.leading, 14)
                         .padding(.vertical, 10)
                         .disabled(isSending)
                         .focused($composerFocused)
-                        .accessibilityIdentifier("agentMessageField")
+                        .textInputAutocapitalization(isConversation ? .sentences : .never)
+                        .autocorrectionDisabled(!isConversation)
+                        .accessibilityIdentifier(isConversation ? "agentMessageField" : "terminalCommandField")
                     Group {
                         if showsStop {
                             Button { stop() } label: {
@@ -358,7 +361,7 @@ struct ObserveView: View {
                                 .contentShape(Rectangle().inset(by: -5))
                             }
                             .disabled(!canSend)
-                            .accessibilityLabel(queuesMessage ? "排队发送" : "发送消息")
+                            .accessibilityLabel(isConversation ? (queuesMessage ? "排队发送" : "发送消息") : "发送命令")
                             .accessibilityHint(queuesMessage ? "这一轮结束后发出" : "")
                             .accessibilityIdentifier("sendAgentMessage")
                         }
@@ -450,7 +453,7 @@ struct ObserveView: View {
                 attachments.removeAll { $0.state != .uploading }
                 updateResponse()
             case .failed(let kind, _):
-                confirmingBlocked = kind == "blocked"
+                confirmingBlocked = isConversation && kind == "blocked"
             case .unknown:
                 break
             }
@@ -458,17 +461,15 @@ struct ObserveView: View {
     }
 
     /// One "+" for everything that goes into the message, as in Messages:
-    /// images (conversation only) and the quick phrases.
+    /// images and the quick phrases.
     private var composerMenu: some View {
         Menu {
-            if isConversation {
-                Section {
-                    Button("照片图库", systemImage: "photo.on.rectangle") { pickingPhotos = true }
-                    Button("拍照", systemImage: "camera") { takingPhoto = true }
-                        .disabled(!CameraPicker.isAvailable)
-                }
-                .disabled(attachments.count >= ImageAttachment.limit)
+            Section {
+                Button("照片图库", systemImage: "photo.on.rectangle") { pickingPhotos = true }
+                Button("拍照", systemImage: "camera") { takingPhoto = true }
+                    .disabled(!CameraPicker.isAvailable)
             }
+            .disabled(attachments.count >= ImageAttachment.limit)
             Section("填入输入框") {
                 ForEach(QuickCommand.phrases, id: \.self) { phrase in
                     Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
@@ -484,7 +485,7 @@ struct ObserveView: View {
         .tint(.secondary)
         .frame(width: 44, height: 44)
         .disabled(isSending)
-        .accessibilityLabel(isConversation ? "添加图片或快捷语" : "快捷语")
+        .accessibilityLabel("添加图片或快捷语")
         .accessibilityIdentifier("composerMenu")
     }
 
@@ -541,7 +542,7 @@ struct ObserveView: View {
             .accessibilityElement(children: .combine)
             .accessibilityHint(isConversation
                 ? "可查看对话、批准或回答 Agent 的请求、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。"
-                : "可查看终端、按常用按键、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。")
+                : "可查看终端、运行 shell 命令、按常用按键，都不会改变桌面上的终端尺寸。")
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             tabMenu
@@ -672,7 +673,7 @@ struct ObserveView: View {
     }
 
     private func updateResponse() {
-        guard let delivery, case .sent(let text, let sentTurn, let status, _) = delivery,
+        guard isConversation, let delivery, case .sent(let text, let sentTurn, let status, _) = delivery,
               currentSession.turn > sentTurn else { return }
         client.remember(.turnCompleted(text: text, status: status), host: config.host, session: session.id)
     }
@@ -725,10 +726,12 @@ private struct QueuedBanner: View {
 
 private struct DeliveryBanner: View {
     let delivery: AgentDelivery
+    /// A shell command: delivered or not, with no Agent turn to follow.
+    let shell: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            Label(delivery.state, systemImage: delivery.symbol)
+            Label(shell ? delivery.shellState : delivery.state, systemImage: delivery.symbol)
                 .foregroundStyle(delivery.color)
                 .layoutPriority(1)
             Text(delivery.text)

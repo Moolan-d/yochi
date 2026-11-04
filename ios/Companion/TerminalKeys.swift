@@ -8,16 +8,15 @@ struct TerminalKey: Identifiable {
     let symbol: String?
     let spoken: String
 
-    /// What Agent dialogs need: move, choose, confirm, cancel, cycle modes.
+    /// What a shell needs beside the command line: stop, complete, recall
+    /// history, confirm, cancel. Agents are driven from the conversation.
     static let bar: [TerminalKey] = [
+        TerminalKey(id: "ctrl+c", label: "⌃C", symbol: nil, spoken: "Control C，中断"),
+        TerminalKey(id: "tab", label: "⇥", symbol: "arrow.right.to.line", spoken: "Tab，补全"),
         TerminalKey(id: "up", label: "↑", symbol: "arrow.up", spoken: "上"),
         TerminalKey(id: "down", label: "↓", symbol: "arrow.down", spoken: "下"),
         TerminalKey(id: "enter", label: "⏎", symbol: "return", spoken: "回车"),
         TerminalKey(id: "esc", label: "esc", symbol: nil, spoken: "Esc"),
-        TerminalKey(id: "1", label: "1", symbol: nil, spoken: "1"),
-        TerminalKey(id: "2", label: "2", symbol: nil, spoken: "2"),
-        TerminalKey(id: "3", label: "3", symbol: nil, spoken: "3"),
-        TerminalKey(id: "shift+tab", label: "⇧⇥", symbol: nil, spoken: "Shift Tab，切换模式"),
     ]
 }
 
@@ -123,7 +122,7 @@ struct TerminalKeyBar: View {
 }
 
 /// A key cap that shares the row's width evenly; the system bordered style
-/// pads too much for eight keys across a phone.
+/// pads too much for seven keys across a phone.
 private struct KeyCapStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

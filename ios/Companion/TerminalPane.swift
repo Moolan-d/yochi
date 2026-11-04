@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The session's terminal (`/v0/observe`), read-only: it never types into
-/// or resizes the terminal, so the desktop's grid is untouched. Line output
-/// is reflowed to the phone's width; a full-screen program is shown as the
+/// The session's terminal (`/v0/observe`). Watching never attaches as an
+/// active viewer, so the desktop's grid is untouched; commands and keys go
+/// in beside it, through the page's composer and key bar. Line output is
+/// reflowed to the phone's width; a full-screen program is shown as the
 /// desktop drew it.
 struct TerminalPane: View {
     let session: String
@@ -15,6 +16,7 @@ struct TerminalPane: View {
 
     @State private var selection: TerminalTextSelection?
     @State private var copiedNotice = false
+    @State private var awayFromBottom = false
     @AppStorage(TerminalTextSize.key) private var fontSize = TerminalTextSize.standard
     @Environment(\.scenePhase) private var scenePhase
 
@@ -28,6 +30,7 @@ struct TerminalPane: View {
                 // way; a fresh attach takes core's exact screen for it.
                 ObservedTerminal(model: model, feed: feed, attempt: model.attempt, fontSize: Float(fontSize),
                                  desktopGrid: desktop, grid: $grid, selection: $selection,
+                                 awayFromBottom: $awayFromBottom,
                                  onScreenModeChange: model.restartAfterResize)
                     .id(model.attempt)
             }
@@ -49,6 +52,16 @@ struct TerminalPane: View {
                 EmptyView()
             }
         }
+        // Above the banner, which takes the bottom when the stream fails.
+        .overlay(alignment: .bottomTrailing) {
+            if awayFromBottom {
+                latestButton
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: awayFromBottom)
         .safeAreaInset(edge: .bottom) { banner }
         .sheet(item: $selection) { selection in
             TerminalTextSheet(selection: selection, onCopied: showCopied)
@@ -67,6 +80,8 @@ struct TerminalPane: View {
         }
         .animation(.easeOut(duration: 0.2), value: copiedNotice)
         .onChange(of: observer.phase) { _, _ in model.phaseChanged() }
+        // A fresh attach starts at the newest output.
+        .onChange(of: model.attempt) { _, _ in awayFromBottom = false }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, case .failed = observer.phase { start() }
         }
@@ -100,6 +115,22 @@ struct TerminalPane: View {
         }
     }
 
+    /// Back to the newest output, as on the conversation page.
+    private var latestButton: some View {
+        Button {
+            model.surface?.view.scrollToBottom()
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: .circle)
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("回到最新")
+        .accessibilityIdentifier("terminalScrollToLatest")
+    }
+
     /// The sheet closed after copying: confirm it somewhere the user is
     /// looking, since the sheet slides away immediately.
     private func showCopied() {
@@ -114,6 +145,7 @@ struct TerminalPane: View {
     private func start() {
         selection = nil
         grid = nil
+        awayFromBottom = false
         model.start(config, session: session, fontSize: fontSize)
     }
 }
