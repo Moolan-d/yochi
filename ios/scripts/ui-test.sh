@@ -39,7 +39,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-wheel >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -69,6 +69,13 @@ start_alt_session() {
 start_history_session() {
     hc run --bg --rm --no-parent --no-notify --name companion-uitest-history --json \
         -- /bin/sh -c 'seq 1 400; exec /bin/cat' > /dev/null
+}
+
+# A full-screen program with its own history, for the full-screen history
+# test: like Claude Code it scrolls only on mouse wheel reports.
+start_wheel_session() {
+    hc run --bg --rm --no-parent --no-notify --name companion-uitest-wheel --json \
+        -- /usr/bin/python3 "$(pwd)/scripts/wheel-tui.py" > /dev/null
 }
 
 # A plain shell, for the shell command test. In the throwaway state
@@ -133,7 +140,7 @@ start_changes_repo() {
 # testChangesPage run only when named, as do testTabMenu, testClaudeStartedInTerminal
 # (starts Claude Code without sending it anything) and the testPerf*
 # measurements (scripts/perf-test.sh).
-for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testConversationCards testHomeSample}; do
+for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testFullScreenScrollsHistory testConversationCards testHomeSample}; do
     if [ "$test" = testPairAndObserveOverRelay ]; then
         # With the tailnet off the link has only the Relay, so the phone pairs
         # and connects through it. Once it has, the tailnet comes back on and
@@ -188,6 +195,10 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         # it takes that terminal over at the phone's grid while the test runs.
         [ -n "${HISTORY_SESSION_NAME:-}" ] || start_history_session
         extra="TEST_RUNNER_COMPANION_HISTORY_SESSION_NAME=${HISTORY_SESSION_NAME:-companion-uitest-history}"
+    fi
+    if [ "$test" = testFullScreenScrollsHistory ]; then
+        start_wheel_session
+        extra="TEST_RUNNER_COMPANION_WHEEL_SESSION_NAME=companion-uitest-wheel"
     fi
     case "$test" in testPerf*)
         start_perf_session
@@ -274,6 +285,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         hc kill companion-uitest-shell >/dev/null 2>&1 || true
     fi
     hc kill companion-uitest-history >/dev/null 2>&1 || true
+    hc kill companion-uitest-wheel >/dev/null 2>&1 || true
     hc kill companion-uitest-dialog >/dev/null 2>&1 || true
     hc kill companion-uitest-picker >/dev/null 2>&1 || true
     hc kill companion-uitest-perf >/dev/null 2>&1 || true

@@ -137,7 +137,7 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(session.waitForExistence(timeout: 15), "no history session")
         session.tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
-        RunLoop.current.run(until: .now.addingTimeInterval(1))
+        RunLoop.current.run(until: .now.addingTimeInterval(2))
         let terminal = app.descendants(matching: .any)["terminalGrid"]
         let before = try viewportNumbers(app, terminal)
         snapshot("1 bottom")
@@ -159,6 +159,38 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(latest.waitForNonExistence(timeout: 5), "still away from the newest output")
         XCTAssertGreaterThanOrEqual(try viewportNumbers(app, terminal).max() ?? 0, before.min() ?? .max,
                                     "did not return to the newest output")
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
+    /// A full-screen program keeps its history itself, as Claude Code does:
+    /// on the alternate screen with mouse reporting on, it scrolls only on
+    /// wheel reports. Taken over, dragging must reach it as the wheel. The
+    /// wheel terminal shows 1…400 and starts at 400.
+    @MainActor
+    func testFullScreenScrollsHistory() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_WHEEL_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no wheel session")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        RunLoop.current.run(until: .now.addingTimeInterval(2))
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        let before = try viewportNumbers(app, terminal)
+        XCTAssertEqual(before.max(), 400, "the program did not start at its newest line")
+        snapshot("1 bottom")
+
+        for _ in 0..<3 {
+            terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+                .press(forDuration: 0.05, thenDragTo: terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+        }
+        RunLoop.current.run(until: .now.addingTimeInterval(1))
+        snapshot("2 dragged")
+        let after = try viewportNumbers(app, terminal)
+        XCTAssertLessThan(after.max() ?? .max, 400, "dragging did not scroll the program's history: \(after)")
         app.navigationBars.buttons.firstMatch.tap()
         unpair(app)
     }

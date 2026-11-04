@@ -70,12 +70,83 @@ struct TerminalTextSelection: Identifiable, Equatable {
     }
 }
 
+/// What of the bytes Ghostty writes for the program may go back to it: only
+/// what a scroll produces. With mouse reporting on, Ghostty turns a drag into
+/// wheel reports, which is how a full-screen program such as Claude Code
+/// scrolls its own history; on the alternate screen without it, into the
+/// cursor up and down keys. Taps (clicks), motion and anything typed stay
+/// on the phone. The Gateway checks the same (`observe::wheel_only`).
+enum TerminalWheel {
+    static func reports(in data: Data) -> Data? {
+        var kept = Data()
+        let bytes = [UInt8](data)
+        var at = 0
+        while at < bytes.count {
+            if let length = report(bytes, at) {
+                kept.append(contentsOf: bytes[at..<at + length])
+                at += length
+            } else {
+                at += 1
+            }
+        }
+        return kept.isEmpty ? nil : kept
+    }
+
+    /// The length of the wheel report or scroll key at `start`.
+    private static func report(_ bytes: [UInt8], _ start: Int) -> Int? {
+        let esc: UInt8 = 0x1b, bracket = UInt8(ascii: "["), letterO = UInt8(ascii: "O")
+        guard start + 2 < bytes.count, bytes[start] == esc else { return nil }
+        let second = bytes[start + 1], third = bytes[start + 2]
+        if second == bracket || second == letterO, third == UInt8(ascii: "A") || third == UInt8(ascii: "B") {
+            return 3
+        }
+        // SGR: ESC [ < button ; column ; row M
+        guard second == bracket, third == UInt8(ascii: "<") else { return nil }
+        var at = start + 3
+        var button = 0
+        for field in 0..<3 {
+            let digitsStart = at
+            var value = 0
+            while at < bytes.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[at]), at - digitsStart < 4 {
+                value = value * 10 + Int(bytes[at] - UInt8(ascii: "0"))
+                at += 1
+            }
+            guard at > digitsStart, at < bytes.count,
+                  bytes[at] == UInt8(ascii: field < 2 ? ";" : "M") else { return nil }
+            if field == 0 { button = value }
+            at += 1
+        }
+        // Shift, meta and ctrl ride in bits 2–4; 64–67 is the wheel.
+        return (64...67).contains(button & ~0b11100) ? at - start : nil
+    }
+}
+
 /// An in-memory Ghostty session that holds the terminal's bytes until the
 /// surface's grid matches the size they were drawn for.
 @MainActor
 final class TerminalFeed {
-    // Observing never types or resizes, so nothing flows back to the Gateway.
-    let session = InMemoryTerminalSession(write: { _ in }, resize: { _ in })
+    /// Nothing typed or resized here flows back to the Gateway; scrolling
+    /// does, through `onWheel`, once a takeover sets it.
+    let session: InMemoryTerminalSession
+    private let wheel = WheelOutlet()
+    /// Wheel reports for the program, from dragging a full-screen program.
+    var onWheel: ((Data) -> Void)? {
+        get { wheel.send }
+        set { wheel.send = newValue }
+    }
+
+    init() {
+        let wheel = wheel
+        session = InMemoryTerminalSession(write: { data in
+            guard let reports = TerminalWheel.reports(in: data) else { return }
+            // In order, on the main actor, whichever thread Ghostty wrote on.
+            DispatchQueue.main.async { MainActor.assumeIsolated { wheel.send?(reports) } }
+        }, resize: { _ in })
+    }
+
+    @MainActor private final class WheelOutlet {
+        var send: ((Data) -> Void)?
+    }
     private var held: [Data] = []
     private(set) var heldBytes = 0
     private(set) var isOpen = false

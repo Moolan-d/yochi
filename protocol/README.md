@@ -323,7 +323,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 `ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach，手机从不经这个连接向终端输入。默认以 `observe` 模式 attach，不改变终端尺寸。
 
-**按手机尺寸接管。** 加 `takeover=1&cols=<列>&rows=<行>` 时改以非 observe 的方式 attach，core 把终端改成这个网格，`attached` 和首屏都按它；列数、行数缺少或不在 1…1000 之内时返回 `400`。查看期间桌面上的终端跟着变小；连接断开后 core 把尺寸还原成仍在 attach 的桌面窗口的大小，没有窗口时还原成基础尺寸。接管的连接上 App 可以发 `{"type": "resize", "cols": 49, "rows": 30}`（键盘弹出收起、转屏），Gateway 转成 core 的 RESIZE 帧；只读连接上的这类消息被忽略。桌面再次操作这个终端时尺寸回到桌面的，`size` 帧会报出来，App 据此改回只读显示（ADR 0001 的 2026-11-04 修订）。
+**按手机尺寸接管。** 加 `takeover=1&cols=<列>&rows=<行>` 时改以非 observe 的方式 attach，core 把终端改成这个网格，`attached` 和首屏都按它；列数、行数缺少或不在 1…1000 之内时返回 `400`。查看期间桌面上的终端跟着变小；连接断开后 core 把尺寸还原成仍在 attach 的桌面窗口的大小，没有窗口时还原成基础尺寸。接管的连接上 App 可以发 `{"type": "resize", "cols": 49, "rows": 30}`（键盘弹出收起、转屏），Gateway 转成 core 的 RESIZE 帧；只读连接上的这类消息被忽略。全屏程序（如 Claude Code）自己保存历史、靠鼠标滚轮翻看，终端里没有回滚可滑：接管的连接上 App 把手机终端为拖动编出的滚轮上报原样发来，`{"type": "wheel", "data": "\u001b[<64;10;5M"}`，Gateway 经 attach 通道写给程序。`data` 只能由 SGR 滚轮上报（`ESC [ < b ; x ; y M`，b 为 64–67，可带 shift/meta/ctrl 位）和 alt screen 上的光标上下键（`ESC [ A`/`B`、`ESC O A`/`B`）组成，最长 4096 字节，否则整条丢弃；点按、移动和打字都不会经这里送到终端。桌面再次操作这个终端时尺寸回到桌面的，`size` 帧会报出来，App 据此改回只读显示（ADR 0001 的 2026-11-04 修订）。
 
 - **文本帧**（控制）：
   ```jsonc
