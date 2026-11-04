@@ -314,7 +314,7 @@ final class ConversationFeed {
         do {
             while true {
                 guard case .string(let text) = try await socket.receive() else { continue }
-                apply(try JSONDecoder().decode(ConversationMessage.self, from: Data(text.utf8)))
+                apply(try await Self.decode(text))
             }
         } catch {
             if Task.isCancelled { return }
@@ -327,6 +327,17 @@ final class ConversationFeed {
             }
             phase = .failed(reason)
         }
+    }
+
+    /// Off the main thread: a whole conversation can run to megabytes.
+    nonisolated private static func decode(_ text: String) async throws -> ConversationMessage {
+        let start = ContinuousClock.now
+        let message = try JSONDecoder().decode(ConversationMessage.self, from: Data(text.utf8))
+        if case .conversation = message {
+            let ms = (ContinuousClock.now - start) / .milliseconds(1)
+            Perf.log.notice("decode conversation bytes=\(text.utf8.count, privacy: .public) ms=\(ms, format: .fixed(precision: 1), privacy: .public)")
+        }
+        return message
     }
 
     func apply(_ message: ConversationMessage) {

@@ -165,4 +165,13 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(blocks.map(\.kind), [.code(language: nil)])
         XCTAssertEqual(blocks.map(\.text), ["still typing"])
     }
+
+    func testCachedParseMatchesParseForEachText() {
+        let first = "# Title\n\n- one\n- two"
+        XCTAssertEqual(MarkdownBlock.cachedParse(first), MarkdownBlock.parse(first))
+        XCTAssertEqual(MarkdownBlock.cachedParse(first), MarkdownBlock.parse(first))
+        // A message still streaming changes its text: each text parses on its own.
+        let longer = first + "\n- three"
+        XCTAssertEqual(MarkdownBlock.cachedParse(longer).count, 4)
+    }
 }

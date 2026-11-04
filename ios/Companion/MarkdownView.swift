@@ -38,6 +38,30 @@ struct MarkdownTable: Equatable {
 }
 
 extension MarkdownBlock {
+    private final class Parsed {
+        let blocks: [MarkdownBlock]
+        init(_ blocks: [MarkdownBlock]) { self.blocks = blocks }
+    }
+
+    /// Parsed messages by their text. A lazy conversation list builds a row
+    /// again each time it scrolls back into view, and the text of a finished
+    /// message never changes, so it is parsed once. NSCache gives the memory
+    /// back under pressure.
+    nonisolated(unsafe) private static let parsedCache: NSCache<NSString, Parsed> = {
+        let cache = NSCache<NSString, Parsed>()
+        cache.countLimit = 400
+        return cache
+    }()
+
+    /// `parse`, kept for the next time the same text is drawn.
+    static func cachedParse(_ markdown: String) -> [MarkdownBlock] {
+        let key = markdown as NSString
+        if let hit = parsedCache.object(forKey: key) { return hit.blocks }
+        let blocks = parse(markdown)
+        parsedCache.setObject(Parsed(blocks), forKey: key)
+        return blocks
+    }
+
     /// Splits Markdown into blocks with Foundation's GFM parser, which reports
     /// structure only through each run's presentation intent: runs are grouped
     /// by their innermost block, and lists and quotes by the intents around it.
@@ -186,7 +210,8 @@ struct MarkdownText: View {
     @ScaledMetric(relativeTo: .body) private var aboveHeading: CGFloat = 20
 
     var body: some View {
-        let blocks = MarkdownBlock.parse(text)
+        let _ = Perf.count("MarkdownText")
+        let blocks = MarkdownBlock.cachedParse(text)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(blocks.indices, id: \.self) { index in
                 MarkdownBlockView(block: blocks[index])

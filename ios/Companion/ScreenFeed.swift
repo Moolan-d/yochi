@@ -37,10 +37,24 @@ final class ScreenFeed {
 
     /// Feeds one screen, as the socket does; for tests and previews.
     func apply(screenText text: String) {
-        let screen = ANSIScreenDecoder.decode(text)
-        self.screen = screen
-        result = BlockedDialogParser.parse(screen, program: .claude)
+        apply(Self.read(text))
+    }
+
+    private func apply(_ read: (ANSIScreen, DialogParseResult)) {
+        screen = read.0
+        if result != read.1 { result = read.1 }
         revision += 1
+    }
+
+    nonisolated private static func read(_ text: String) -> (ANSIScreen, DialogParseResult) {
+        let screen = ANSIScreenDecoder.decode(text)
+        return (screen, BlockedDialogParser.parse(screen, program: .claude))
+    }
+
+    /// Off the main thread: a screen is decoded and searched for dialogs.
+    nonisolated private static func receive(_ text: String) async throws -> (type: String, read: (ANSIScreen, DialogParseResult)?) {
+        let message = try JSONDecoder().decode(ScreenMessage.self, from: Data(text.utf8))
+        return (message.type, message.type == "screen" ? read(message.text ?? "") : nil)
     }
 
     /// Reconnects quietly: the conversation works without the screen, and a
@@ -57,10 +71,10 @@ final class ScreenFeed {
             do {
                 while true {
                     guard case .string(let text) = try await socket.receive() else { continue }
-                    let message = try JSONDecoder().decode(ScreenMessage.self, from: Data(text.utf8))
+                    let message = try await Self.receive(text)
                     switch message.type {
                     case "screen":
-                        apply(screenText: message.text ?? "")
+                        if let read = message.read { apply(read) }
                         delay = .seconds(1)
                     case "closed":
                         clear()
@@ -90,7 +104,7 @@ final class ScreenFeed {
     }
 }
 
-private struct ScreenMessage: Decodable {
+private struct ScreenMessage: Decodable, Sendable {
     let type: String
     let text: String?
 }

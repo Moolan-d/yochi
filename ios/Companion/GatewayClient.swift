@@ -428,7 +428,7 @@ final class GatewayClient {
 
         while true {
             guard case .string(let text) = try await socket.receive() else { continue }
-            switch try JSONDecoder().decode(ServerMessage.self, from: Data(text.utf8)) {
+            switch try await Self.decode(text) {
             case .hello:
                 phase = .connected
             case .sessions(let core, let connected, let sessions, let spaces):
@@ -466,6 +466,11 @@ final class GatewayClient {
                 break
             }
         }
+    }
+
+    /// Off the main thread: the session list, a change list or a diff.
+    nonisolated private static func decode(_ text: String) async throws -> ServerMessage {
+        try JSONDecoder().decode(ServerMessage.self, from: Data(text.utf8))
     }
 
     private func complete(id: String, with result: Reply) {
