@@ -292,6 +292,8 @@ final class TerminalModel {
         takeover = yielded ? nil : phoneGrid(fontSize: fontSize)
         attempt += 1
         observer.onBytes = { feed.receive($0) }
+        // Taken over, a full-screen program's own history scrolls with the wheel.
+        if takeover != nil { feed.onWheel = { [observer] in observer.wheel($0) } }
         observer.start(config, session: session, takeover: takeover)
     }
 

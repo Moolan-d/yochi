@@ -66,6 +66,21 @@ final class TerminalViewTests: XCTestCase {
         XCTAssertTrue(feed.isFullScreen)
     }
 
+    /// Ghostty writes a drag on a full-screen program as wheel reports (or,
+    /// without mouse reporting, cursor up and down); only those go back.
+    func testOnlyWheelReportsGoBackToTheProgram() {
+        let up = "\u{1b}[<64;10;5M", down = "\u{1b}[<65;1;1M", shifted = "\u{1b}[<68;300;40M"
+        XCTAssertEqual(TerminalWheel.reports(in: Data((up + down + shifted).utf8)), Data((up + down + shifted).utf8))
+        XCTAssertEqual(TerminalWheel.reports(in: Data("\u{1b}[A\u{1b}OB".utf8)), Data("\u{1b}[A\u{1b}OB".utf8))
+        // A tap is a click and release: dropped, even beside a wheel report.
+        let click = "\u{1b}[<0;10;5M\u{1b}[<0;10;5m"
+        XCTAssertEqual(TerminalWheel.reports(in: Data((click + up).utf8)), Data(up.utf8))
+        for other in [click, "\u{1b}[<35;10;5M", "\u{1b}[<64;10;5m", "\u{1b}[<64;10;5", "\u{1b}[<64;;5M",
+                      "ls\r", "\u{1b}[C", "\u{1b}[M`!!", "\u{1b}[<64;12345;5M"] {
+            XCTAssertNil(TerminalWheel.reports(in: Data(other.utf8)), other.debugDescription)
+        }
+    }
+
     func testSelectionPrefersThePressedWord() {
         let text = "cd ~/app\nswift build\n"
         let word = (text as NSString).range(of: "swift build")

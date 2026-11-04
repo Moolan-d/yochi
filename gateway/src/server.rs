@@ -5,7 +5,8 @@
 //!   The app may send Agent Messages, key presses, or `unpair` to remove itself.
 //! - `/v0/observe?session=<id>` streams one terminal: control as text,
 //!   terminal bytes as binary messages. With `takeover=1&cols=&rows=` the
-//!   terminal takes the phone's size while it is watched.
+//!   terminal takes the phone's size while it is watched, and the app's
+//!   scrolling reaches a full-screen program as the mouse wheel.
 //! - `/v0/conversation?session=<id>` follows the conversation of the Agent in
 //!   one terminal, read from its transcript.
 //! - `/v0/screen?session=<id>` sends one terminal's screen as styled text while
@@ -308,6 +309,9 @@ struct ObserveQuery {
 enum ObserveMessage {
     /// The phone's grid changed, e.g. its keyboard came up.
     Resize { cols: u16, rows: u16 },
+    /// A drag on a full-screen program, as the wheel reports the phone's
+    /// terminal made for it; anything but wheel reports is dropped.
+    Wheel { data: String },
 }
 
 /// A grid core can draw: neither empty nor absurd.
@@ -398,12 +402,16 @@ async fn relay(
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                 Some(Ok(Message::Text(text))) if takeover => {
-                    if let Ok(ObserveMessage::Resize { cols, rows }) = serde_json::from_str(&text)
-                        && valid_grid(cols, rows)
-                        && observer.resize(cols, rows).await.is_err()
-                    {
-                        break;
-                    }
+                    let sent = match serde_json::from_str(&text) {
+                        Ok(ObserveMessage::Resize { cols, rows }) if valid_grid(cols, rows) => {
+                            observer.resize(cols, rows).await
+                        }
+                        Ok(ObserveMessage::Wheel { data }) if observe::wheel_only(data.as_bytes()) => {
+                            observer.wheel(data.as_bytes()).await
+                        }
+                        _ => Ok(()),
+                    };
+                    if sent.is_err() { break }
                 }
                 Some(Ok(_)) => {}
             },
@@ -931,6 +939,8 @@ mod tests {
         assert!(serde_json::from_str::<ObserveMessage>(r#"{"type":"resize","cols":-1,"rows":45}"#).is_err());
         assert!(valid_grid(1, 1) && valid_grid(1000, 1000));
         assert!(!valid_grid(0, 45) && !valid_grid(49, 0) && !valid_grid(1001, 45));
+        let message: ObserveMessage = serde_json::from_str(r#"{"type":"wheel","data":"\u001b[<64;3;4M"}"#).unwrap();
+        assert!(matches!(message, ObserveMessage::Wheel { data } if data == "\x1b[<64;3;4M"));
     }
 
     #[test]

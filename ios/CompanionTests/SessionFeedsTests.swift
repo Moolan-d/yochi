@@ -304,6 +304,37 @@ final class SessionFeedsTests: XCTestCase {
         model.stop()
     }
 
+    /// Claude Code and other full-screen programs keep their history
+    /// themselves and scroll on the mouse wheel. Taken over, the wheel
+    /// reports Ghostty writes for a drag reach the Gateway, and a tap's
+    /// click doesn't; only watching, nothing does.
+    func testTakeoverPassesTheWheelOnToTheProgram() async throws {
+        TerminalCell.forget()
+        TerminalCell.remember(CGSize(width: 5.5, height: 11), fontSize: 9)
+        let model = TerminalModel()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 600))
+        model.resume(config, session: "t1", fontSize: 9)
+        XCTAssertNotNil(model.takeover)
+        let feed = try XCTUnwrap(model.feed)
+        // What Ghostty's write would carry: a tap, then a drag up.
+        feed.session.sendInput(Data("\u{1b}[<0;3;4M\u{1b}[<0;3;4m".utf8))
+        feed.session.sendInput(Data("\u{1b}[<64;3;4M\u{1b}[<64;3;4M".utf8))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(model.observer.wheels, [Data("\u{1b}[<64;3;4M\u{1b}[<64;3;4M".utf8)])
+        model.stop()
+
+        TerminalCell.forget()
+        let watching = TerminalModel()
+        watching.pageSize(CGSize(width: 402, height: 600))
+        watching.resume(config, session: "t1", fontSize: 9)
+        XCTAssertNil(watching.takeover)
+        try XCTUnwrap(watching.feed).session.sendInput(Data("\u{1b}[<64;3;4M".utf8))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(watching.observer.wheels, [], "a watching stream never writes to the terminal")
+        watching.stop()
+    }
+
     /// A page coming back measures its surface before core answers the
     /// attach; once it answers, core is asked for the grid on screen.
     func testSurfaceGridFromBeforeTheAttachIsAskedFor() async throws {

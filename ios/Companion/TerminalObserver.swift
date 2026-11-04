@@ -47,9 +47,23 @@ final class TerminalObserver {
         Task { try? await socket.send(.string(message)) }
     }
 
+    /// A drag on a full-screen program, as the wheel reports Ghostty made
+    /// for it. Ignored by the Gateway on a stream that only watches.
+    func wheel(_ reports: Data) {
+        #if DEBUG
+        wheels.append(reports)
+        #endif
+        guard let socket,
+              let message = try? JSONEncoder().encode(["type": "wheel", "data": String(decoding: reports, as: UTF8.self)])
+        else { return }
+        Task { try? await socket.send(.string(String(decoding: message, as: UTF8.self))) }
+    }
+
     #if DEBUG
     /// Every grid asked for, for tests.
     private(set) var resizes: [TerminalGrid] = []
+    /// Every scroll passed on, for tests.
+    private(set) var wheels: [Data] = []
 
     /// Core answered the attach with this grid, for tests.
     func attached(cols: Int, rows: Int) {

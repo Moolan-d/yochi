@@ -1,7 +1,8 @@
 //! A view of one terminal: its own framed `hc connect`, then `terminal.attach`.
 //! Observing never types into or resizes the terminal. Taking it over sets
-//! its size to the phone's while attached (and still never types); core
-//! gives the size back to the desktop once the phone detaches.
+//! its size to the phone's while attached; core gives the size back to the
+//! desktop once the phone detaches. A takeover passes on only the mouse
+//! wheel, so a full-screen program can scroll its own history; it never types.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -126,6 +127,15 @@ impl Observer {
         write_frame(&mut self.stdin, self.channel, RESIZE, &resize_payload(cols, rows)).await
     }
 
+    /// A takeover viewer's scroll, as wheel reports the program asked for
+    /// (see `wheel_only`). Anything else is refused, so the phone never types.
+    pub async fn wheel(&mut self, reports: &[u8]) -> Result<()> {
+        if !wheel_only(reports) {
+            bail!("not only wheel reports");
+        }
+        write_frame(&mut self.stdin, self.channel, DATA, reports).await
+    }
+
     pub async fn detach(mut self) {
         let _ = write_frame(&mut self.stdin, self.channel, CLOSE, &[]).await;
     }
@@ -136,6 +146,54 @@ fn resize_payload(cols: u16, rows: u16) -> [u8; 4] {
     let [c0, c1] = cols.to_le_bytes();
     let [r0, r1] = rows.to_le_bytes();
     [c0, c1, r0, r1]
+}
+
+/// Longest scroll the app sends at once; a fling sends many in a row.
+const WHEEL_MAX: usize = 4096;
+
+/// Whether `bytes` are nothing but what a terminal sends for a scroll: SGR
+/// mouse wheel reports (`ESC [ < b ; x ; y M`, b 64–67 plus shift, meta or
+/// ctrl), or the cursor up and down keys a terminal sends instead on the
+/// alternate screen when the program doesn't report the mouse.
+pub fn wheel_only(bytes: &[u8]) -> bool {
+    if bytes.is_empty() || bytes.len() > WHEEL_MAX {
+        return false;
+    }
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match wheel_report(rest) {
+            Some(len) => rest = &rest[len..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// The length of the wheel report or scroll key `bytes` start with.
+fn wheel_report(bytes: &[u8]) -> Option<usize> {
+    match bytes {
+        [0x1b, b'[' | b'O', b'A' | b'B', ..] => Some(3),
+        [0x1b, b'[', b'<', rest @ ..] => {
+            let mut fields = [0u32; 3];
+            let mut at = 0;
+            for (i, field) in fields.iter_mut().enumerate() {
+                let digits = rest[at..].iter().take_while(|b| b.is_ascii_digit()).count();
+                if digits == 0 || digits > 4 {
+                    return None;
+                }
+                *field = std::str::from_utf8(&rest[at..at + digits]).ok()?.parse().ok()?;
+                at += digits;
+                let end = if i < 2 { b';' } else { b'M' };
+                if rest.get(at) != Some(&end) {
+                    return None;
+                }
+                at += 1;
+            }
+            // Shift, meta and ctrl ride in bits 2–4; 64–67 is the wheel.
+            (64..=67).contains(&(fields[0] & !0b11100)).then_some(3 + at)
+        }
+        _ => None,
+    }
 }
 
 fn output(kind: u8, payload: Vec<u8>) -> Option<Output> {
@@ -187,6 +245,26 @@ async fn write_frame(stdin: &mut ChildStdin, channel: u32, kind: u8, payload: &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_wheel_reports_pass() {
+        assert!(wheel_only(b"\x1b[<64;10;5M"));
+        assert!(wheel_only(b"\x1b[<65;1;1M\x1b[<65;1;1M\x1b[<69;300;40M"));
+        assert!(wheel_only(b"\x1b[A\x1b[B\x1bOA\x1bOB"));
+        // Clicks, releases, motion, typing and partial reports are refused.
+        assert!(!wheel_only(b""));
+        assert!(!wheel_only(b"\x1b[<0;10;5M"));
+        assert!(!wheel_only(b"\x1b[<0;10;5m"));
+        assert!(!wheel_only(b"\x1b[<35;10;5M"));
+        assert!(!wheel_only(b"\x1b[<64;10;5m"));
+        assert!(!wheel_only(b"\x1b[<64;10;5"));
+        assert!(!wheel_only(b"\x1b[<64;10M"));
+        assert!(!wheel_only(b"\x1b[<64;;5M"));
+        assert!(!wheel_only(b"\x1b[<64;10;5Mls\r"));
+        assert!(!wheel_only(b"\x1b[C"));
+        assert!(!wheel_only(b"\x1b[M`!!"));
+        assert!(!wheel_only(&b"\x1b[A".repeat(2000)));
+    }
 
     #[test]
     fn resize_payload_is_cols_then_rows() {
