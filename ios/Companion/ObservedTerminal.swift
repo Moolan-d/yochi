@@ -169,18 +169,14 @@ final class TerminalFeed {
     /// screen TUI uses; such a screen cannot be reflowed without misplacing it.
     private(set) var isFullScreen = false
     var onFullScreenChange: ((Bool) -> Void)?
-    /// Whether the program asked for mouse reports. Ghostty then turns a drag
-    /// into wheel reports for it instead of scrolling the history here.
-    var reportsMouse: Bool { !mouseModes.isEmpty }
-    private var mouseModes: Set<Int> = []
-    /// A mode switch cut off at the end of the last bytes, read whole with
-    /// the next ones.
-    private var modeTail: [UInt8] = []
+    /// The tail of the last bytes, so a mode switch split between chunks is
+    /// still read whole.
+    private var modeTail = Data()
 
     func receive(_ data: Data) {
         hasOutput = true
         lastReceiveAt = Date()
-        noteModes(data)
+        noteScreenMode(data)
         if isOpen, !isPaused {
             session.receive(data)
             return
@@ -212,66 +208,40 @@ final class TerminalFeed {
         heldBytes = 0
     }
 
-    /// Follows the DEC private modes programs set and reset
-    /// (`ESC [ ? n ; … h|l`): the alternate screen and mouse reporting. The
-    /// core's first paint turns them all off, then on again for what the
-    /// program it holds uses.
-    private func noteModes(_ data: Data) {
+    /// Follows the alternate-screen switches programs emit. The core's first
+    /// paint turns them all off, then on again when the screen it holds is
+    /// the alternate one.
+    private func noteScreenMode(_ data: Data) {
         var bytes = modeTail
-        bytes.append(contentsOf: data)
-        modeTail = []
-        var screen: Bool?
-        var at = 0
-        scan: while let escape = bytes[at...].firstIndex(of: 0x1b) {
-            at = escape + 1
-            var index = escape + 1
-            for expected in [UInt8(ascii: "["), UInt8(ascii: "?")] {
-                guard index < bytes.count else { keepTail(bytes, from: escape); break scan }
-                guard bytes[index] == expected else { continue scan }
-                index += 1
+        bytes.append(data)
+        var mode: Bool?
+        var index = bytes.startIndex
+        while let escape = bytes[index...].firstIndex(of: 0x1b) {
+            let rest = bytes[escape...]
+            var matched = false
+            for (sequence, fullScreen) in Self.screenModes where rest.starts(with: sequence) {
+                mode = fullScreen
+                index = rest.index(rest.startIndex, offsetBy: sequence.count)
+                matched = true
+                break
             }
-            var params: [Int] = []
-            var value = 0, digits = 0
-            while true {
-                guard index < bytes.count else { keepTail(bytes, from: escape); break scan }
-                let byte = bytes[index]
-                if (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte), digits < 5 {
-                    value = value * 10 + Int(byte - UInt8(ascii: "0"))
-                    digits += 1
-                } else if byte == UInt8(ascii: ";") {
-                    params.append(value)
-                    value = 0
-                    digits = 0
-                } else if byte == UInt8(ascii: "h") || byte == UInt8(ascii: "l") {
-                    params.append(value)
-                    let on = byte == UInt8(ascii: "h")
-                    for mode in params {
-                        if Self.screenModes.contains(mode) { screen = on }
-                        if Self.mouseModes.contains(mode) {
-                            if on { mouseModes.insert(mode) } else { mouseModes.remove(mode) }
-                        }
-                    }
-                    at = index + 1
-                    continue scan
-                } else {
-                    continue scan
-                }
-                index += 1
-            }
+            if !matched { index = rest.index(after: rest.startIndex) }
         }
-        guard let screen, screen != isFullScreen else { return }
-        isFullScreen = screen
+        modeTail = bytes.suffix(8)
+        guard let mode, mode != isFullScreen else { return }
+        isFullScreen = mode
         let change = onFullScreenChange
-        DispatchQueue.main.async { change?(screen) }
+        DispatchQueue.main.async { change?(mode) }
     }
 
-    private func keepTail(_ bytes: [UInt8], from start: Int) {
-        if bytes.count - start <= 32 { modeTail = Array(bytes[start...]) }
-    }
-
-    private static let screenModes: Set<Int> = [47, 1047, 1049]
-    /// X10, normal, button-event and any-event tracking.
-    private static let mouseModes: Set<Int> = [9, 1000, 1002, 1003]
+    private static let screenModes: [([UInt8], Bool)] = [
+        (Array("\u{1b}[?1049h".utf8), true),
+        (Array("\u{1b}[?1047h".utf8), true),
+        (Array("\u{1b}[?47h".utf8), true),
+        (Array("\u{1b}[?1049l".utf8), false),
+        (Array("\u{1b}[?1047l".utf8), false),
+        (Array("\u{1b}[?47l".utf8), false),
+    ]
 
     func open() {
         guard !isOpen else { return }
@@ -337,8 +307,8 @@ struct ObservedTerminal: UIViewRepresentable {
 /// at that grid; a full-screen program draws at absolute positions that no
 /// reflow keeps, so it stays as the desktop drew it: the whole grid fitted
 /// to the phone's width, which a pinch zooms and a drag pans.
-final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate,
-    TerminalSurfaceGridResizeDelegate, TerminalSurfaceTextSelectionRequestDelegate, TerminalSurfaceScrollbarDelegate {
+final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceGridResizeDelegate,
+    TerminalSurfaceTextSelectionRequestDelegate, TerminalSurfaceScrollbarDelegate {
     var onGridChange: ((TerminalGrid) -> Void)?
     var onTextSelection: ((TerminalTextSelection) -> Void)?
     var onAwayFromBottom: ((Bool) -> Void)?
@@ -355,16 +325,6 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecogni
     private var cell: CGSize?
     private var lastGrid: TerminalGrid?
     private var awayFromBottom = false
-    /// Ghostty's last word on the history: where the viewport is in it.
-    private var scrollbar: TerminalScrollbar?
-    /// Drags the history point for point; Ghostty's own drag moves it a row at a time.
-    private let historyPan = UIPanGestureRecognizer()
-    /// While a drag or its coast is under way.
-    private var history: HistoryScroll?
-    /// The row the surface was last told to show.
-    private var shownRow: Int?
-    private var glide: (curve: HistoryGlide, started: CFTimeInterval)?
-    private var glideLink: CADisplayLink?
 
     /// True until the first paint is taken and shown.
     private var preparing = true
@@ -409,18 +369,6 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecogni
         terminal.alpha = 0
         zoom.addSubview(terminal)
 
-        historyPan.addTarget(self, action: #selector(dragHistory(_:)))
-        historyPan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        historyPan.maximumNumberOfTouches = 1
-        historyPan.delegate = self
-        terminal.addGestureRecognizer(historyPan)
-        // Ghostty's finger drag waits to see whether this one takes it.
-        for gesture in terminal.gestureRecognizers ?? [] where gesture !== historyPan && gesture is UIPanGestureRecognizer
-            && gesture.allowedTouchTypes == historyPan.allowedTouchTypes {
-            gesture.require(toFail: historyPan)
-        }
-        terminal.onTouchDown = { [weak self] in self?.catchGlide() }
-
         #if DEBUG
         terminal.addGestureRecognizer(TouchWatcher { FrameMeter.shared.touch() })
         #endif
@@ -458,7 +406,6 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecogni
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0, bounds.height > 0 else { return }
-        if zoom.frame.size != bounds.size { endHistoryScroll() }
         zoom.frame = bounds
         if preparing {
             if !paintStarted {
@@ -650,12 +597,6 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecogni
     /// arrives; the page offers the way back down. A full-screen program
     /// has no history, so it never counts as scrolled away.
     func terminalDidUpdateScrollbar(_ scrollbar: TerminalScrollbar) {
-        self.scrollbar = scrollbar
-        if var history {
-            // Output added to the history while the finger is on it.
-            history.lastRow = Int(scrollbar.total) - Int(scrollbar.len)
-            self.history = history
-        }
         let away = !asDrawn && scrollbar.offset + scrollbar.len < scrollbar.total
         guard away != awayFromBottom else { return }
         awayFromBottom = away
@@ -670,109 +611,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecogni
     }
 
     func scrollToBottom() {
-        endHistoryScroll()
         terminal.performBindingAction("scroll_to_bottom")
-    }
-
-    // MARK: Smooth history
-
-    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
-        guard gesture === historyPan else { return super.gestureRecognizerShouldBegin(gesture) }
-        // A program that takes the mouse, or a full-screen one, gets
-        // Ghostty's wheel reports or arrow keys instead.
-        return !preparing && !asDrawn && !feed.isFullScreen && !feed.reportsMouse
-            && cell != nil && scrollbar != nil
-    }
-
-    @objc private func dragHistory(_ pan: UIPanGestureRecognizer) {
-        switch pan.state {
-        case .began:
-            stopGlide()
-            if history == nil, let scrollbar, let cell {
-                history = HistoryScroll(cell: cell.height, row: Int(scrollbar.offset),
-                                        lastRow: Int(scrollbar.total) - Int(scrollbar.len))
-                shownRow = Int(scrollbar.offset)
-            }
-            fallthrough
-        case .changed:
-            let moved = pan.translation(in: self).y
-            pan.setTranslation(.zero, in: self)
-            guard var history else { return }
-            // The finger pulls the text: down shows older lines.
-            history.move(by: -moved)
-            self.history = history
-            showHistory()
-        case .ended:
-            startGlide(velocity: -pan.velocity(in: self).y)
-        case .cancelled, .failed:
-            startGlide(velocity: 0)
-        default:
-            break
-        }
-    }
-
-    /// Shows `history`: Ghostty at its row, drawn in this same frame, and the
-    /// surface shifted by the rest.
-    private func showHistory() {
-        guard let history else { return }
-        let (row, shift) = history.frame
-        if row != shownRow {
-            _ = terminal.surface?.scrollToRow(UInt(row))
-            terminal.renderNow()
-            shownRow = row
-        }
-        zoom.contentOffset = CGPoint(x: 0, y: -shift)
-    }
-
-    private func startGlide(velocity: CGFloat) {
-        guard let history else { return }
-        glide = (HistoryGlide(from: history, velocity: velocity), CACurrentMediaTime())
-        guard glideLink == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(glideFrame(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
-        link.add(to: .main, forMode: .common)
-        glideLink = link
-    }
-
-    @objc private func glideFrame(_ link: CADisplayLink) {
-        guard let glide, var history else { return endHistoryScroll() }
-        let elapsed = link.targetTimestamp - glide.started
-        if glide.curve.isDone(at: elapsed) {
-            history.move(to: glide.curve.target)
-            self.history = history
-            showHistory()
-            finishHistoryScroll()
-        } else {
-            history.move(to: glide.curve.position(at: elapsed))
-            self.history = history
-            showHistory()
-        }
-    }
-
-    private func stopGlide() {
-        glideLink?.invalidate()
-        glideLink = nil
-        glide = nil
-    }
-
-    /// A finger on a coasting history holds it, as on any scroll view.
-    private func catchGlide() {
-        guard glide != nil else { return }
-        startGlide(velocity: 0)
-    }
-
-    /// Resting on a whole row; back at the newest output, Ghostty follows it again.
-    private func finishHistoryScroll() {
-        let atBottom = history.map { $0.frame.row >= $0.lastRow } ?? false
-        endHistoryScroll()
-        if atBottom { terminal.performBindingAction("scroll_to_bottom") }
-    }
-
-    private func endHistoryScroll() {
-        stopGlide()
-        history = nil
-        shownRow = nil
-        if !asDrawn, zoom.contentOffset != .zero { zoom.contentOffset = .zero }
     }
 
     // MARK: Text selection
@@ -788,7 +627,6 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, UIGestureRecogni
 /// a tap never becomes first responder, so no keyboard appears.
 private final class SelectionOnlyTerminalView: UITerminalView {
     override var canBecomeFirstResponder: Bool { false }
-    var onTouchDown: (() -> Void)?
 
     override func toggleSoftwareKeyboard() {}
 
@@ -802,7 +640,6 @@ private final class SelectionOnlyTerminalView: UITerminalView {
             let at = touch.location(in: self)
             sendMousePos(x: at.x, y: at.y)
         }
-        onTouchDown?()
         super.touchesBegan(touches, with: event)
     }
 }
