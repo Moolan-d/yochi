@@ -5,6 +5,7 @@
 //! has the Herdr desktop app take it into a space, in a tab of its own.
 
 use crate::core::{RequestError, error_kind, request as request_core};
+use crate::lang::Lang;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -42,8 +43,8 @@ impl Response {
     }
 }
 
-pub async fn run(hc: &str, request: RunRequest) -> Response {
-    if let Err(message) = validate(&request) {
+pub async fn run(hc: &str, request: RunRequest, lang: Lang) -> Response {
+    if let Err(message) = validate(&request, lang) {
         return Response::failed(request.id, "invalid_params", message);
     }
     let id = request.id.clone();
@@ -56,11 +57,11 @@ pub async fn run(hc: &str, request: RunRequest) -> Response {
         },
     };
     match tokio::time::timeout(RUN_TIMEOUT, request_core(hc, "terminal.run", params(&request, &space))).await {
-        Ok(Ok(reply)) => map_reply(id, machine.as_deref(), reply),
+        Ok(Ok(reply)) => map_reply(id, machine.as_deref(), reply, lang),
         Ok(Err(RequestError::BeforeSend(error))) => Response::failed(id, "unavailable", format!("{error:#}")),
         // The call may have started a terminal; say so rather than offer a retry.
         Ok(Err(RequestError::AfterSend(error))) => Response::failed(id, "unknown", format!("{error:#}")),
-        Err(_) => Response::failed(id, "unknown", "创建超时，结果未知"),
+        Err(_) => Response::failed(id, "unknown", lang.pick("创建超时，结果未知", "Timed out creating it; the result is unknown")),
     }
 }
 
@@ -83,24 +84,24 @@ fn new_space_id() -> anyhow::Result<String> {
     Ok(format!("sp{}", crate::devices::hex(&crate::devices::random_bytes::<16>()?)))
 }
 
-fn validate(request: &RunRequest) -> Result<(), String> {
+fn validate(request: &RunRequest, lang: Lang) -> Result<(), String> {
     if request.argv.len() > MAX_ARGV {
-        return Err(format!("程序参数最多 {MAX_ARGV} 个"));
+        return Err(lang.pick(format!("程序参数最多 {MAX_ARGV} 个"), format!("At most {MAX_ARGV} program arguments")));
     }
     if request.argv.iter().any(|arg| arg.is_empty() || arg.len() > MAX_ARG_BYTES) {
-        return Err("程序参数无效".into());
+        return Err(lang.pick("程序参数无效", "Invalid program arguments").into());
     }
     if request.cwd.len() > MAX_CWD_BYTES {
-        return Err("目录过长".into());
+        return Err(lang.pick("目录过长", "The folder is too long").into());
     }
     if machine(request).is_some_and(|machine| machine.len() > MAX_MACHINE_BYTES) {
-        return Err("机器名无效".into());
+        return Err(lang.pick("机器名无效", "Invalid machine name").into());
     }
     if let Some(space) = space(request) {
         // A space lives on one machine; one from another would be made anew there.
         let here = local(space, machine(request));
         if space.len() > MAX_SPACE_BYTES || here.contains('/') || (machine(request).is_some() && here == space) {
-            return Err("Space 不在所选机器上".into());
+            return Err(lang.pick("Space 不在所选机器上", "The Space isn't on the chosen machine").into());
         }
     }
     Ok(())
@@ -127,16 +128,16 @@ fn params(request: &RunRequest, space: &str) -> Value {
 }
 
 /// The address as the session list gives it: `t7` here, `vps-us/t7` there.
-fn map_reply(id: String, machine: Option<&str>, reply: Value) -> Response {
+fn map_reply(id: String, machine: Option<&str>, reply: Value, lang: Lang) -> Response {
     if let Some(error) = reply.get("error") {
         return Response::failed(
             id,
             error_kind(error),
-            error["message"].as_str().unwrap_or("创建会话失败"),
+            error["message"].as_str().unwrap_or(lang.pick("创建会话失败", "Couldn't create the session")),
         );
     }
     let Some(address) = reply["result"]["address"].as_str().filter(|address| !address.is_empty()) else {
-        return Response::failed(id, "unknown", "herdr-core 返回了无效的会话信息");
+        return Response::failed(id, "unknown", lang.pick("herdr-core 返回了无效的会话信息", "herdr-core gave invalid session details"));
     };
     let session = match machine {
         Some(machine) if !address.contains('/') => format!("{machine}/{address}"),
@@ -181,35 +182,43 @@ mod tests {
     #[test]
     fn validates_arguments() {
         let mut request = request();
-        assert!(validate(&request).is_ok());
+        assert!(validate(&request, Lang::English).is_ok());
         request.argv = vec!["x".into(); MAX_ARGV + 1];
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
         request.argv = vec!["".into()];
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
         request.argv = vec!["x".into()];
         request.cwd = "x".repeat(MAX_CWD_BYTES + 1);
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
         request.cwd = "/".into();
         request.machine = Some("m".repeat(MAX_MACHINE_BYTES + 1));
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
+    }
+
+    #[test]
+    fn says_why_in_the_phones_language() {
+        let mut request = request();
+        request.cwd = "x".repeat(MAX_CWD_BYTES + 1);
+        assert_eq!(validate(&request, Lang::English).unwrap_err(), "The folder is too long");
+        assert_eq!(validate(&request, Lang::Chinese).unwrap_err(), "目录过长");
     }
 
     #[test]
     fn space_must_be_on_the_chosen_machine() {
         let mut request = request();
         request.space = Some("sp1".into());
-        assert!(validate(&request).is_ok());
+        assert!(validate(&request, Lang::English).is_ok());
         request.space = Some("vps-us/sp1".into());
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
         request.machine = Some("vps-us".into());
-        assert!(validate(&request).is_ok());
+        assert!(validate(&request, Lang::English).is_ok());
         assert_eq!(local("vps-us/sp1", Some("vps-us")), "sp1");
         request.space = Some("sp1".into());
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
         request.space = Some("vps-eu/sp1".into());
-        assert!(validate(&request).is_err());
+        assert!(validate(&request, Lang::English).is_err());
         request.space = Some(" ".into());
-        assert!(validate(&request).is_ok());
+        assert!(validate(&request, Lang::English).is_ok());
     }
 
     #[test]
@@ -221,12 +230,12 @@ mod tests {
 
     #[test]
     fn maps_created_with_its_machine() {
-        let local = map_reply("r1".into(), None, json!({"result": {"address": "t24"}}));
+        let local = map_reply("r1".into(), None, json!({"result": {"address": "t24"}}), Lang::English);
         assert!(matches!(local, Response::RunCreated { session, .. } if session == "t24"));
-        let remote = map_reply("r2".into(), Some("vps-us"), json!({"result": {"address": "t7"}}));
+        let remote = map_reply("r2".into(), Some("vps-us"), json!({"result": {"address": "t7"}}), Lang::English);
         assert!(matches!(remote, Response::RunCreated { session, .. } if session == "vps-us/t7"));
         // Core may already give the qualified address.
-        let qualified = map_reply("r3".into(), Some("vps-us"), json!({"result": {"address": "vps-us/t7"}}));
+        let qualified = map_reply("r3".into(), Some("vps-us"), json!({"result": {"address": "vps-us/t7"}}), Lang::English);
         assert!(matches!(qualified, Response::RunCreated { session, .. } if session == "vps-us/t7"));
     }
 
@@ -234,9 +243,9 @@ mod tests {
     fn maps_core_errors_and_missing_address() {
         let failed = map_reply("r1".into(), None, json!({
             "error": {"code": -32000, "message": "no such machine", "data": {"kind": "machine_unknown"}},
-        }));
+        }), Lang::English);
         assert!(matches!(failed, Response::RunFailed { kind, .. } if kind == "machine_unknown"));
-        let invalid = map_reply("r1".into(), None, json!({"result": {}}));
+        let invalid = map_reply("r1".into(), None, json!({"result": {}}), Lang::English);
         assert!(matches!(invalid, Response::RunFailed { kind, .. } if kind == "unknown"));
     }
 }

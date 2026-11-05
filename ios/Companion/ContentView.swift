@@ -25,15 +25,15 @@ struct ContentView: View {
                 if let config {
                     SessionListView(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
                                     newSession: { showingNewSession = true })
-                        .navigationTitle("Agent")
+                        .navigationTitle(String(localized: "home.title", defaultValue: "Agents"))
                         .navigationDestination(for: Session.self) { session in
                             ObserveView(session: session, config: config, client: client) { path.append($0) }
                         }
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {
-                                Button("新建", systemImage: "plus") { showingNewSession = true }
+                                Button("New", systemImage: "plus") { showingNewSession = true }
                                     .disabled(client.phase != .connected)
-                                Button("设置", systemImage: "gearshape") { showingSettings = true }
+                                Button("Settings", systemImage: "gearshape") { showingSettings = true }
                             }
                         }
                         .sheet(isPresented: $showingSettings) {
@@ -65,20 +65,20 @@ struct ContentView: View {
                 replacement = opened
             }
         }
-        .confirmationDialog("与新的 Gateway 配对？", isPresented: Binding(
+        .confirmationDialog("Pair with a New Gateway?", isPresented: Binding(
             get: { replacement != nil },
             set: { if !$0 { replacement = nil } }
         ), titleVisibility: .visible, presenting: replacement) { opened in
-            Button("配对新的 Gateway", role: .destructive) {
+            Button("Pair a New Gateway", role: .destructive) {
                 showingSettings = false
                 path = []
                 forget()
                 invite = opened
             }
             // iOS drops `.cancel` buttons from this popover, so keeping is a plain button.
-            Button("保留当前配对") {}
+            Button("Keep Current Pairing") {}
         } message: { _ in
-            Text("此 iPhone 与 \(config?.host ?? "当前 Gateway") 的配对将被删除。")
+            Text("This iPhone's pairing with \(config?.host ?? String(localized: "the current Gateway")) will be removed.")
         }
         .onChange(of: config, initial: true) { _, config in
             if let config { client.connect(config) }
@@ -171,15 +171,15 @@ struct PairingView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("地址") {
-                    TextField("地址", text: $host, prompt: Text(throughRelay ? "仅经 Relay" : "100.x.y.z"))
+                LabeledContent("Address") {
+                    TextField("Address", text: $host, prompt: Text(throughRelay ? "Relay only" : "100.x.y.z"))
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("配对码") {
-                    TextField("配对码", text: $code, prompt: Text("XXXX-XXXX"))
+                LabeledContent("Pairing Code") {
+                    TextField("Pairing Code", text: $code, prompt: Text("XXXX-XXXX"))
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                         .monospaced()
@@ -188,7 +188,7 @@ struct PairingView: View {
             } header: {
                 Text("Gateway")
             } footer: {
-                Text("在主 Mac 上运行 yochi pair，用相机扫描显示的二维码，或在此填写地址和配对码。")
+                Text("Run yochi pair on the main Mac, then scan its QR code with the Camera, or enter the address and pairing code here.")
             }
             Section {
                 if let error {
@@ -199,7 +199,7 @@ struct PairingView: View {
                     Task { await pair() }
                 } label: {
                     HStack {
-                        Text("配对")
+                        Text("Pair")
                         if pairing {
                             Spacer()
                             ProgressView()
@@ -208,7 +208,7 @@ struct PairingView: View {
                 }
                 .disabled(!canPair)
             } footer: {
-                Text("配对后，此 iPhone 可以查看并操作主 Mac 上的全部会话终端，相当于用你的账户在该 Mac 及其连接的机器上执行命令。")
+                Text("Once paired, this iPhone can see and control every session terminal on the main Mac: it can run commands as your account on that Mac and the machines it connects to.")
             }
         }
         .onSubmit { if canPair { Task { await pair() } } }
@@ -247,46 +247,46 @@ struct GatewaySettingsView: View {
         NavigationStack {
             Form {
                 Section("Gateway") {
-                    LabeledContent("地址", value: config.host.isEmpty ? "仅经 Relay" : config.host)
+                    LabeledContent("Address", value: config.host.isEmpty ? String(localized: "Relay only") : config.host)
                         .accessibilityIdentifier("gateway.host")
-                    LabeledContent("状态", value: client.statusText)
+                    LabeledContent("Status", value: client.statusText)
                     if let path = client.path {
-                        LabeledContent("连接方式", value: path == .relay ? "Relay（端到端加密）" : "Tailnet")
+                        LabeledContent("Connection", value: path == .relay ? String(localized: "Relay (end-to-end encrypted)") : "Tailnet")
                             .accessibilityIdentifier("gateway.path")
                     }
                     if let core = client.coreName {
-                        LabeledContent("主 Mac", value: core)
+                        LabeledContent("Main Mac", value: core)
                     }
                 }
                 if let device = config.device {
                     Section {
-                        LabeledContent("设备 ID", value: device)
+                        LabeledContent("Device ID", value: device)
                             .textSelection(.enabled)
                     } footer: {
-                        Text("在主 Mac 上运行 yochi devices 可查看所有已配对的设备。")
+                        Text("Run yochi devices on the main Mac to see every paired device.")
                     }
                 }
                 Section {
-                    Button("取消配对", role: .destructive) { confirmingForget = true }
+                    Button("Unpair", role: .destructive) { confirmingForget = true }
                 } footer: {
-                    Text("此 iPhone 将删除与该 Gateway 的配对。已连接时 Gateway 会同时移除这台设备，否则请在主 Mac 上运行 yochi revoke。")
+                    Text("This iPhone will remove its pairing with that Gateway. If connected, the Gateway removes this device too; otherwise run yochi revoke on the main Mac.")
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button("Done") { dismiss() }
                 }
             }
-            .confirmationDialog("取消与此 Gateway 的配对？", isPresented: $confirmingForget, titleVisibility: .visible) {
-                Button("取消配对", role: .destructive) {
+            .confirmationDialog("Unpair from This Gateway?", isPresented: $confirmingForget, titleVisibility: .visible) {
+                Button("Unpair", role: .destructive) {
                     dismiss()
                     onForget()
                 }
-                Button("保留配对") {}
+                Button("Keep Pairing") {}
             } message: {
-                Text("之后需要在主 Mac 上重新运行 yochi pair 才能再次连接。")
+                Text("To connect again, run yochi pair on the main Mac.")
             }
         }
     }

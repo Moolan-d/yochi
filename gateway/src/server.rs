@@ -31,6 +31,7 @@ use crate::core::Client;
 use crate::devices::{Device, Store};
 use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
+use crate::lang::Lang;
 use crate::layout::Space;
 use crate::mux;
 use crate::relay::{self, RelayDevice};
@@ -395,12 +396,20 @@ async fn upgrade(
     State(state): State<AppState>,
     headers: HeaderMap,
     via_relay: Option<Extension<RelayDevice>>,
+    Query(query): Query<LangQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    ws.on_upgrade(move |socket| push(socket, state, device))
+    let lang = Lang::from_tag(query.lang.as_deref());
+    ws.on_upgrade(move |socket| push(socket, state, device, lang))
+}
+
+/// The language the phone shows, on any endpoint: `lang=en`, `lang=zh-Hans`.
+#[derive(Deserialize)]
+struct LangQuery {
+    lang: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -418,6 +427,8 @@ struct ObserveQuery {
     /// the app has. Answered `410` when the stream can't go on from there.
     resume: Option<String>,
     offset: Option<u64>,
+    /// The language the phone shows; see `LangQuery`.
+    lang: Option<String>,
 }
 
 /// What the app may send on a stream. Only a takeover resizes or scrolls.
@@ -508,12 +519,12 @@ enum Ended {
     /// The phone dropped off; a resumable stream waits for it.
     Dropped,
     /// The phone came back on another connection, wanting bytes from `u64` on.
-    Replaced(WebSocket, Caller, u64),
+    Replaced(Box<WebSocket>, Caller, u64),
 }
 
 /// How a stream answered a phone coming back.
 enum Accepted {
-    Yes(WebSocket, Caller, u64),
+    Yes(Box<WebSocket>, Caller, u64),
     /// It lacks bytes the phone needs, or gave up waiting; the phone attaches afresh.
     Refused,
     /// The phone's new connection never arrived.
@@ -587,13 +598,13 @@ async fn relay(
             Ended::Dropped => match stream.wait(&mut claims, &mut state.access(&caller)).await {
                 Accepted::Yes(socket, by, offset) => {
                     caller = by;
-                    (socket, offset)
+                    (*socket, offset)
                 }
                 Accepted::Refused | Accepted::Lost => break,
             },
             Ended::Replaced(socket, by, offset) => {
                 caller = by;
-                (socket, offset)
+                (*socket, offset)
             }
         };
         // A new token for each connection, so a token that resumed once can't again.
@@ -731,7 +742,7 @@ impl Stream {
             return Accepted::Lost;
         }
         match tokio::time::timeout(HANDOVER_WITHIN, arrival).await {
-            Ok(Ok((socket, caller))) => Accepted::Yes(socket, caller, claim.offset),
+            Ok(Ok((socket, caller))) => Accepted::Yes(Box::new(socket), caller, claim.offset),
             _ => Accepted::Lost,
         }
     }
@@ -876,7 +887,8 @@ async fn conversation(
     if session_size(&state.view.borrow(), &query.session).is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| follow(socket, state, device, query.session))
+    let lang = Lang::from_tag(query.lang.as_deref());
+    ws.on_upgrade(move |socket| follow(socket, state, device, query.session, lang))
 }
 
 /// What a tick depends on; a change in it means look again now.
@@ -887,7 +899,7 @@ fn watched(view: &CoreView, id: &str) -> Option<(Option<u64>, u64, Option<crate:
 /// Polls the transcript while a phone follows the conversation: every second
 /// while the Agent works or waits and for a few seconds after any change
 /// (Claude Code may finish before its last line is written), else every few.
-async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: String) {
+async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: String, lang: Lang) {
     let mut client = match Client::connect(&state.hc).await {
         Ok(client) => client,
         Err(err) => {
@@ -896,7 +908,7 @@ async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: Stri
             return;
         }
     };
-    let mut follower = Follower::default();
+    let mut follower = Follower::new(lang);
     let mut view = state.view.clone();
     let mut access = state.access(&caller);
     let mut seen = None;
@@ -972,7 +984,7 @@ async fn unpaired(devices: &mut watch::Receiver<Vec<Device>>, device: &str) {
     }
 }
 
-async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
+async fn push(mut socket: WebSocket, state: AppState, caller: Caller, lang: Lang) {
     let device = caller.device.clone();
     let mut tailnet = state.tailnet.clone();
     let mut view = state.view.clone();
@@ -1048,7 +1060,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = agent::Request { id, session, text, force };
-                            let response = agent::send(&state.hc, &state.view, request).await;
+                            let response = agent::send(&state.hc, &state.view, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1059,7 +1071,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = agent::AnswerRequest { id, session, choice, expect };
-                            let response = agent::answer(&state.hc, &state.view, request).await;
+                            let response = agent::answer(&state.hc, &state.view, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1070,7 +1082,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = agent::InterruptRequest { id, session };
-                            let response = agent::interrupt(&state.hc, &state.view, request).await;
+                            let response = agent::interrupt(&state.hc, &state.view, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1081,7 +1093,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = agent::PutRequest { id, session, name, data };
-                            let response = agent::put(&state.hc, &state.view, request).await;
+                            let response = agent::put(&state.hc, &state.view, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1092,7 +1104,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = changes::Request { id, session };
-                            let response = changes::list(&state.hc, &state.view, &state.changes, request).await;
+                            let response = changes::list(&state.hc, &state.view, &state.changes, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1103,7 +1115,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = changes::DiffRequest { id, session, path };
-                            let response = changes::diff(&state.hc, &state.changes, request).await;
+                            let response = changes::diff(&state.hc, &state.changes, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1114,7 +1126,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = commands::Request { id, session };
-                            let response = commands::list(&state.hc, &state.view, request).await;
+                            let response = commands::list(&state.hc, &state.view, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1125,7 +1137,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = run::RunRequest { id, machine, cwd, argv, space };
-                            let response = run::run(&state.hc, request).await;
+                            let response = run::run(&state.hc, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }
@@ -1155,7 +1167,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller) {
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
                             let request = agent::KeysRequest { id, session, keys };
-                            let response = agent::press(&state.hc, &state.view, request).await;
+                            let response = agent::press(&state.hc, &state.view, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);
                             }

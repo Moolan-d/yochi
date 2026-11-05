@@ -31,6 +31,22 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(feed.items[1].output, "a\nb")
     }
 
+    /// A notice the app knows is worded by the app; others show the Gateway's text.
+    func testNoticesWithACodeAreWordedByTheApp() throws {
+        let feed = ConversationFeed()
+        feed.apply(try decode(#"""
+        {"type":"conversation","supported":true,"items":[
+          {"kind":"notice","id":"n1","text":"已中断","code":"interrupted"},
+          {"kind":"notice","id":"n2","text":"Context compacted","code":"compacted"},
+          {"kind":"notice","id":"n3","text":"Something new","code":"later"},
+          {"kind":"notice","id":"n4","text":"Old Gateway"}
+        ]}
+        """#))
+        XCTAssertEqual(feed.items.map(\.noticeText), [
+            String(localized: "Interrupted"), String(localized: "Context compacted"), "Something new", "Old Gateway",
+        ])
+    }
+
     func testTaskReportsAreTheirOwnItems() throws {
         let feed = ConversationFeed()
         feed.apply(try decode(#"""

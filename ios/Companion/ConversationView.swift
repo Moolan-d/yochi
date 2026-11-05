@@ -55,23 +55,23 @@ struct ConversationPane: View {
     private var placeholder: some View {
         switch feed.phase {
         case .connecting:
-            ProgressView("正在读取对话…")
+            ProgressView("Loading the conversation…")
         case .failed(let reason):
             ContentUnavailableView {
-                Label("无法读取对话", systemImage: "exclamationmark.triangle")
+                Label("Can't Read the Conversation", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(reason)
             } actions: {
-                Button("重试", action: retry).buttonStyle(.borderedProminent)
+                Button("Retry", action: retry).buttonStyle(.borderedProminent)
             }
         case .closed(let reason):
-            ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
+            ContentUnavailableView("The session has ended", systemImage: "stop.circle", description: Text(reason))
         case .following, .unsupported:
             // Unsupported shows only for Claude Code before its transcript exists.
             ContentUnavailableView {
-                Label("还没有对话", systemImage: "bubble.left.and.bubble.right")
+                Label("No Conversation Yet", systemImage: "bubble.left.and.bubble.right")
             } description: {
-                Text(working ? "Agent 正在工作…" : "发出第一条消息后，对话会显示在这里。")
+                Text(working ? "The Agent is working…" : "Once you send the first message, the conversation shows up here.")
             }
         }
     }
@@ -86,7 +86,7 @@ struct ConversationPane: View {
                 }
                 if working {
                     Label {
-                        Text("Agent 正在工作…")
+                        Text("The Agent is working…")
                     } icon: {
                         ProgressView().controlSize(.small)
                     }
@@ -97,8 +97,8 @@ struct ConversationPane: View {
                 switch feed.phase {
                 case .failed(let reason):
                     HStack {
-                        BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
-                        Button("重试", action: retry).buttonStyle(.bordered)
+                        BannerLabel(text: String(localized: "Disconnected: \(reason)"), systemImage: "wifi.exclamationmark")
+                        Button("Retry", action: retry).buttonStyle(.bordered)
                     }
                 case .closed(let reason):
                     BannerLabel(text: reason, systemImage: "stop.circle")
@@ -182,7 +182,7 @@ struct ConversationPane: View {
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(unseen ? "回到最新，有新消息" : "回到最新")
+        .accessibilityLabel(unseen ? "Jump to Latest, new messages" : "Jump to Latest")
         .accessibilityIdentifier("scrollToLatest")
     }
 
@@ -232,7 +232,7 @@ struct ConversationRow: View {
                     .textSelection(.enabled)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("你：\(item.text ?? "")")
+            .accessibilityLabel("You: \(item.text ?? "")")
         case .agent:
             AgentReply(text: item.text ?? "", arrival: arrival)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,7 +253,7 @@ struct ConversationRow: View {
         case .task:
             TaskRow(item: item)
         case .notice:
-            Text(item.text ?? "")
+            Text(item.noticeText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
@@ -335,7 +335,7 @@ private struct ToolRow: View {
 
     private var answer: String? {
         guard let answers = item.answers, !answers.isEmpty else { return nil }
-        return answers.values.sorted().joined(separator: "、")
+        return answers.values.sorted().joined(separator: String(localized: "list.separator", defaultValue: ", "))
     }
 
     var body: some View {
@@ -348,7 +348,7 @@ private struct ToolRow: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name ?? "工具")
+                        Text(item.name ?? String(localized: "Tool"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         if let summary = item.summary, !summary.isEmpty {
@@ -359,7 +359,7 @@ private struct ToolRow: View {
                                 .multilineTextAlignment(.leading)
                         }
                         if let answer {
-                            Text("已选：\(answer)")
+                            Text("Selected: \(answer)")
                                 .font(.footnote)
                                 .foregroundStyle(.primary)
                         }
@@ -385,8 +385,8 @@ private struct ToolRow: View {
         .padding(10)
         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("工具 \(item.name ?? "")：\(item.summary ?? "")，\(stateText)\(answer.map { "，已选：\($0)" } ?? "")")
-        .accessibilityHint(item.output == nil ? "" : "轻点两下显示或隐藏输出")
+        .accessibilityLabel("Tool \(item.name ?? ""): \(item.summary ?? ""), \(stateText)\(answer.map { String(localized: ", selected: \($0)") } ?? "")")
+        .accessibilityHint(item.output == nil ? "" : "Double-tap to show or hide the output")
     }
 
     @ViewBuilder
@@ -403,9 +403,9 @@ private struct ToolRow: View {
 
     private var stateText: String {
         switch item.state {
-        case .running: "运行中"
-        case .error: "出错"
-        case .done, nil: "已完成"
+        case .running: String(localized: "Running")
+        case .error: String(localized: "Error")
+        case .done, nil: String(localized: "Completed")
         }
     }
 
@@ -441,8 +441,12 @@ struct TaskRow: View {
     private var failed: Bool { item.state == .error }
 
     var heading: String {
-        let who = subagent == nil ? "后台任务" : "子代理"
-        return "\(who)\(failed ? "失败" : "完成")"
+        switch (subagent == nil, failed) {
+        case (true, false): String(localized: "Background task done")
+        case (true, true): String(localized: "Background task failed")
+        case (false, false): String(localized: "Subagent done")
+        case (false, true): String(localized: "Subagent failed")
+        }
     }
 
     var detail: String { subagent ?? item.summary ?? "" }
@@ -484,8 +488,8 @@ struct TaskRow: View {
             .buttonStyle(.plain)
             .disabled(report == nil)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(heading)：\(detail)")
-            .accessibilityHint(report == nil ? "" : "轻点两下显示或隐藏汇报")
+            .accessibilityLabel("\(heading): \(detail)")
+            .accessibilityHint(report == nil ? "" : "Double-tap to show or hide the report")
             .accessibilityIdentifier("taskRow")
 
             if expanded, let report {
@@ -520,6 +524,6 @@ private struct CommandRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("命令 \(item.name ?? "")")
+        .accessibilityLabel("Command \(item.name ?? "")")
     }
 }

@@ -4,6 +4,7 @@
 
 use crate::core::{RequestError, request as request_core};
 use crate::herdr::CoreView;
+use crate::lang::Lang;
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -14,6 +15,9 @@ pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 /// Enough for a chord sequence such as `down down enter`; the app sends one tap at a time.
 pub const MAX_KEYS: usize = 8;
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub const GONE_ZH: &str = "会话不存在或已结束";
+pub const GONE_EN: &str = "The session doesn't exist or has ended";
 
 pub struct Request {
     pub id: String,
@@ -112,23 +116,23 @@ impl Response {
     }
 }
 
-pub async fn send(hc: &str, view: &watch::Receiver<CoreView>, request: Request) -> Response {
-    if let Err(response) = validate(&view.borrow(), &request) {
+pub async fn send(hc: &str, view: &watch::Receiver<CoreView>, request: Request, lang: Lang) -> Response {
+    if let Err(response) = validate(lang, &view.borrow(), &request) {
         return response;
     }
     let params = json!({"terminal": request.session, "text": request.text, "force": request.force});
     match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.send", params)).await {
-        Ok(Ok(reply)) => map_reply(request, reply),
+        Ok(Ok(reply)) => map_reply(lang, request, reply),
         Ok(Err(err)) => request_failure(err, request.id),
-        Err(_) => Response::failed(request.id, "timeout", "发送超时，结果未知"),
+        Err(_) => Response::failed(request.id, "timeout", lang.pick("发送超时，结果未知", "Timed out sending; the result is unknown")),
     }
 }
 
 /// Like an Agent Message, pressing keys never attaches to the terminal, so it
 /// neither takes over nor resizes it; core applies the same quiet rule.
-pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequest) -> Response {
+pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequest, lang: Lang) -> Response {
     let failed = |kind: &str, message: String| Response::KeysFailed { id: request.id.clone(), kind: kind.into(), message };
-    if let Err(message) = validate_keys(&view.borrow(), &request) {
+    if let Err(message) = validate_keys(lang, &view.borrow(), &request) {
         return failed("invalid_params", message.into());
     }
     let params = json!({"terminal": request.session, "keys": request.keys});
@@ -136,12 +140,12 @@ pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequ
         Ok(Ok(reply)) => reply,
         Ok(Err(RequestError::BeforeSend(error))) => return failed("unavailable", format!("{error:#}")),
         Ok(Err(RequestError::AfterSend(error))) => return failed("unknown", format!("{error:#}")),
-        Err(_) => return failed("timeout", "按键超时，结果未知".into()),
+        Err(_) => return failed("timeout", lang.pick("按键超时，结果未知", "Timed out pressing keys; the result is unknown").into()),
     };
     match reply.get("error") {
         Some(error) => failed(
             error["data"]["kind"].as_str().unwrap_or("unavailable"),
-            error["message"].as_str().unwrap_or("按键发送失败").into(),
+            error["message"].as_str().unwrap_or(lang.pick("按键发送失败", "Couldn't press the keys")).into(),
         ),
         None => Response::KeysSent { id: request.id },
     }
@@ -149,54 +153,54 @@ pub async fn press(hc: &str, view: &watch::Receiver<CoreView>, request: KeysRequ
 
 /// Never attaches either; core's terminal.interrupt never escalates past
 /// the one stop key, so a second press is the user's call.
-pub async fn interrupt(hc: &str, view: &watch::Receiver<CoreView>, request: InterruptRequest) -> Response {
+pub async fn interrupt(hc: &str, view: &watch::Receiver<CoreView>, request: InterruptRequest, lang: Lang) -> Response {
     let failed = |kind: &str, message: String| Response::InterruptFailed { id: request.id.clone(), kind: kind.into(), message };
     if !view.borrow().sessions.iter().any(|session| session.id == request.session) {
-        return failed("not_found", "会话不存在或已结束".into());
+        return failed("not_found", lang.pick(GONE_ZH, GONE_EN).into());
     }
     let params = json!({"terminal": request.session, "timeout": INTERRUPT_WATCH_SECS});
     let reply = match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.interrupt", params)).await {
         Ok(Ok(reply)) => reply,
         Ok(Err(RequestError::BeforeSend(error))) => return failed("unavailable", format!("{error:#}")),
         Ok(Err(RequestError::AfterSend(error))) => return failed("unknown", format!("{error:#}")),
-        Err(_) => return failed("timeout", "停止超时，结果未知".into()),
+        Err(_) => return failed("timeout", lang.pick("停止超时，结果未知", "Timed out stopping; the result is unknown").into()),
     };
-    map_interrupt(request.id, reply)
+    map_interrupt(lang, request.id, reply)
 }
 
-fn map_interrupt(id: String, reply: Value) -> Response {
+fn map_interrupt(lang: Lang, id: String, reply: Value) -> Response {
     if let Some(error) = reply.get("error") {
         return Response::InterruptFailed {
             id,
             kind: error["data"]["kind"].as_str().unwrap_or("unavailable").into(),
-            message: error["message"].as_str().unwrap_or("停止失败").into(),
+            message: error["message"].as_str().unwrap_or(lang.pick("停止失败", "Couldn't stop it")).into(),
         };
     }
     match reply["result"]["outcome"].as_str() {
         Some(outcome) => Response::Interrupted { id, outcome: outcome.into() },
-        None => Response::InterruptFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的停止结果".into() },
+        None => Response::InterruptFailed { id, kind: "unknown".into(), message: lang.pick("herdr-core 返回了无效的停止结果", "herdr-core gave an invalid stop result").into() },
     }
 }
 
-pub async fn put(hc: &str, view: &watch::Receiver<CoreView>, request: PutRequest) -> Response {
+pub async fn put(hc: &str, view: &watch::Receiver<CoreView>, request: PutRequest, lang: Lang) -> Response {
     let failed = |kind: &str, message: String| Response::PutFailed { id: request.id.clone(), kind: kind.into(), message };
     if !view.borrow().sessions.iter().any(|session| session.id == request.session) {
-        return failed("not_found", "会话不存在或已结束".into());
+        return failed("not_found", lang.pick(GONE_ZH, GONE_EN).into());
     }
     if !valid_put_name(&request.name) {
-        return failed("invalid", "文件名无效".into());
+        return failed("invalid", lang.pick("文件名无效", "Invalid file name").into());
     }
     if request.data.is_empty() || request.data.len() > PUT_MAX_BASE64 {
-        return failed("too_large", "文件为空或超过 8 MB".into());
+        return failed("too_large", lang.pick("文件为空或超过 8 MB", "The file is empty or over 8 MB").into());
     }
     let params = json!({"terminal": request.session, "name": request.name, "data": request.data});
     let reply = match tokio::time::timeout(SEND_TIMEOUT, request_core(hc, "terminal.put", params)).await {
         Ok(Ok(reply)) => reply,
         Ok(Err(RequestError::BeforeSend(error))) => return failed("unavailable", format!("{error:#}")),
         Ok(Err(RequestError::AfterSend(error))) => return failed("unknown", format!("{error:#}")),
-        Err(_) => return failed("timeout", "上传超时，结果未知".into()),
+        Err(_) => return failed("timeout", lang.pick("上传超时，结果未知", "Timed out uploading; the result is unknown").into()),
     };
-    map_put(request.id, reply)
+    map_put(lang, request.id, reply)
 }
 
 /// A plain file name: no folders, nothing hidden, short enough for any disk.
@@ -207,17 +211,17 @@ fn valid_put_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
-fn map_put(id: String, reply: Value) -> Response {
+fn map_put(lang: Lang, id: String, reply: Value) -> Response {
     if let Some(error) = reply.get("error") {
         return Response::PutFailed {
             id,
             kind: error["data"]["kind"].as_str().unwrap_or("unavailable").into(),
-            message: error["message"].as_str().unwrap_or("上传失败").into(),
+            message: error["message"].as_str().unwrap_or(lang.pick("上传失败", "Couldn't upload it")).into(),
         };
     }
     match reply["result"]["path"].as_str() {
         Some(path) => Response::PutDone { id, path: path.into() },
-        None => Response::PutFailed { id, kind: "unknown".into(), message: "herdr-core 返回了无效的上传结果".into() },
+        None => Response::PutFailed { id, kind: "unknown".into(), message: lang.pick("herdr-core 返回了无效的上传结果", "herdr-core gave an invalid upload result").into() },
     }
 }
 
@@ -225,51 +229,51 @@ fn map_put(id: String, reply: Value) -> Response {
 /// the same thing the phone showed: someone at the desk may have answered.
 /// Claude Code's dialogs put Yes first, cancel on Esc, and number a single
 /// question's options from 1 (experiment 0001).
-pub async fn answer(hc: &str, view: &watch::Receiver<CoreView>, request: AnswerRequest) -> Response {
-    let keys = match answer_keys(&view.borrow(), &request) {
+pub async fn answer(hc: &str, view: &watch::Receiver<CoreView>, request: AnswerRequest, lang: Lang) -> Response {
+    let keys = match answer_keys(lang, &view.borrow(), &request) {
         Ok(keys) => keys,
         Err((kind, message)) => return Response::KeysFailed { id: request.id, kind: kind.into(), message: message.into() },
     };
-    press(hc, view, KeysRequest { id: request.id, session: request.session, keys }).await
+    press(hc, view, KeysRequest { id: request.id, session: request.session, keys }, lang).await
 }
 
-fn answer_keys(view: &CoreView, request: &AnswerRequest) -> Result<Vec<String>, (&'static str, &'static str)> {
-    let session = view.sessions.iter().find(|session| session.id == request.session).ok_or(("not_found", "会话不存在或已结束"))?;
-    let status = session.status.as_ref().filter(|status| status.state == "blocked").ok_or(("changed", "Agent 已不在等待"))?;
+fn answer_keys(lang: Lang, view: &CoreView, request: &AnswerRequest) -> Result<Vec<String>, (&'static str, &'static str)> {
+    let session = view.sessions.iter().find(|session| session.id == request.session).ok_or(("not_found", lang.pick(GONE_ZH, GONE_EN)))?;
+    let status = session.status.as_ref().filter(|status| status.state == "blocked").ok_or(("changed", lang.pick("Agent 已不在等待", "The Agent is no longer waiting")))?;
     if status.message != request.expect {
-        return Err(("changed", "Agent 等待的内容已变化"));
+        return Err(("changed", lang.pick("Agent 等待的内容已变化", "What the Agent is waiting for has changed")));
     }
     let key = match (status.kind.as_deref(), request.choice.as_str()) {
         (Some("permission"), "allow") => "1",
         (Some("permission" | "question"), "deny") => "esc",
         (Some("question"), number) if matches!(number.parse::<u8>(), Ok(1..=9)) => number,
-        _ => return Err(("invalid_params", "无法这样作答")),
+        _ => return Err(("invalid_params", lang.pick("无法这样作答", "That answer doesn't fit"))),
     };
     Ok(vec![key.to_owned()])
 }
 
-fn validate_keys(view: &CoreView, request: &KeysRequest) -> Result<(), &'static str> {
+fn validate_keys(lang: Lang, view: &CoreView, request: &KeysRequest) -> Result<(), &'static str> {
     if request.keys.is_empty() || request.keys.len() > MAX_KEYS {
-        return Err("按键数量无效");
+        return Err(lang.pick("按键数量无效", "Invalid number of keys"));
     }
     if request.keys.iter().any(|key| key.is_empty() || key.len() > 16) {
-        return Err("按键名称无效");
+        return Err(lang.pick("按键名称无效", "Invalid key name"));
     }
     if !view.sessions.iter().any(|session| session.id == request.session) {
-        return Err("会话不存在或已结束");
+        return Err(lang.pick(GONE_ZH, GONE_EN));
     }
     Ok(())
 }
 
-fn validate(view: &CoreView, request: &Request) -> Result<(), Response> {
+fn validate(lang: Lang, view: &CoreView, request: &Request) -> Result<(), Response> {
     if request.text.trim().is_empty() {
-        return Err(Response::failed(&request.id, "invalid_params", "消息不能为空"));
+        return Err(Response::failed(&request.id, "invalid_params", lang.pick("消息不能为空", "The message is empty")));
     }
     if request.text.len() > MAX_MESSAGE_BYTES {
-        return Err(Response::failed(&request.id, "too_long", "消息超过 16 KiB 上限"));
+        return Err(Response::failed(&request.id, "too_long", lang.pick("消息超过 16 KiB 上限", "The message is over the 16 KiB limit")));
     }
     if !view.sessions.iter().any(|session| session.id == request.session) {
-        return Err(Response::failed(&request.id, "not_found", "会话不存在或已结束"));
+        return Err(Response::failed(&request.id, "not_found", lang.pick(GONE_ZH, GONE_EN)));
     }
     Ok(())
 }
@@ -284,14 +288,14 @@ fn request_failure(error: RequestError, id: String) -> Response {
     Response::failed(id, kind, format!("{error:#}"))
 }
 
-fn map_reply(request: Request, reply: Value) -> Response {
+fn map_reply(lang: Lang, request: Request, reply: Value) -> Response {
     if let Some(error) = reply.get("error") {
         let kind = error["data"]["kind"].as_str().unwrap_or("unavailable");
-        let message = error["message"].as_str().unwrap_or("Agent Message 发送失败");
+        let message = error["message"].as_str().unwrap_or(lang.pick("Agent Message 发送失败", "Couldn't send the Agent Message"));
         return Response::failed(request.id, kind, message);
     }
     let Some(turn) = reply["result"]["turn"].as_u64() else {
-        return Response::failed(request.id, "unknown", "herdr-core 返回了无效的发送结果");
+        return Response::failed(request.id, "unknown", lang.pick("herdr-core 返回了无效的发送结果", "herdr-core gave an invalid send result"));
     };
     let status = reply["result"]["status"].as_str().map(str::to_owned);
     let started = reply["result"]["started"].as_bool();
@@ -337,19 +341,19 @@ mod tests {
     #[test]
     fn validates_text_and_live_session() {
         let view = view();
-        assert!(validate(&view, &request("hello".into())).is_ok());
+        assert!(validate(Lang::English, &view, &request("hello".into())).is_ok());
         assert!(matches!(
-            validate(&view, &request("  \n".into())),
+            validate(Lang::English, &view, &request("  \n".into())),
             Err(Response::SendFailed { kind, .. }) if kind == "invalid_params"
         ));
         assert!(matches!(
-            validate(&view, &request("x".repeat(MAX_MESSAGE_BYTES + 1))),
+            validate(Lang::English, &view, &request("x".repeat(MAX_MESSAGE_BYTES + 1))),
             Err(Response::SendFailed { kind, .. }) if kind == "too_long"
         ));
         let mut missing = request("hello".into());
         missing.session = "t404".into();
         assert!(matches!(
-            validate(&view, &missing),
+            validate(Lang::English, &view, &missing),
             Err(Response::SendFailed { kind, .. }) if kind == "not_found"
         ));
     }
@@ -362,13 +366,13 @@ mod tests {
             session: "t1".into(),
             keys: keys.iter().map(|key| (*key).into()).collect(),
         };
-        assert!(validate_keys(&view, &keys(&["down", "enter"])).is_ok());
-        assert!(validate_keys(&view, &keys(&[])).is_err());
-        assert!(validate_keys(&view, &keys(&["up"; MAX_KEYS + 1])).is_err());
-        assert!(validate_keys(&view, &keys(&[""])).is_err());
+        assert!(validate_keys(Lang::English, &view, &keys(&["down", "enter"])).is_ok());
+        assert!(validate_keys(Lang::English, &view, &keys(&[])).is_err());
+        assert!(validate_keys(Lang::English, &view, &keys(&["up"; MAX_KEYS + 1])).is_err());
+        assert!(validate_keys(Lang::English, &view, &keys(&[""])).is_err());
         let mut missing = keys(&["esc"]);
         missing.session = "t404".into();
-        assert!(validate_keys(&view, &missing).is_err());
+        assert!(validate_keys(Lang::English, &view, &missing).is_err());
     }
 
     #[test]
@@ -380,39 +384,39 @@ mod tests {
             choice: choice.into(),
             expect: Some(expect.into()),
         };
-        assert_eq!(answer_keys(&view, &answer("allow", "x")).unwrap_err().0, "changed", "not blocked");
+        assert_eq!(answer_keys(Lang::English, &view, &answer("allow", "x")).unwrap_err().0, "changed", "not blocked");
         view.sessions[0].status = Some(crate::session::Status {
             state: "blocked".into(),
             app: Some("claude-code".into()),
             message: Some("approve Bash: ls".into()),
             kind: Some("permission".into()),
         });
-        assert_eq!(answer_keys(&view, &answer("allow", "approve Bash: ls")).unwrap(), ["1"]);
-        assert_eq!(answer_keys(&view, &answer("deny", "approve Bash: ls")).unwrap(), ["esc"]);
-        assert_eq!(answer_keys(&view, &answer("allow", "approve Bash: rm")).unwrap_err().0, "changed");
-        assert_eq!(answer_keys(&view, &answer("2", "approve Bash: ls")).unwrap_err().0, "invalid_params");
+        assert_eq!(answer_keys(Lang::English, &view, &answer("allow", "approve Bash: ls")).unwrap(), ["1"]);
+        assert_eq!(answer_keys(Lang::English, &view, &answer("deny", "approve Bash: ls")).unwrap(), ["esc"]);
+        assert_eq!(answer_keys(Lang::English, &view, &answer("allow", "approve Bash: rm")).unwrap_err().0, "changed");
+        assert_eq!(answer_keys(Lang::English, &view, &answer("2", "approve Bash: ls")).unwrap_err().0, "invalid_params");
 
         let status = view.sessions[0].status.as_mut().unwrap();
         status.kind = Some("question".into());
         status.message = Some("answer: Red or Blue?".into());
-        assert_eq!(answer_keys(&view, &answer("2", "answer: Red or Blue?")).unwrap(), ["2"]);
-        assert_eq!(answer_keys(&view, &answer("allow", "answer: Red or Blue?")).unwrap_err().0, "invalid_params");
-        assert_eq!(answer_keys(&view, &answer("12", "answer: Red or Blue?")).unwrap_err().0, "invalid_params");
+        assert_eq!(answer_keys(Lang::English, &view, &answer("2", "answer: Red or Blue?")).unwrap(), ["2"]);
+        assert_eq!(answer_keys(Lang::English, &view, &answer("allow", "answer: Red or Blue?")).unwrap_err().0, "invalid_params");
+        assert_eq!(answer_keys(Lang::English, &view, &answer("12", "answer: Red or Blue?")).unwrap_err().0, "invalid_params");
     }
 
     #[test]
     fn length_limit_is_utf8_bytes() {
         let view = view();
-        assert!(validate(&view, &request("界".repeat(MAX_MESSAGE_BYTES / 3))).is_ok());
+        assert!(validate(Lang::English, &view, &request("界".repeat(MAX_MESSAGE_BYTES / 3))).is_ok());
         assert!(matches!(
-            validate(&view, &request("界".repeat(MAX_MESSAGE_BYTES / 3 + 1))),
+            validate(Lang::English, &view, &request("界".repeat(MAX_MESSAGE_BYTES / 3 + 1))),
             Err(Response::SendFailed { kind, .. }) if kind == "too_long"
         ));
     }
 
     #[test]
     fn maps_send_result() {
-        let response = map_reply(request("hello".into()), json!({
+        let response = map_reply(Lang::English, request("hello".into()), json!({
             "jsonrpc": "2.0", "id": 1,
             "result": {"turn": 7, "status": "working", "started": true, "wait": null},
         }));
@@ -439,7 +443,7 @@ mod tests {
 
     #[test]
     fn maps_core_error_kind_and_message() {
-        let response = map_reply(request("hello".into()), json!({
+        let response = map_reply(Lang::English, request("hello".into()), json!({
             "jsonrpc": "2.0", "id": 1,
             "error": {"code": -32000, "message": "waiting for permission", "data": {"kind": "blocked"}},
         }));
@@ -452,13 +456,13 @@ mod tests {
 
     #[test]
     fn maps_interrupt_outcome_and_errors() {
-        let response = map_interrupt("i1".into(), json!({"result": {"outcome": "stopped", "key": "esc"}}));
+        let response = map_interrupt(Lang::English, "i1".into(), json!({"result": {"outcome": "stopped", "key": "esc"}}));
         assert!(matches!(response, Response::Interrupted { id, outcome } if id == "i1" && outcome == "stopped"));
-        let response = map_interrupt("i2".into(), json!({
+        let response = map_interrupt(Lang::English, "i2".into(), json!({
             "error": {"code": -32000, "message": "finished", "data": {"kind": "finished"}},
         }));
         assert!(matches!(response, Response::InterruptFailed { kind, .. } if kind == "finished"));
-        let response = map_interrupt("i3".into(), json!({"result": {}}));
+        let response = map_interrupt(Lang::English, "i3".into(), json!({"result": {}}));
         assert!(matches!(response, Response::InterruptFailed { kind, .. } if kind == "unknown"));
         let json = serde_json::to_value(Response::Interrupted { id: "i1".into(), outcome: "still_working".into() }).unwrap();
         assert_eq!(json, json!({"type": "interrupted", "id": "i1", "outcome": "still_working"}));
@@ -466,9 +470,9 @@ mod tests {
 
     #[test]
     fn maps_put_result_and_checks_names() {
-        let response = map_put("p1".into(), json!({"result": {"path": "/tmp/t7/image.jpg", "bytes": 3}}));
+        let response = map_put(Lang::English, "p1".into(), json!({"result": {"path": "/tmp/t7/image.jpg", "bytes": 3}}));
         assert!(matches!(response, Response::PutDone { id, path } if id == "p1" && path == "/tmp/t7/image.jpg"));
-        let response = map_put("p2".into(), json!({
+        let response = map_put(Lang::English, "p2".into(), json!({
             "error": {"code": -32602, "message": "invalid_params", "data": {"kind": "invalid_params"}},
         }));
         assert!(matches!(response, Response::PutFailed { kind, .. } if kind == "invalid_params"));

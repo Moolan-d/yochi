@@ -5,6 +5,7 @@
 
 use crate::conversation::{Conversation, Item, Pending};
 use crate::core::Client;
+use crate::lang::Lang;
 use crate::session::Session;
 use crate::transcript::{self, Located, Tail};
 use anyhow::Result;
@@ -21,6 +22,7 @@ pub enum Update {
 
 #[derive(Default)]
 pub struct Follower {
+    lang: Lang,
     following: Option<(Located, Tail)>,
     conversation: Conversation,
     /// What the app was last told, so ticks only send changes.
@@ -30,6 +32,10 @@ pub struct Follower {
 }
 
 impl Follower {
+    pub fn new(lang: Lang) -> Self {
+        Self { lang, ..Self::default() }
+    }
+
     pub async fn tick(&mut self, client: &mut Client, session: &Session) -> Result<Vec<Update>> {
         let machine = session.machine.as_deref();
         let located = match session.pid {
@@ -39,7 +45,7 @@ impl Follower {
         let mut updates = Vec::new();
         let Some(located) = located else {
             self.following = None;
-            self.conversation = Conversation::default();
+            self.conversation = Conversation::new(self.lang);
             self.mode = None;
             if self.supported != Some(false) {
                 self.supported = Some(false);
@@ -54,7 +60,7 @@ impl Follower {
             let mut tail = Tail::new(machine, &located);
             let lines = tail.start(client).await?;
             self.following = Some((located, tail));
-            self.conversation = Conversation::default();
+            self.conversation = Conversation::new(self.lang);
             lines
         } else {
             let (_, tail) = self.following.as_mut().expect("following");

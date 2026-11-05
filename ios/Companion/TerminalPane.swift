@@ -43,18 +43,18 @@ struct TerminalPane: View {
             }
             switch observer.phase {
             case .connecting where model.desktop == nil:
-                ProgressView("正在连接…")
+                ProgressView("Connecting…")
             case .failed(let reason) where model.desktop == nil:
                 ContentUnavailableView {
-                    Label("无法查看终端", systemImage: "exclamationmark.triangle")
+                    Label("Can't Show the Terminal", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(reason)
                 } actions: {
-                    Button("重试", action: start)
+                    Button("Retry", action: start)
                         .buttonStyle(.borderedProminent)
                 }
             case .closed(let reason) where model.desktop == nil:
-                ContentUnavailableView("会话已结束", systemImage: "stop.circle", description: Text(reason))
+                ContentUnavailableView("The session has ended", systemImage: "stop.circle", description: Text(reason))
             default:
                 EmptyView()
             }
@@ -79,7 +79,7 @@ struct TerminalPane: View {
         }
         .overlay(alignment: .top) {
             if copiedNotice {
-                Label("已复制", systemImage: "checkmark.circle.fill")
+                Label("Copied", systemImage: "checkmark.circle.fill")
                     .font(.footnote.weight(.medium))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
@@ -129,11 +129,11 @@ struct TerminalPane: View {
             Group {
                 switch observer.phase {
                 case .observing where observer.reconnecting:
-                    BannerLabel(text: "正在重新连接…", systemImage: "arrow.triangle.2.circlepath")
+                    BannerLabel(text: String(localized: "Reconnecting…"), systemImage: "arrow.triangle.2.circlepath")
                 case .observing where model.yielded:
                     HStack {
-                        BannerLabel(text: "桌面正在使用这个终端，按桌面尺寸显示", systemImage: "desktopcomputer")
-                        Button("按手机尺寸") { model.takeOverAgain() }
+                        BannerLabel(text: String(localized: "The desktop is using this terminal, so it's shown at desktop size"), systemImage: "desktopcomputer")
+                        Button("Fit to Phone") { model.takeOverAgain() }
                             .buttonStyle(.bordered)
                             .accessibilityIdentifier("terminalTakeOver")
                     }
@@ -141,8 +141,8 @@ struct TerminalPane: View {
                     BannerLabel(text: reason, systemImage: "stop.circle")
                 case .failed(let reason):
                     HStack {
-                        BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
-                        Button("重试", action: start).buttonStyle(.bordered)
+                        BannerLabel(text: String(localized: "Disconnected: \(reason)"), systemImage: "wifi.exclamationmark")
+                        Button("Retry", action: start).buttonStyle(.bordered)
                     }
                 default:
                     EmptyView()
@@ -165,14 +165,14 @@ struct TerminalPane: View {
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("回到最新")
+        .accessibilityLabel("Jump to Latest")
         .accessibilityIdentifier("terminalScrollToLatest")
     }
 
     /// The sheet closed after copying: confirm it somewhere the user is
     /// looking, since the sheet slides away immediately.
     private func showCopied() {
-        AccessibilityNotification.Announcement("已复制").post()
+        AccessibilityNotification.Announcement(String(localized: "Copied")).post()
         copiedNotice = true
         Task {
             try? await Task.sleep(for: .seconds(1.6))

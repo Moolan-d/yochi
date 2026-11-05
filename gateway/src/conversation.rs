@@ -3,6 +3,7 @@
 //! usage, request records and attachments never leave the Gateway. Unknown
 //! record types are skipped, so a newer Claude Code degrades to fewer items.
 
+use crate::lang::Lang;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -46,7 +47,14 @@ pub enum Item {
     /// A slash command run in Claude Code, with what it printed.
     Command { id: String, name: String, output: Option<String> },
     /// Something that happened to the conversation (compacted, interrupted, API error).
-    Notice { id: String, text: String },
+    Notice {
+        id: String,
+        text: String,
+        /// `interrupted` or `compacted` when the Gateway wrote `text`, for the
+        /// app to say in its own words; none for an API error's own text.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<&'static str>,
+    },
     /// A subagent or background task reporting back to the Agent. Claude Code
     /// files it as a user message; it is not what the user typed.
     Task {
@@ -156,6 +164,8 @@ pub struct Pending {
 
 #[derive(Default)]
 pub struct Conversation {
+    /// The phone's language, for the few words the Gateway adds.
+    lang: Lang,
     items: Vec<Item>,
     index: HashMap<String, usize>,
     /// Claude Code's permission mode as of its latest message.
@@ -170,6 +180,10 @@ pub struct Conversation {
 }
 
 impl Conversation {
+    pub fn new(lang: Lang) -> Self {
+        Self { lang, ..Self::default() }
+    }
+
     #[cfg(test)]
     pub fn items(&self) -> &[Item] {
         &self.items
@@ -276,7 +290,7 @@ impl Conversation {
                 Some("text") => {
                     push_paragraph(&mut text, block["text"].as_str().unwrap_or_default());
                 }
-                Some("image") => push_paragraph(&mut text, "［图片］"),
+                Some("image") => push_paragraph(&mut text, image(self.lang)),
                 Some("tool_result") => touched.extend(self.tool_result(block, &record["toolUseResult"])),
                 _ => {}
             }
@@ -305,7 +319,8 @@ impl Conversation {
             return self.command_output(output);
         }
         if text.starts_with("[Request interrupted by user") {
-            return Some(self.upsert(Item::Notice { id: uuid.into(), text: "已中断".into() }));
+            let text = self.lang.pick("已中断", "Interrupted").into();
+            return Some(self.upsert(Item::Notice { id: uuid.into(), text, code: Some("interrupted") }));
         }
         Some(self.upsert(Item::User { id: uuid.into(), text: clip(text, MAX_TEXT) }))
     }
@@ -325,7 +340,7 @@ impl Conversation {
         };
         let (summary, report) = match tag(text, "summary") {
             Some(summary) => (summary.to_owned(), tag(text, "result")),
-            None => ("任务通知".to_owned(), Some(text)),
+            None => (self.lang.pick("任务通知", "Task notification").to_owned(), Some(text)),
         };
         let report = report.filter(|report| !report.is_empty()).map(|report| clip(report, MAX_TEXT));
         if let Some(call) = tag(text, "tool-use-id").and_then(|id| self.index.get(id)).map(|&i| self.items[i].clone()) {
@@ -429,7 +444,7 @@ impl Conversation {
         if output.is_empty() {
             return None;
         }
-        Some(self.upsert(Item::Command { id, name, output: Some(clip_output(output)) }))
+        Some(self.upsert(Item::Command { id, name, output: Some(clip_output(output, self.lang)) }))
     }
 
     fn tool_result(&mut self, block: &Value, structured: &Value) -> Option<String> {
@@ -448,7 +463,7 @@ impl Conversation {
             _ => return None,
         };
         let mut state = if failed { ToolState::Error } else { ToolState::Done };
-        let output = result_text(&block["content"]).map(|text| clip_output(&text));
+        let output = result_text(&block["content"], self.lang).map(|text| clip_output(&text, self.lang));
         let answers = structured.get("answers").filter(|answers| answers.is_object()).cloned();
         let edit = (!failed && matches!(name.as_str(), "Edit" | "MultiEdit" | "Write")).then(|| edit(structured)).flatten();
         if let Some(agent) = agent.as_mut().filter(|_| !failed) {
@@ -477,7 +492,7 @@ impl Conversation {
                     }
                     let id = format!("{uuid}.{n}");
                     let item = if record["isApiErrorMessage"] == true {
-                        Item::Notice { id, text: clip(text, MAX_TEXT) }
+                        Item::Notice { id, text: clip(text, MAX_TEXT), code: None }
                     } else {
                         Item::Agent { id, text: clip(text, MAX_TEXT) }
                     };
@@ -513,7 +528,7 @@ impl Conversation {
                     }
                     let questions = (name == "AskUserQuestion").then(|| questions(input));
                     let agent = matches!(name.as_str(), "Agent" | "Task").then(|| Subagent {
-                        name: summary(&name, input),
+                        name: summary(&name, input, self.lang),
                         kind: input["subagent_type"].as_str().map(str::to_owned),
                         started_ms: record["timestamp"].as_str().and_then(epoch_ms),
                         duration_ms: None,
@@ -521,7 +536,7 @@ impl Conversation {
                     });
                     touched.push(self.upsert(Item::Tool {
                         id: id.into(),
-                        summary: summary(&name, input),
+                        summary: summary(&name, input, self.lang),
                         name,
                         state: ToolState::Running,
                         output: None,
@@ -539,7 +554,10 @@ impl Conversation {
 
     fn system(&mut self, uuid: &str, record: &Value) -> Vec<String> {
         match record["subtype"].as_str() {
-            Some("compact_boundary") => vec![self.upsert(Item::Notice { id: uuid.into(), text: "上下文已压缩".into() })],
+            Some("compact_boundary") => {
+                let text = self.lang.pick("上下文已压缩", "Context compacted").into();
+                vec![self.upsert(Item::Notice { id: uuid.into(), text, code: Some("compacted") })]
+            }
             Some("local_command") => {
                 let content = record["content"].as_str().unwrap_or_default();
                 tag(content, "local-command-stdout").and_then(|output| self.command_output(output)).into_iter().collect()
@@ -550,7 +568,7 @@ impl Conversation {
 }
 
 /// The one line a collapsed tool call shows.
-fn summary(name: &str, input: &Value) -> String {
+fn summary(name: &str, input: &Value, lang: Lang) -> String {
     let field = |key: &str| input[key].as_str().map(str::to_owned);
     let text = match name {
         "Bash" => field("command"),
@@ -560,7 +578,7 @@ fn summary(name: &str, input: &Value) -> String {
         "WebFetch" => field("url"),
         "WebSearch" => field("query"),
         "AskUserQuestion" => input["questions"][0]["question"].as_str().map(str::to_owned),
-        "TodoWrite" => Some("更新待办".into()),
+        "TodoWrite" => Some(lang.pick("更新待办", "Update to-dos").into()),
         _ => None,
     }
     .or_else(|| field("description"))
@@ -686,7 +704,7 @@ fn questions(input: &Value) -> Value {
     Value::Array(questions)
 }
 
-fn result_text(content: &Value) -> Option<String> {
+fn result_text(content: &Value, lang: Lang) -> Option<String> {
     if let Some(text) = content.as_str() {
         return Some(text.to_owned());
     }
@@ -694,7 +712,7 @@ fn result_text(content: &Value) -> Option<String> {
     for block in content.as_array()? {
         match block["type"].as_str() {
             Some("text") => push_paragraph(&mut text, block["text"].as_str().unwrap_or_default()),
-            Some("image") => push_paragraph(&mut text, "［图片］"),
+            Some("image") => push_paragraph(&mut text, image(lang)),
             _ => {}
         }
     }
@@ -729,13 +747,18 @@ fn clip(text: &str, max: usize) -> String {
     format!("{}…", &text[..end])
 }
 
-fn clip_output(text: &str) -> String {
+/// Where an image was, in text that is otherwise kept.
+fn image(lang: Lang) -> &'static str {
+    lang.pick("［图片］", "[Image]")
+}
+
+fn clip_output(text: &str, lang: Lang) -> String {
     let mut lines = text.lines();
     let head: Vec<&str> = lines.by_ref().take(MAX_OUTPUT_LINES).collect();
     let more = lines.count();
     let mut out = clip(&head.join("\n"), MAX_OUTPUT);
     if more > 0 {
-        out.push_str(&format!("\n…（另有 {more} 行）"));
+        out.push_str(&lang.pick(format!("\n…（另有 {more} 行）"), format!("\n… ({more} more lines)")));
     }
     out
 }
@@ -851,6 +874,16 @@ mod tests {
         conversation.apply(lines);
         let items = conversation.items();
         assert_eq!(kinds(items), ["tool", "notice", "notice", "command", "notice"]);
+        assert!(matches!(&items[1], Item::Notice { text, code: Some("interrupted"), .. } if text == "已中断"));
+        assert!(matches!(&items[2], Item::Notice { code: Some("compacted"), .. }));
+        assert!(matches!(&items[4], Item::Notice { code: None, .. }));
+        let mut english = Conversation::new(Lang::English);
+        english.apply(lines);
+        assert!(matches!(&english.items()[1], Item::Notice { text, .. } if text == "Interrupted"));
+        assert!(matches!(&english.items()[2], Item::Notice { text, .. } if text == "Context compacted"));
+        let json = serde_json::to_value(&english.items()[1]).unwrap();
+        assert_eq!(json, serde_json::json!({"kind": "notice", "id": "u2", "text": "Interrupted", "code": "interrupted"}));
+        assert!(serde_json::to_value(&items[4]).unwrap().get("code").is_none());
         assert!(matches!(&items[0], Item::Tool { state: ToolState::Error, output: Some(output), .. } if output == "no such file"));
         assert!(matches!(&items[3], Item::Command { name, output: Some(output), .. }
             if name == "/model haiku" && output == "Set model to haiku"));
@@ -884,9 +917,11 @@ mod tests {
 
     #[test]
     fn long_output_is_clipped_by_lines_and_bytes() {
-        let output = clip_output(&(1..=100).map(|n| n.to_string()).collect::<Vec<_>>().join("\n"));
+        let long = (1..=100).map(|n| n.to_string()).collect::<Vec<_>>().join("\n");
+        let output = clip_output(&long, Lang::Chinese);
         assert!(output.starts_with("1\n2\n"));
         assert!(output.ends_with("（另有 60 行）"));
+        assert!(clip_output(&long, Lang::English).ends_with("… (60 more lines)"));
         assert_eq!(clip("界界", 4), "界…");
     }
 

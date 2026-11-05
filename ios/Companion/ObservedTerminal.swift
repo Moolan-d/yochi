@@ -374,11 +374,11 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         #endif
 
         isAccessibilityElement = true
-        accessibilityLabel = "终端画面"
+        accessibilityLabel = String(localized: "Terminal screen")
         accessibilityIdentifier = "terminalGrid"
         accessibilityHint = takeover
-            ? "终端按手机尺寸排版，查看期间桌面上的终端会变小；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
-            : "终端画面按手机宽度排版，全屏程序按桌面原样显示、可双指缩放；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
+            ? String(localized: "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Type commands below, or use the key bar.")
+            : String(localized: "The terminal is laid out at phone width; full-screen programs show as on the desktop and can be pinched to zoom. Long-press to select and copy; drag to see history. Type commands below, or use the key bar.")
 
         feed.onFullScreenChange = { [weak self] fullScreen in
             // Taken over, a full-screen program draws for the phone like anything else.

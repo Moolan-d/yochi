@@ -3,6 +3,7 @@
 //! (ADR 0001, 2026-11-03 revision): the phone never names what runs.
 
 use crate::core::{RequestError, request as request_core};
+use crate::lang::Lang;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
@@ -42,6 +43,7 @@ pub async fn exec(
     program: Program<'_>,
     input: Option<&[u8]>,
     timeout_secs: u64,
+    lang: Lang,
 ) -> Result<Output, Failure> {
     let mut params = json!({"cwd": cwd, "timeout": timeout_secs});
     match program {
@@ -57,27 +59,27 @@ pub async fn exec(
     // A little longer than core's own limit, so its answer wins.
     let wait = Duration::from_secs(timeout_secs + 5);
     match tokio::time::timeout(wait, request_core(hc, "machine.exec", params)).await {
-        Ok(Ok(reply)) => from_reply(reply),
+        Ok(Ok(reply)) => from_reply(reply, lang),
         // Only reads; either way it is safe to ask again.
         Ok(Err(RequestError::BeforeSend(error) | RequestError::AfterSend(error))) => {
             Err(Failure::new("unavailable", format!("{error:#}")))
         }
-        Err(_) => Err(Failure::new("timeout", "超时")),
+        Err(_) => Err(Failure::new("timeout", lang.pick("超时", "Timed out"))),
     }
 }
 
-pub fn from_reply(reply: Value) -> Result<Output, Failure> {
+pub fn from_reply(reply: Value, lang: Lang) -> Result<Output, Failure> {
     if let Some(error) = reply.get("error") {
         return Err(Failure::new(
             error["data"]["kind"].as_str().unwrap_or("unavailable"),
-            error["message"].as_str().unwrap_or("执行失败"),
+            error["message"].as_str().unwrap_or(lang.pick("执行失败", "Couldn't run it")),
         ));
     }
     let result = &reply["result"];
     let stdout = result["stdout"]
         .as_str()
         .and_then(|data| STANDARD.decode(data).ok())
-        .ok_or_else(|| Failure::new("unknown", "herdr-core 返回了无效的结果"))?;
+        .ok_or_else(|| Failure::new("unknown", lang.pick("herdr-core 返回了无效的结果", "herdr-core gave an invalid result")))?;
     Ok(Output {
         code: result["code"].as_i64().map(|code| code as i32),
         stdout,
@@ -92,10 +94,10 @@ mod tests {
     #[test]
     fn reads_results_and_errors() {
         let reply = json!({"result": {"code": 1, "stdout": STANDARD.encode("hi"), "truncated": false, "timed_out": true}});
-        let output = from_reply(reply).unwrap();
+        let output = from_reply(reply, Lang::English).unwrap();
         assert_eq!((output.code, output.stdout.as_slice(), output.cut), (Some(1), &b"hi"[..], true));
         let reply = json!({"error": {"message": "no answer", "data": {"kind": "unreachable"}}});
-        assert_eq!(from_reply(reply).err().unwrap().kind, "unreachable");
-        assert_eq!(from_reply(json!({"result": {}})).err().unwrap().kind, "unknown");
+        assert_eq!(from_reply(reply, Lang::English).err().unwrap().kind, "unreachable");
+        assert_eq!(from_reply(json!({"result": {}}), Lang::English).err().unwrap().kind, "unknown");
     }
 }
