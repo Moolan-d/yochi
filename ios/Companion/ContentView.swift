@@ -7,6 +7,9 @@ struct ContentView: View {
     @State private var showingSettings = false
     @State private var showingNewSession = false
     @State private var path: [Session] = []
+    /// The map of the tab's panes, shown while switching between them.
+    @State private var paneHint: PaneTab?
+    @State private var paneHintFade: Task<Void, Never>?
     /// A terminal just started from the phone; opened once the list has it.
     @State private var opening: String?
     /// Opened from a pairing QR code; fills in the pairing form.
@@ -27,11 +30,9 @@ struct ContentView: View {
                                     newSession: { showingNewSession = true })
                         .navigationTitle(String(localized: "home.title", defaultValue: "Agents"))
                         .navigationDestination(for: Session.self) { session in
-                            ObserveView(session: session, config: config, client: client) { mate in
-                                // A terminal in the same tab takes this one's place, so Back
-                                // still leads home however often the user switches.
-                                if path.last == session { path[path.count - 1] = mate } else { path.append(mate) }
-                            }
+                            ObserveView(session: session, config: config, client: client,
+                                        open: { switchPane(from: session, to: $0) },
+                                        showPanes: showPanes)
                         }
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -59,6 +60,15 @@ struct ContentView: View {
                     }
                     .navigationTitle("Yochi")
                 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if let paneHint {
+                PaneMap(tab: paneHint)
+                    .padding(.top, 56)
+                    .padding(.trailing, 16)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .topTrailing)))
             }
         }
         .onOpenURL { url in
@@ -121,7 +131,10 @@ struct ContentView: View {
             recordSeen()
             if client.phase == .connected && client.coreConnected { seen.keep(only: sessions) }
         }
-        .onChange(of: path) { recordSeen() }
+        .onChange(of: path) {
+            recordSeen()
+            if path.isEmpty { paneHintFade?.cancel(); paneHint = nil }
+        }
         .onChange(of: scenePhase) { _, phase in
             guard let config else { return }
             switch phase {
@@ -129,6 +142,30 @@ struct ContentView: View {
             case .background: client.disconnect()
             default: break
             }
+        }
+    }
+
+    /// A terminal in the same tab takes this one's place at once, so Back
+    /// still leads home however often the user switches.
+    private func switchPane(from session: Session, to mate: Session) {
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            if path.last == session { path[path.count - 1] = mate } else { path.append(mate) }
+        }
+        showPanes(mate.id, holding: false)
+    }
+
+    /// Shows where `id` sits in its tab; once let go, the map fades.
+    private func showPanes(_ id: String, holding: Bool) {
+        paneHintFade?.cancel()
+        let tab = PaneTab(of: id, sessions: client.sessions, spaces: client.spaces)
+        withAnimation(.snappy(duration: 0.2)) { paneHint = tab }
+        guard !holding, tab != nil else { return }
+        paneHintFade = Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { paneHint = nil }
         }
     }
 

@@ -21,7 +21,7 @@ final class SessionSectionsTests: XCTestCase {
 
     private func space(_ id: String, _ name: String, machine: String? = nil, tabs: [(String, [String])]) -> Space {
         Space(id: id, machine: machine, name: name, folder: nil,
-              tabs: tabs.map { SpaceTab(id: "\(id)/\($0.0)", name: $0.0, sessions: $0.1) })
+              tabs: tabs.map { SpaceTab(id: "\(id)/\($0.0)", name: $0.0, sessions: $0.1, layout: nil) })
     }
 
     private func row(_ session: Session, space: String? = nil, tab: String? = nil, unseen: Bool = false) -> HomeRow {

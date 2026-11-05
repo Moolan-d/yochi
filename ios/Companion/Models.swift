@@ -122,6 +122,38 @@ struct SpaceTab: Decodable, Hashable, Identifiable {
     let name: String
     /// Session ids in pane order.
     let sessions: [String]
+    /// How Herdr splits the tab; older Gateways don't send it.
+    let layout: PaneNode?
+}
+
+/// A pane of a Herdr tab, or a split holding panes side by side or stacked.
+struct PaneNode: Decodable, Hashable {
+    enum Split: String, Decodable { case row, column }
+
+    /// Its share of the split it sits in; nil for an equal share.
+    let weight: Double?
+    let split: Split?
+    let children: [PaneNode]
+    /// The live session the pane shows; nil for anything else.
+    let session: String?
+
+    init(weight: Double? = nil, split: Split? = nil, children: [PaneNode] = [], session: String? = nil) {
+        self.weight = weight
+        self.split = split
+        self.children = children
+        self.session = session
+    }
+
+    private enum CodingKeys: String, CodingKey { case weight, split, children, session }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        weight = try? c.decodeIfPresent(Double.self, forKey: .weight)
+        // A kind of split this app doesn't know is drawn side by side.
+        split = c.contains(.split) ? ((try? c.decode(Split.self, forKey: .split)) ?? .row) : nil
+        children = (try? c.decodeIfPresent([PaneNode].self, forKey: .children)) ?? []
+        session = try? c.decodeIfPresent(String.self, forKey: .session)
+    }
 }
 
 enum ServerMessage: Decodable {

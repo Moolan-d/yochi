@@ -10,8 +10,10 @@ struct ObserveView: View {
     let session: Session
     let config: GatewayConfig
     let client: GatewayClient
-    /// Opens another session on top of this one.
+    /// Switches to another session in the same tab, in this page's place.
     var open: (Session) -> Void
+    /// Shows the map of this tab's panes: held while a swipe is on.
+    var showPanes: (_ id: String, _ holding: Bool) -> Void
 
     /// The page's streams, kept by the client's cache for a while after the
     /// page leaves: coming back shows the last conversation and terminal at
@@ -44,11 +46,13 @@ struct ObserveView: View {
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    init(session: Session, config: GatewayConfig, client: GatewayClient, open: @escaping (Session) -> Void) {
+    init(session: Session, config: GatewayConfig, client: GatewayClient,
+         open: @escaping (Session) -> Void, showPanes: @escaping (String, Bool) -> Void) {
         self.session = session
         self.config = config
         self.client = client
         self.open = open
+        self.showPanes = showPanes
         _draft = State(initialValue: AgentMessageStore.draft(host: config.host, session: session.id))
         _feeds = State(initialValue: client.feedStore.feeds(host: config.host, session: session.id))
     }
@@ -139,6 +143,11 @@ struct ObserveView: View {
         // Tapping the conversation or the terminal puts the keyboard away, as
         // do dragging and the keyboard's 收起 button above it.
         .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
+        // A sideways swipe away from the left edge goes to the next or the
+        // previous terminal in the Agent's Herdr tab.
+        .gesture(PaneSwipeGesture(enabled: paneTab != nil,
+                                  began: { showPanes(session.id, true) },
+                                  ended: swiped))
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomPanel }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
         .navigationBarTitleDisplayMode(.inline)
@@ -560,6 +569,18 @@ struct ObserveView: View {
             Label("More", systemImage: "ellipsis")
         }
         .accessibilityIdentifier("moreMenu")
+    }
+
+    private var paneTab: PaneTab? {
+        PaneTab(of: session.id, sessions: client.sessions, spaces: client.spaces)
+    }
+
+    private func swiped(_ step: Int?) {
+        if let step, let next = paneTab?.neighbor(step), let mate = client.sessions.first(where: { $0.id == next }) {
+            open(mate)
+        } else {
+            showPanes(session.id, false)
+        }
     }
 
     private var changesPage: some View {
