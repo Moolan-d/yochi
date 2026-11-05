@@ -107,12 +107,7 @@ private struct ScreenMessage: Decodable, Sendable {
 
 extension GatewayConfig {
     func screenURL(session: String) -> URL? {
-        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
-            return nil
-        }
-        components.path = "/v0/screen"
-        components.queryItems = [URLQueryItem(name: "session", value: session)]
-        return components.url
+        endpoint("/v0/screen", query: [URLQueryItem(name: "session", value: session)])
     }
 }
 

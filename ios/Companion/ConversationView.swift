@@ -253,7 +253,7 @@ struct ConversationRow: View {
         case .task:
             TaskRow(item: item)
         case .notice:
-            Text(item.text ?? "")
+            Text(item.noticeText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)

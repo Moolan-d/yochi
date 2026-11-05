@@ -33,9 +33,12 @@ struct ConversationItem: Decodable, Identifiable, Equatable {
     let agent: Subtask?
     let todos: [TodoEntry]?
     let direction: PeerDirection?
+    /// Notice: what happened, for the app to word itself (`interrupted`,
+    /// `compacted`); `text` is the Gateway's own wording.
+    let code: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, text, name, summary, state, output, questions, answers, edit, agent, todos = "items", direction
+        case id, kind, text, name, summary, state, output, questions, answers, edit, agent, todos = "items", direction, code
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +57,16 @@ struct ConversationItem: Decodable, Identifiable, Equatable {
         agent = try? c.decodeIfPresent(Subtask.self, forKey: .agent)
         todos = try? c.decodeIfPresent([TodoEntry].self, forKey: .todos)
         direction = try? c.decodeIfPresent(PeerDirection.self, forKey: .direction)
+        code = try? c.decodeIfPresent(String.self, forKey: .code)
+    }
+
+    /// A notice in the app's language when the app knows its code.
+    var noticeText: String {
+        switch code {
+        case "interrupted": String(localized: "Interrupted")
+        case "compacted": String(localized: "Context compacted")
+        default: text ?? ""
+        }
     }
 }
 
@@ -433,11 +446,6 @@ enum ConversationMessage: Decodable {
 
 extension GatewayConfig {
     func conversationURL(session: String) -> URL? {
-        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
-            return nil
-        }
-        components.path = "/v0/conversation"
-        components.queryItems = [URLQueryItem(name: "session", value: session)]
-        return components.url
+        endpoint("/v0/conversation", query: [URLQueryItem(name: "session", value: session)])
     }
 }

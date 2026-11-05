@@ -32,6 +32,7 @@ struct PairingTests {
         let config = GatewayConfig(host: "", token: "t")
         #expect(config.url?.host() == GatewayConfig.relayOnlyHost)
         #expect(config.url?.path() == "/v0/ws")
+        #expect(config.url?.query() == "lang=\(GatewayConfig.language)")
     }
 
     @Test func theTailnetAddressDecodes() throws {

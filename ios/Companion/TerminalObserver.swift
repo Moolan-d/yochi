@@ -160,17 +160,12 @@ private struct ObserveMessage: Decodable {
 
 extension GatewayConfig {
     func observeURL(session: String, takeover: TerminalGrid? = nil) -> URL? {
-        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
-            return nil
-        }
-        components.path = "/v0/observe"
         var items = [URLQueryItem(name: "session", value: session)]
         if let takeover {
             items += [URLQueryItem(name: "takeover", value: "1"),
                       URLQueryItem(name: "cols", value: String(takeover.cols)),
                       URLQueryItem(name: "rows", value: String(takeover.rows))]
         }
-        components.queryItems = items
-        return components.url
+        return endpoint("/v0/observe", query: items)
     }
 }
