@@ -29,6 +29,7 @@ use crate::devices::{Device, Store};
 use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::layout::Space;
+use crate::mux;
 use crate::relay::{self, RelayDevice};
 use crate::resume::{self, Replay};
 use crate::tailnet;
@@ -257,13 +258,7 @@ pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiv
     tokio::spawn(about::run(hc.clone(), view.clone(), about_sender));
     let (tailnet_state, tailnet) = watch::channel(tailnet::State::Waiting);
     let state = AppState { hc, view, store, devices, changes: Arc::default(), about, tailnet, streams: Default::default() };
-    let app = Router::new()
-        .route("/v0/pair", get(pair))
-        .route("/v0/ws", get(upgrade))
-        .route("/v0/observe", get(observe))
-        .route("/v0/conversation", get(conversation))
-        .route("/v0/screen", get(screen))
-        .with_state(state.clone());
+    let app = with_mux(api(state.clone()), state.clone());
     let keys = state.store.gateway_key()?;
     let relay = relay::Relay { router: app.clone(), store: state.store.clone(), devices: state.devices.clone(), keys };
     tokio::spawn(relay::run(Arc::new(relay)));
@@ -282,6 +277,48 @@ pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiv
         ran = tailnet::run(dir, resolve, app, tailnet_state, TAILNET_RETRY) => ran,
         _ = tokio::signal::ctrl_c() => Ok(()),
     }
+}
+
+/// Every endpoint but the mux: what a mux's streams may open.
+fn api(state: AppState) -> Router {
+    Router::new()
+        .route("/v0/pair", get(pair))
+        .route("/v0/ws", get(upgrade))
+        .route("/v0/observe", get(observe))
+        .route("/v0/conversation", get(conversation))
+        .route("/v0/screen", get(screen))
+        .with_state(state)
+}
+
+/// `api` and `/v0/mux` (ADR 0007), whose streams it serves.
+fn with_mux(api: Router, state: AppState) -> Router {
+    let streams = api.clone();
+    api.route(
+        "/v0/mux",
+        get(move |headers: HeaderMap, via_relay: Option<Extension<RelayDevice>>, ws: WebSocketUpgrade| {
+            multiplex(state.clone(), streams.clone(), headers, via_relay, ws)
+        }),
+    )
+}
+
+async fn multiplex(
+    state: AppState,
+    api: Router,
+    headers: HeaderMap,
+    via_relay: Option<Extension<RelayDevice>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let relayed = via_relay.as_ref().map(|Extension(RelayDevice(device))| device.clone());
+    let Some(caller) = authorize(&headers, via_relay, &state.devices.borrow()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let pass = match (relayed, headers.get(header::AUTHORIZATION)) {
+        (Some(device), _) => mux::Pass::Relay(device),
+        (None, Some(token)) => mux::Pass::Bearer(token.clone()),
+        (None, None) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    let mut access = state.access(&caller);
+    ws.on_upgrade(move |socket| async move { mux::serve(socket, api, pass, access.lost()).await })
 }
 
 /// Picks up `yochi revoke` (and anything else that rewrites the state file).

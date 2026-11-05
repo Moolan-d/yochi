@@ -450,23 +450,39 @@ async fn pair(relay: &Relay, secret: &[u8; 32], remote: &[u8; 32], name: &str) -
     })
 }
 
-type Local = tokio_tungstenite::WebSocketStream<tokio::io::DuplexStream>;
+pub(crate) type Local = tokio_tungstenite::WebSocketStream<tokio::io::DuplexStream>;
 
 /// Opens `path` on the Gateway's own Router, in this process, as `device`.
 /// Refusals come back as close codes: 4000 + the HTTP status.
 async fn local(router: &Router, device: String, path: &str) -> Result<Local, u16> {
+    let request = format!("ws://gateway{path}").into_client_request().map_err(|_| BAD_REQUEST)?;
+    in_process(router.clone().layer(Extension(RelayDevice(device))), request).await
+}
+
+/// Opens `request` on `router`, in this process over an in-memory pipe.
+/// Refusals come back as close codes: 4000 + the HTTP status.
+pub(crate) async fn in_process(router: Router, request: tungstenite::handshake::client::Request) -> Result<Local, u16> {
     let (client, server) = tokio::io::duplex(256 * 1024);
-    let service = hyper_util::service::TowerToHyperService::new(router.clone().layer(Extension(RelayDevice(device))));
+    let service = hyper_util::service::TowerToHyperService::new(router);
     tokio::spawn(async move {
         let io = hyper_util::rt::TokioIo::new(server);
         let _ = hyper::server::conn::http1::Builder::new().serve_connection(io, service).with_upgrades().await;
     });
-    let request = format!("ws://gateway{path}").into_client_request().map_err(|_| BAD_REQUEST)?;
     match tokio_tungstenite::client_async(request, client).await {
         Ok((socket, _)) => Ok(socket),
         Err(tungstenite::Error::Http(response)) => Err(4000 + response.status().as_u16().min(999)),
         Err(_) => Err(4500),
     }
+}
+
+/// The close code a stream passes on: the endpoint's own if it is one an app
+/// may see (1000, 3000–4999), else a normal close.
+pub(crate) fn passed_on(frame: Option<CloseFrame>) -> (u16, String) {
+    frame.map_or((1000, String::new()), |CloseFrame { code, reason }| {
+        let code = u16::from(code);
+        let code = if code == 1000 || (3000..5000).contains(&code) { code } else { 1000 };
+        (code, reason.to_string())
+    })
 }
 
 /// Carries messages both ways until either side ends.
@@ -502,13 +518,7 @@ async fn pump(
                         send_data(outgoing, id, &sealed).await?;
                     }
                 }
-                Some(Ok(Message::Close(frame))) => {
-                    return Ok(frame.map_or((1000, String::new()), |CloseFrame { code, reason }| {
-                        let code = u16::from(code);
-                        let code = if code == 1000 || (3000..5000).contains(&code) { code } else { 1000 };
-                        (code, reason.to_string())
-                    }));
-                }
+                Some(Ok(Message::Close(frame))) => return Ok(passed_on(frame)),
                 Some(Ok(_)) => {}
                 Some(Err(_)) | None => return Ok((1000, String::new())),
             }
@@ -755,6 +765,166 @@ mod tests {
 
         client.abort();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A TCP hop that holds every chunk for `delay` each way, as a slow network
+    /// would, after a round trip for the TCP handshake.
+    async fn slow_hop(upstream: u16, delay: Duration) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay * 2).await;
+                    let Ok(server) = tokio::net::TcpStream::connect(("127.0.0.1", upstream)).await else { return };
+                    let _ = client.set_nodelay(true);
+                    let _ = server.set_nodelay(true);
+                    let (client_read, client_write) = client.into_split();
+                    let (server_read, server_write) = server.into_split();
+                    tokio::spawn(carry(client_read, server_write, delay));
+                    tokio::spawn(carry(server_read, client_write, delay));
+                });
+            }
+        });
+        port
+    }
+
+    async fn carry(mut from: tokio::net::tcp::OwnedReadHalf, mut to: tokio::net::tcp::OwnedWriteHalf, delay: Duration) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let (sender, mut chunks) = mpsc::unbounded_channel::<(tokio::time::Instant, Vec<u8>)>();
+        tokio::spawn(async move {
+            while let Some((due, chunk)) = chunks.recv().await {
+                tokio::time::sleep_until(due).await;
+                if to.write_all(&chunk).await.is_err() {
+                    return;
+                }
+            }
+            let _ = to.shutdown().await;
+        });
+        let mut buffer = vec![0u8; 64 * 1024];
+        while let Ok(n) = from.read(&mut buffer).await {
+            if n == 0 || sender.send((tokio::time::Instant::now() + delay, buffer[..n].to_vec())).is_err() {
+                break;
+            }
+        }
+    }
+
+    fn median(mut samples: Vec<Duration>) -> Duration {
+        samples.sort();
+        samples[samples.len() / 2]
+    }
+
+    /// How long a page takes to open, from dialling to the endpoint's first
+    /// message, over a slow tailnet and through a slow Relay. Prints; run with
+    /// `cargo test page_open_latency -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn page_open_latency() {
+        // One way: phone ↔ relay 40 ms, relay ↔ Gateway 15 ms, tailnet 30 ms.
+        let (phone_relay, relay_gateway, tailnet) = (Duration::from_millis(40), Duration::from_millis(15), Duration::from_millis(30));
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let Some(_relay) = node_relay(port) else { return };
+        for _ in 0..100 {
+            if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let dir = std::env::temp_dir().join(format!("yochi-latency-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Arc::new(Store::open(dir.clone()).unwrap());
+        let gateway_side = slow_hop(port, relay_gateway).await;
+        let config = Config::new(&format!("http://127.0.0.1:{gateway_side}"), Some("e2e-key".into())).unwrap();
+        config.save(&dir).unwrap();
+        let gateway = store.gateway_key().unwrap();
+        store.offer().unwrap();
+        let secret = store.offer_secret().unwrap().unwrap();
+        let keys = Keypair::generate().unwrap();
+        let devices = Arc::new(watch::Sender::new(store.devices().unwrap()));
+        let api = Router::new().route("/v0/echo", axum::routing::get(echo));
+        let streams = api.clone();
+        let router = api.route(
+            "/v0/mux",
+            axum::routing::get(move |Extension(RelayDevice(device)): Extension<RelayDevice>, upgrade: axum::extract::ws::WebSocketUpgrade| {
+                let streams = streams.clone();
+                async move {
+                    upgrade.on_upgrade(move |socket| crate::mux::serve(socket, streams, crate::mux::Pass::Relay(device), std::future::pending()))
+                }
+            }),
+        );
+        let relay = Arc::new(Relay { router: router.clone(), store: store.clone(), devices: devices.clone(), keys: store.gateway_key().unwrap() });
+        let client = tokio::spawn(run(relay));
+        for _ in 0..100 {
+            if Status::load(&dir).is_some_and(|status| status.connected) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let mut phone = Phone::connect(port, &config.route, &gateway.public, &keys, &secret).await.unwrap();
+        phone.send(false, br#"{"path":"/v0/pair","name":"Perf"}"#).await;
+        let psk = decode_key(phone.text().await.unwrap()["psk"].as_str().unwrap()).unwrap();
+        let device = store.devices().unwrap()[0].id.clone();
+
+        // The tailnet: the same Router, served over TCP, behind its own slow hop.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let direct = listener.local_addr().unwrap().port();
+        let tailnet_router = router.layer(Extension(RelayDevice(device)));
+        tokio::spawn(async move { axum::serve(listener, tailnet_router).await });
+        let tailnet_side = slow_hop(direct, tailnet).await;
+        let phone_side = slow_hop(port, phone_relay).await;
+
+        let mut tailnet_open = Vec::new();
+        let mut relay_open = Vec::new();
+        for _ in 0..5 {
+            let started = Instant::now();
+            let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{tailnet_side}/v0/echo")).await.unwrap();
+            next_message(&mut socket).await;
+            tailnet_open.push(started.elapsed());
+
+            let started = Instant::now();
+            let mut phone = Phone::connect(phone_side, &config.route, &gateway.public, &keys, &psk).await.unwrap();
+            phone.send(false, br#"{"path":"/v0/echo"}"#).await;
+            phone.text().await.unwrap();
+            relay_open.push(started.elapsed());
+        }
+
+        // The same pages as streams on a mux opened beforehand.
+        use crate::mux::{self, OPEN};
+        let (mut tailnet_mux, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{tailnet_side}/v0/mux")).await.unwrap();
+        next_message(&mut tailnet_mux).await;
+        let mut relay_mux = Phone::connect(phone_side, &config.route, &gateway.public, &keys, &psk).await.unwrap();
+        relay_mux.send(false, br#"{"path":"/v0/mux"}"#).await;
+        relay_mux.recv().await.unwrap();
+        let mut tailnet_muxed = Vec::new();
+        let mut relay_muxed = Vec::new();
+        for id in 1..=5u32 {
+            let started = Instant::now();
+            tailnet_mux.send(Message::Binary(mux::encode(id, OPEN, b"/v0/echo").into())).await.unwrap();
+            let Message::Binary(frame) = next_message(&mut tailnet_mux).await else { panic!("a frame") };
+            assert_eq!(mux::decode(&frame).unwrap().0, id);
+            tailnet_muxed.push(started.elapsed());
+
+            let started = Instant::now();
+            relay_mux.send(true, &mux::encode(id, OPEN, b"/v0/echo")).await;
+            let (_, frame) = relay_mux.recv().await.unwrap();
+            assert_eq!(mux::decode(&frame).unwrap().0, id);
+            relay_muxed.push(started.elapsed());
+        }
+        eprintln!("page open, tailnet direct: {:?}", median(tailnet_open));
+        eprintln!("page open, tailnet mux: {:?}", median(tailnet_muxed));
+        eprintln!("page open, relay direct: {:?}", median(relay_open));
+        eprintln!("page open, relay mux: {:?}", median(relay_muxed));
+        client.abort();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    async fn next_message(socket: &mut PhoneSocket) -> Message {
+        loop {
+            match socket.next().await.expect("a message").expect("no error") {
+                message @ (Message::Text(_) | Message::Binary(_)) => return message,
+                _ => continue,
+            }
+        }
     }
 }
 

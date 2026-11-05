@@ -9,6 +9,7 @@ mod exec;
 mod following;
 mod herdr;
 mod layout;
+mod mux;
 mod noise;
 mod observe;
 mod relay;
