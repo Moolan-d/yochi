@@ -44,11 +44,12 @@ final class CompanionUITests: XCTestCase {
 
         // The terminal's text size is a phone-side preference; changing it
         // rebuilds the surface and attaches again for core's exact screen.
-        app.buttons["终端字号"].tap()
+        app.buttons["moreMenu"].tap()
+        snapshot("3 more menu")
         app.buttons["增大字号"].tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15),
                   "terminal did not re-attach after the font size change")
-        app.buttons["终端字号"].tap()
+        app.buttons["moreMenu"].tap()
         app.buttons["恢复默认字号"].tap()
 
         // A long press opens the visible rows in a selectable sheet; Copy is
@@ -885,7 +886,8 @@ final class CompanionUITests: XCTestCase {
         session.tap()
         XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
 
-        app.buttons["changesButton"].tap()
+        app.buttons["moreMenu"].tap()
+        app.buttons["改动"].tap()
         XCTAssert(text(app, containing: "uitest-agent · 相对 HEAD").waitForExistence(timeout: 20), "no changes header")
         let changed = app.buttons["change-app.txt"]
         XCTAssert(changed.exists, "no modified file")
@@ -1047,21 +1049,22 @@ final class CompanionUITests: XCTestCase {
         let app = launchUnpaired(observing: id)
         pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(app, observing: true)
-        let menu = app.buttons["tabMenu"]
-        XCTAssert(menu.waitForExistence(timeout: 15), "no menu of the tab's terminals")
-        XCTAssertEqual(menu.label, "同一个 Tab 的终端")
+        let menu = app.buttons["moreMenu"]
+        XCTAssert(menu.waitForExistence(timeout: 15), "no More menu")
+        XCTAssertEqual(menu.label, "更多")
         menu.tap()
         let first = app.collectionViews.buttons.firstMatch
         XCTAssert(first.waitForExistence(timeout: 5), "the menu is empty")
-        snapshot("1 tab menu")
+        snapshot("1 more menu")
         let title = first.label.components(separatedBy: ",").first ?? first.label
         first.tap()
         XCTAssert(app.navigationBars.staticTexts[title].waitForExistence(timeout: 10)
                   || text(app, containing: title).waitForExistence(timeout: 5), "\(title) did not open")
         snapshot("2 opened")
+        // The switch took the first session's place: Back leads home.
         app.navigationBars.buttons.firstMatch.tap()
-        XCTAssert(menu.waitForExistence(timeout: 10), "did not come back to the first session")
-        leaveAndUnpair(app)
+        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 10), "Back did not lead home")
+        unpair(app)
     }
 
     @MainActor

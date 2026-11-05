@@ -27,7 +27,11 @@ struct ContentView: View {
                                     newSession: { showingNewSession = true })
                         .navigationTitle(String(localized: "home.title", defaultValue: "Agents"))
                         .navigationDestination(for: Session.self) { session in
-                            ObserveView(session: session, config: config, client: client) { path.append($0) }
+                            ObserveView(session: session, config: config, client: client) { mate in
+                                // A terminal in the same tab takes this one's place, so Back
+                                // still leads home however often the user switches.
+                                if path.last == session { path[path.count - 1] = mate } else { path.append(mate) }
+                            }
                         }
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {

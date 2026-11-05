@@ -367,26 +367,24 @@ struct ObserveView: View {
 
     /// The terminal's text size is a per-install preference; a taken-over
     /// terminal is attached again at the grid the new size fits.
-    private var textSizeMenu: some View {
-        Menu {
-            Section("Text Size \(Int(terminalFontSize))") {
-                Button("Larger Text", systemImage: "textformat.size.larger") {
-                    terminalFontSize = TerminalTextSize.clamped(terminalFontSize + 1)
-                }
-                .disabled(terminalFontSize >= TerminalTextSize.range.upperBound)
-                Button("Smaller Text", systemImage: "textformat.size.smaller") {
-                    terminalFontSize = TerminalTextSize.clamped(terminalFontSize - 1)
-                }
-                .disabled(terminalFontSize <= TerminalTextSize.range.lowerBound)
-                if terminalFontSize != TerminalTextSize.standard {
-                    Button("Default Text Size") { terminalFontSize = TerminalTextSize.standard }
-                }
+    @ViewBuilder private var textSizeControls: some View {
+        ControlGroup {
+            Button("Smaller Text", systemImage: "textformat.size.smaller") {
+                terminalFontSize = TerminalTextSize.clamped(terminalFontSize - 1)
             }
+            .disabled(terminalFontSize <= TerminalTextSize.range.lowerBound)
+            Button("Larger Text", systemImage: "textformat.size.larger") {
+                terminalFontSize = TerminalTextSize.clamped(terminalFontSize + 1)
+            }
+            .disabled(terminalFontSize >= TerminalTextSize.range.upperBound)
         } label: {
-            Image(systemName: "textformat.size")
+            Text("Text Size \(Int(terminalFontSize))")
         }
-        .accessibilityLabel("Terminal Text Size")
-        .accessibilityIdentifier("terminalTextSize")
+        if terminalFontSize != TerminalTextSize.standard {
+            Button("Default Text Size", systemImage: "arrow.counterclockwise") {
+                terminalFontSize = TerminalTextSize.standard
+            }
+        }
     }
 
     private func subtitle(at now: Date) -> String {
@@ -531,20 +529,16 @@ struct ObserveView: View {
                 ? "Read the conversation, approve or answer the Agent, and send whole messages, all without taking over the terminal or resizing it on the desktop."
                 : "View the terminal, run shell commands and press common keys. While you look, the terminal is laid out at phone size and shrinks on the desktop until you leave.")
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            tabMenu
-            Button("Changes", systemImage: "arrow.triangle.pull") { showingChanges = true }
-                .accessibilityIdentifier("changesButton")
-            if !isConversation { textSizeMenu }
-        }
+        ToolbarItem(placement: .topBarTrailing) { moreMenu }
     }
 
-    /// The dev server or shell beside the Agent in its Herdr tab, one tap
-    /// away; hidden when the tab holds nothing else.
-    @ViewBuilder private var tabMenu: some View {
+    /// Everything that is not the page itself sits behind one button: the
+    /// other terminals in the Agent's Herdr tab to switch to, the changes,
+    /// and the terminal's text size.
+    private var moreMenu: some View {
         let mates = tabMates(of: session.id, sessions: client.sessions, spaces: client.spaces)
-        if !mates.isEmpty {
-            Menu("Terminals in the Same Tab", systemImage: "rectangle.split.2x1") {
+        return Menu {
+            if !mates.isEmpty {
                 Section("Same Tab") {
                     ForEach(mates) { mate in
                         Button {
@@ -556,8 +550,16 @@ struct ObserveView: View {
                     }
                 }
             }
-            .accessibilityIdentifier("tabMenu")
+            Section {
+                Button("Changes", systemImage: "arrow.triangle.pull") { showingChanges = true }
+            }
+            if !isConversation {
+                Section { textSizeControls }
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis")
         }
+        .accessibilityIdentifier("moreMenu")
     }
 
     private var changesPage: some View {
