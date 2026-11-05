@@ -54,5 +54,6 @@ TESTS="testPairObserveAndUnpair testShellCommandsRun" scripts/ui-test.sh
 - **UI follows Apple's Human Interface Guidelines.** Use system controls and 44 pt touch targets, and check changes with a simulator screenshot.
 - **Commits.**
   - Use Conventional Commits (`type(scope): subject`), with scopes such as `ios`, `gateway`, `relay` and `readme`.
+  - Write commit messages (subject and body) in English, with an imperative subject.
   - One intent per commit.
   - Stage explicit paths. Do not commit `docs/`, `GLOSSARY.md`, build output or anything with secrets.
