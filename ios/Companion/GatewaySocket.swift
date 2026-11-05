@@ -117,13 +117,15 @@ final class GatewaySocket: Sendable {
     /// `url` is the endpoint's tailnet address. Without Relay keys it is the
     /// only path; without a tailnet address (`GatewayConfig.relayOnlyHost`)
     /// the Relay is. `tailnetFirst` tries the tailnet first even when the Relay
-    /// worked last, so the app's main connection finds its way back.
-    init(url: URL, token: String, maximumMessageSize: Int, tailnetFirst: Bool = false) {
+    /// worked last, so the app's main connection finds its way back. With
+    /// `viaMux` the socket is a stream on the app's mux when one is ready on
+    /// the path it would try first (ADR 0007).
+    init(url: URL, token: String, maximumMessageSize: Int, tailnetFirst: Bool = false, viaMux: Bool = true) {
         let box = box
         opening = Task {
             do {
                 let link = try await Self.open(url: url, token: token, maximumMessageSize: maximumMessageSize,
-                                               tailnetFirst: tailnetFirst)
+                                               tailnetFirst: tailnetFirst, viaMux: viaMux)
                 let cancelled = box.state.withLock { state in
                     state.link = link
                     return state.cancelled
@@ -178,8 +180,18 @@ final class GatewaySocket: Sendable {
         link?.cancel()
     }
 
-    private static func open(url: URL, token: String, maximumMessageSize: Int, tailnetFirst: Bool) async throws -> any GatewayLink {
+    private static func open(url: URL, token: String, maximumMessageSize: Int, tailnetFirst: Bool, viaMux: Bool) async throws -> any GatewayLink {
         let relayOnly = url.host() == GatewayConfig.relayOnlyHost
+        if viaMux {
+            let first: GatewayPath = if RelayKeys.info == nil {
+                .tailnet
+            } else if relayOnly {
+                .relay
+            } else {
+                tailnetFirst || GatewayRoute.preferred == .tailnet ? .tailnet : .relay
+            }
+            if let stream = await GatewayMux.stream(to: url, token: token, on: first) { return stream }
+        }
         guard let relay = RelayKeys.info else {
             if relayOnly { throw URLError(.cannotFindHost) }
             return TailnetLink(url: url, token: token, maximumMessageSize: maximumMessageSize)
@@ -210,6 +222,18 @@ final class GatewaySocket: Sendable {
             }
         }
         throw failure
+    }
+
+    /// A connection to `url` on `path` alone, as the app's mux opens one.
+    static func link(on path: GatewayPath, url: URL, token: String, maximumMessageSize: Int) async throws -> any GatewayLink {
+        switch path {
+        case .tailnet:
+            guard url.host() != GatewayConfig.relayOnlyHost else { throw URLError(.cannotFindHost) }
+            return try await TailnetLink.connect(url: url, token: token, maximumMessageSize: maximumMessageSize, within: .seconds(10))
+        case .relay:
+            guard let relay = RelayKeys.info else { throw URLError(.cannotFindHost) }
+            return try await RelayLink.connect(relay, request: relayRequest(url))
+        }
     }
 
     /// The endpoint, as the first message on a Relay stream names it.

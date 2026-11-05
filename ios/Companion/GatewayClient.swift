@@ -191,6 +191,7 @@ final class GatewayClient {
     }
 
     func disconnect() {
+        GatewayMux.retireAll()
         failPending()
         loop?.cancel()
         loop = nil
@@ -422,10 +423,11 @@ final class GatewayClient {
     private func follow(url: URL, token: String) async throws {
         // A file's diff can run to half a megabyte. The tailnet goes first
         // even after the Relay, so the app finds its way back to it.
-        let socket = GatewaySocket(url: url, token: token, maximumMessageSize: 4 << 20, tailnetFirst: true)
+        let socket = GatewaySocket(url: url, token: token, maximumMessageSize: 4 << 20, tailnetFirst: true, viaMux: false)
         self.socket = socket
         let pings = Task { await Self.keepAlive(socket) }
         defer {
+            GatewayMux.retireAll()
             failPending(for: socket)
             pings.cancel()
             socket.cancel()
@@ -437,6 +439,8 @@ final class GatewayClient {
             case .hello:
                 phase = .connected
                 path = socket.path
+                // Pages open as streams on one connection beside this one (ADR 0007).
+                if let path { GatewayMux.warm(endpoint: url, token: token, path: path) }
                 // On the tailnet, the Gateway tells this device how to reach
                 // it through the Relay, for when the tailnet isn't there.
                 if path == .tailnet {

@@ -378,3 +378,21 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 **分片**：每个 WebSocket 消息加密为一条或多条 Noise 消息，每条单独作为一个二进制 WebSocket 消息发送。明文是 `[flags][payload]`：bit 0 置位表示二进制消息（否则为文本），bit 1 置位表示后面还有分片。每条 Noise 消息最多 65535 字节，所以每片 payload 最多 65518 字节；重组后的消息最多 64 MiB。Noise 消息不能重放、不能乱序，解密失败就结束连接。
 
+### 一条连接多条流（`/v0/mux`）
+
+页面不必各开一条连接：App 可以连一次 `/v0/mux`，在上面开任意多条流，每条流等同于单独连到那个接口（ADR 0007）。经 Relay 时，这省掉了每进一个页面就连中继、做 Noise 握手的几个往返；在 tailnet 上省掉 TCP 握手。认证同其他接口：tailnet 上带 Bearer token，经 Relay 时由握手完成，流沿用 mux 的认证。旧 Gateway 没有这个接口，返回 `404`（经 Relay 为 `4404`），App 照旧单独连接。
+
+每个 WebSocket 消息是一帧二进制：`[流 id: u32][kind: u8][payload]`，小端。
+
+| kind | 方向 | payload |
+| --- | --- | --- |
+| 0 OPEN | App → Gateway | 接口的路径和查询，UTF-8，例如 `/v0/observe?session=t1&resumable=1` |
+| 1 TEXT | 双向 | 这条流上的一条文本消息 |
+| 2 BINARY | 双向 | 这条流上的一条二进制消息 |
+| 3 CLOSE | 双向 | `[code: u16][reason]`，这条流结束 |
+
+- **流 id** 由 App 分配，非 0，同一条 mux 上不重复使用。0 是 mux 自己的：Gateway 接受连接后先在 0 上发 TEXT `{"type": "mux", "v": 1}`。
+- **OPEN 之后**不必等回复，可以紧接着发这条流的消息。接口的第一条消息就是回复。
+- **结束**：接口拒绝时 CLOSE 的 code 为 `4000 + HTTP 状态`（与 Relay 相同，如 `4404`、`4410`）。接口自己关闭时带它的 close code。不能开的接口（`/v0/pair`、`/v0/mux`）为 `4400`。App 发 CLOSE 等同于关掉那条连接，对终端流来说就是掉线，可续传；要离开仍先发 `detach`。
+- **限制**：每条 mux 最多 32 条流，超出的 OPEN 以 `1013` 关闭。Gateway 为每条流缓冲 64 条 App 发来的消息，接口来不及读时这条流以 `1013` 关闭，不影响其他流。
+- **心跳**：Gateway 每 15 秒 ping 一次，45 秒没听到 App 就关掉 mux，上面的流都随之断开。

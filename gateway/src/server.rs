@@ -14,6 +14,9 @@
 //! - `/v0/screen?session=<id>` sends one terminal's screen as styled text while
 //!   its Agent isn't working, for the app to find dialogs in (ADR 0005).
 //!
+//! - `/v0/mux` carries streams to any of the above but pairing on one
+//!   WebSocket, so a page opens without a connection of its own (`mux.rs`).
+//!
 //! Unpairing a device (by itself or with `yochi revoke`) closes its connections.
 //!
 //! The same endpoints are reachable through the Relay (`relay.rs`): there the

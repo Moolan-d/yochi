@@ -42,6 +42,7 @@ Gateway ──WSS /gateway?route=<hash>──▶ 中继 ◀──WSS /c/<路由 
 - 连 `WSS /c/<路由 token>`，不需要任何密钥。Gateway 不在线时，升级请求以 HTTP 502 拒绝；这个 Gateway 的流太多时以 503 拒绝。
 - 只发二进制消息，单条最大 128 KiB（一条 Noise 消息最多 65535 字节）。收到文本消息即以 1003 关闭。
 - 消息在 `open` 之后按顺序到达 Gateway，不需要等 Gateway 确认。
+- 一台手机通常有两条流：主连接，以及承载各页面的 `/v0/mux`（ADR 0007）。中继不区分它们。
 
 ## 其他端点
 
