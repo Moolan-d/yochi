@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="128" height="128" alt="Yochi app icon" />
+<img src=".github/assets/icon.png" width="128" height="128" alt="Yochi app icon" />
 
 # Yochi
 
@@ -13,6 +13,7 @@ A native iPhone app for the Claude Code, Codex and pi sessions that Herdr runs o
 ![Rust 2024](https://img.shields.io/badge/Rust-2024-000000?logo=rust&logoColor=white)
 ![Terminal: libghostty](https://img.shields.io/badge/terminal-libghostty-3551F3)
 ![Encryption: Noise IKpsk2](https://img.shields.io/badge/relay-Noise%20IKpsk2-2E7D32)
+![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 English | [简体中文](./README.zh-CN.md)
 
@@ -27,8 +28,8 @@ The phone reaches the Gateway over your **tailnet** or, when it isn't on one, th
 <div align="center">
 <table>
   <tr>
-    <td align="center"><img src="docs/images/home.png" width="260" alt="Home: agents that need you, then each Space" /></td>
-    <td align="center"><img src="docs/images/conversation.png" width="260" alt="Conversation: messages, edits, sub-tasks and todos" /></td>
+    <td align="center"><img src=".github/assets/home.png" width="260" alt="Home: agents that need you, then each Space" /></td>
+    <td align="center"><img src=".github/assets/conversation.png" width="260" alt="Conversation: messages, edits, sub-tasks and todos" /></td>
   </tr>
   <tr>
     <td align="center"><sub><b>Home</b>: who needs you, then every Space</sub></td>
@@ -48,6 +49,7 @@ The phone reaches the Gateway over your **tailnet** or, when it isn't on one, th
 - [Development](#development)
 - [Repository layout](#repository-layout)
 - [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ## Features
 
@@ -65,7 +67,7 @@ The phone reaches the Gateway over your **tailnet** or, when it isn't on one, th
 ## How it fits together
 
 <p align="center">
-  <img src="docs/diagrams/yochi-architecture.svg" alt="Yochi architecture: the phone app, tailnet and relay paths, the Gateway on the main Mac, herdr-core and remote machines" />
+  <img src=".github/assets/yochi-architecture.svg" alt="Yochi architecture: the phone app, tailnet and relay paths, the Gateway on the main Mac, herdr-core and remote machines" />
 </p>
 
 | Piece | Where it runs | What it does |
@@ -80,7 +82,7 @@ Remote machines need nothing installed. Everything goes through the main Mac's h
 ### How sessions are shown
 
 <p align="center">
-  <img src="docs/diagrams/yochi-sessions.svg" alt="How Herdr's Host, Space, Tab, Pane and Terminal levels map onto the Yochi home page" />
+  <img src=".github/assets/yochi-sessions.svg" alt="How Herdr's Host, Space, Tab, Pane and Terminal levels map onto the Yochi home page" />
 </p>
 
 Herdr nests Host → Space → Tab → Pane → Terminal. A phone needs fewer levels:
@@ -202,7 +204,7 @@ yochi [OPTIONS] [COMMAND]
 - **The terminal is still a terminal.** A paired phone can type into the sessions it sees, and a shell can do anything your account can. Treat pairing like handing over an unlocked laptop, and revoke devices you no longer hold.
 - **The Relay can't read your traffic.** App and Gateway run Noise IKpsk2 end to end. The pairing link carries the Gateway's static key and a one-time secret. The Relay forwards opaque frames and needs only a registration key, which you generate. It runs in your own account.
 
-The design decisions behind all this are in [`docs/adr/`](docs/adr). The wire protocol is in [`protocol/README.md`](protocol/README.md).
+The wire protocol is in [`protocol/README.md`](protocol/README.md).
 
 ## Development
 
@@ -236,9 +238,6 @@ gateway/    Rust Gateway and the `yochi` CLI
 ios/        SwiftUI app (XcodeGen project, libghostty fetched by script)
 relay/      Self-hostable Relay: Cloudflare Worker or Node + Docker
 protocol/   The versioned app ↔ Gateway API
-docs/adr/   Architecture decision records
-docs/diagrams/  Excalidraw sources for the diagrams above
-GLOSSARY.md The project's vocabulary: Terminal, Agent, Space, Takeover…
 ```
 
 ## Acknowledgements
@@ -247,3 +246,7 @@ GLOSSARY.md The project's vocabulary: Terminal, Agent, Space, Takeover…
 - [Heeler](https://github.com/ZingerLittleBee/Heeler) (Apache-2.0): the ANSI screen model and the Claude Code dialog reader are ported from it.
 - [Alma Relay](https://github.com/yetone/alma-relay) (MIT): `relay/` is a fork, cut down to the WebSocket tunnel. See [`relay/LICENSE`](relay/LICENSE).
 - Herdr: Yochi is a client of herdr-core and depends on its session runtime.
+
+## License
+
+Yochi is licensed under the [Apache License 2.0](LICENSE). `relay/` is a fork of Alma Relay and stays under the [MIT License](relay/LICENSE). See [NOTICE](NOTICE) for third-party attributions.
