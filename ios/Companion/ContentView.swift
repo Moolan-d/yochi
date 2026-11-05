@@ -33,6 +33,11 @@ struct ContentView: View {
                             ObserveView(session: session, config: config, client: client,
                                         open: { switchPane(from: session, to: $0) },
                                         showPanes: showPanes)
+                            // A pane switch swaps the path's last session in place, and the
+                            // stack keeps the destination at that spot, @State included; the
+                            // page would go on showing the old session's streams under the
+                            // new title. A new session is a new page.
+                            .id(session.id)
                         }
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {

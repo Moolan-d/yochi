@@ -39,7 +39,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=companion-uitest
 test_session=
-trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-wheel >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill companion-uitest >/dev/null 2>&1 || true; hc kill companion-uitest-alt >/dev/null 2>&1 || true; hc kill companion-uitest-history >/dev/null 2>&1 || true; hc kill companion-uitest-wheel >/dev/null 2>&1 || true; hc kill companion-uitest-dialog >/dev/null 2>&1 || true; hc kill companion-uitest-picker >/dev/null 2>&1 || true; hc kill companion-uitest-perf >/dev/null 2>&1 || true; hc kill companion-uitest-shell >/dev/null 2>&1 || true; hc kill companion-uitest-pane-a >/dev/null 2>&1 || true; hc kill companion-uitest-pane-b >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -92,6 +92,14 @@ start_perf_session() {
         -- /bin/sh -c 'seq 1 1000; while :; do date; sleep 0.05; done' > /dev/null
 }
 
+# Two terminals that each print a word of their own, for the pane switch
+# test, which makes them up into one Herdr tab. Prints their ids.
+start_pane_session() {
+    hc run --bg --rm --no-parent --no-notify --name "companion-uitest-pane-$1" --json \
+        -- /bin/sh -c "echo $2-pane; exec /bin/cat" |
+        python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)'
+}
+
 # Claude Code in a new, empty folder, for the dialog test: it opens on the
 # folder trust dialog, which the test declines, so nothing is saved.
 start_dialog_session() {
@@ -140,7 +148,7 @@ start_changes_repo() {
 # testChangesPage run only when named, as do testTabMenu, testClaudeStartedInTerminal
 # (starts Claude Code without sending it anything) and the testPerf*
 # measurements (scripts/perf-test.sh).
-for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testFullScreenScrollsHistory testConversationCards testHomeSample}; do
+for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testFullScreenScrollsHistory testConversationCards testHomeSample testSwipeSwitchesPanes}; do
     if [ "$test" = testPairAndObserveOverRelay ]; then
         # With the tailnet off the link has only the Relay, so the phone pairs
         # and connects through it. Once it has, the tailnet comes back on and
@@ -204,6 +212,11 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         start_perf_session
         extra="TEST_RUNNER_COMPANION_PERF_SESSION_NAME=companion-uitest-perf TEST_RUNNER_COMPANION_CONVERSATION_SESSION=${CONVERSATION_SESSION:-}"
     esac
+    if [ "$test" = testSwipeSwitchesPanes ]; then
+        pane_a=$(start_pane_session a alpha)
+        pane_b=$(start_pane_session b beta)
+        extra="TEST_RUNNER_COMPANION_PANE_A=$pane_a TEST_RUNNER_COMPANION_PANE_B=$pane_b"
+    fi
     if [ "$test" = testTabMenu ]; then
         # An existing session whose Herdr tab holds more, opened read only: TAB_SESSION=<id>.
         extra="TEST_RUNNER_COMPANION_TAB_SESSION=${TAB_SESSION:-}"
@@ -289,6 +302,8 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
     hc kill companion-uitest-dialog >/dev/null 2>&1 || true
     hc kill companion-uitest-picker >/dev/null 2>&1 || true
     hc kill companion-uitest-perf >/dev/null 2>&1 || true
+    hc kill companion-uitest-pane-a >/dev/null 2>&1 || true
+    hc kill companion-uitest-pane-b >/dev/null 2>&1 || true
     if [ -n "${alt_session:-}" ]; then
         # Leaving the page gave the base size back.
         sleep 1

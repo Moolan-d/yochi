@@ -454,11 +454,16 @@ final class GatewayClient {
                 // A phone that paired through the Relay learns the tailnet
                 // here; one whose Gateway left the tailnet stops trying it.
                 if (host ?? "") != self.host { onTailnet?(host ?? "") }
-            case .sessions(let core, let connected, let sessions, let spaces):
+            case .sessions(let core, let connected, let sessions, let received):
                 // Every page reads these; an unchanged list redraws nothing.
                 if coreName != core { coreName = core }
                 if coreConnected != connected { coreConnected = connected }
                 if self.sessions != sessions { self.sessions = sessions }
+                #if DEBUG
+                let spaces = UITestTab.adding(to: received)
+                #else
+                let spaces = received
+                #endif
                 if self.spaces != spaces { self.spaces = spaces }
                 releaseQueued()
             case .sent(let id, let turn, let status, let started):

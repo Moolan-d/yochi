@@ -212,15 +212,22 @@ final class CompanionUITests: XCTestCase {
     /// The numbers on screen, read through the long-press selection sheet.
     @MainActor
     private func viewportNumbers(_ app: XCUIApplication, _ terminal: XCUIElement) throws -> [Int] {
+        let numbers = try viewportText(app, terminal).split(whereSeparator: \.isNewline)
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        XCTAssertFalse(numbers.isEmpty, "no numbers in the viewport")
+        return numbers
+    }
+
+    /// The visible rows, as the long-press selection sheet shows them.
+    @MainActor
+    private func viewportText(_ app: XCUIApplication, _ terminal: XCUIElement) throws -> String {
         terminal.press(forDuration: 1.0)
         let view = app.textViews.firstMatch
         XCTAssert(view.waitForExistence(timeout: 5), "no selection sheet")
-        let numbers = ((view.value as? String) ?? "").split(whereSeparator: \.isNewline)
-            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        let text = (view.value as? String) ?? ""
         app.buttons["取消"].tap()
         XCTAssert(view.waitForNonExistence(timeout: 5), "selection sheet did not close")
-        XCTAssertFalse(numbers.isEmpty, "no numbers in the viewport")
-        return numbers
+        return text
     }
 
     @MainActor
@@ -1079,6 +1086,63 @@ final class CompanionUITests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 10), "Back did not lead home")
         unpair(app)
+    }
+
+    /// A sideways swipe swaps the page for the next terminal in the tab, and
+    /// the page must show that terminal, not keep the last one's screen under
+    /// the new title. Two throwaway terminals stand in as one Herdr tab
+    /// (COMPANION_TEST_TAB); each printed its own word.
+    @MainActor
+    func testSwipeSwitchesPanes() throws {
+        let first = env("COMPANION_PANE_A"), second = env("COMPANION_PANE_B")
+        let app = Self.chineseApp()
+        app.launchEnvironment["COMPANION_RESET"] = "1"
+        app.launchEnvironment["COMPANION_OBSERVE"] = first
+        app.launchEnvironment["COMPANION_TEST_TAB"] = "\(first),\(second)"
+        app.launch()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app, observing: true)
+
+        let terminal = app.descendants(matching: .any)["terminalGrid"]
+        XCTAssert(terminal.waitForExistence(timeout: 15), "the first pane never showed its terminal")
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "the first pane never attached")
+        XCTAssert(try viewportText(app, terminal).contains("alpha-pane"), "the first pane shows another terminal")
+        snapshot("1 first pane")
+
+        terminal.swipeLeft()
+        XCTAssert(text(app, containing: "companion-uitest-pane-b").waitForExistence(timeout: 10),
+                  "the swipe did not switch to the second pane")
+        XCTAssert(terminal.waitForExistence(timeout: 15), "the second pane never showed its terminal")
+        let shown = waitForViewport(app, terminal, containing: "beta-pane")
+        snapshot("2 second pane")
+        XCTAssert(shown.contains("beta-pane"), "the second pane kept showing the first one's terminal: \(shown)")
+        XCTAssertFalse(shown.contains("alpha-pane"), "the second pane shows the first one's terminal: \(shown)")
+
+        terminal.swipeRight()
+        XCTAssert(text(app, containing: "companion-uitest-pane-a").waitForExistence(timeout: 10),
+                  "the swipe back did not switch to the first pane")
+        let back = waitForViewport(app, terminal, containing: "alpha-pane")
+        snapshot("3 first pane again")
+        XCTAssert(back.contains("alpha-pane") && !back.contains("beta-pane"),
+                  "coming back shows another terminal: \(back)")
+
+        // Each switch took the last one's place: Back leads home.
+        leaveAndUnpair(app)
+    }
+
+    /// The visible rows, read again until they hold `word` or time runs out.
+    @MainActor
+    private func waitForViewport(_ app: XCUIApplication, _ terminal: XCUIElement, containing word: String,
+                                 timeout: TimeInterval = 15) -> String {
+        let deadline = Date.now.addingTimeInterval(timeout)
+        var shown = ""
+        repeat {
+            XCTAssert(terminal.waitForExistence(timeout: 5))
+            shown = (try? viewportText(app, terminal)) ?? ""
+            if shown.contains(word) { break }
+            RunLoop.current.run(until: .now.addingTimeInterval(1))
+        } while Date.now < deadline
+        return shown
     }
 
     @MainActor
