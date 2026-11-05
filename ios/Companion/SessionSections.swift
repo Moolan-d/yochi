@@ -70,7 +70,7 @@ func makeHome(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:]
         let rows = childrenAfterParents(group).map { row($0, nil, nil) }
         groups.append(HomeGroup(
             id: "others/\(machine ?? "")", kind: .others,
-            title: spaces.isEmpty ? (machine ?? String(localized: "本机")) : String(localized: "其他终端"),
+            title: spaces.isEmpty ? (machine ?? String(localized: "This Mac")) : String(localized: "Other Terminals"),
             machine: spaces.isEmpty ? nil : machine,
             agents: pinnedFirst(rows.filter(\.session.isAgent)), terminals: rows.filter { !$0.session.isAgent }))
     }
@@ -168,31 +168,31 @@ extension HomeRow {
         let since = session.statusMs.map { Int64(now.timeIntervalSince1970 * 1000) - $0 }
         let text: String? = switch status.state {
         case "blocked":
-            status.message ?? String(localized: "等你处理")
+            status.message ?? String(localized: "Needs you")
         case "working":
-            [session.todo.map { TodoProgress($0).text } ?? String(localized: "工作中"), since.map { Elapsed.text(milliseconds: $0) }]
+            [session.todo.map { TodoProgress($0).text } ?? String(localized: "Working"), since.map { Elapsed.text(milliseconds: $0) }]
                 .compactMap { $0 }.joined(separator: " · ")
         case "done":
-            since.map { String(localized: "完成 · \(Ago.text(milliseconds: $0))") } ?? String(localized: "完成")
+            since.map { String(localized: "Done · \(Ago.text(milliseconds: $0))") } ?? String(localized: "Done")
         case "error":
-            status.message.map { String(localized: "出错：\($0)") } ?? String(localized: "出错")
+            status.message.map { String(localized: "Error: \($0)") } ?? String(localized: "Error")
         default:
             nil
         }
         guard session.parent != nil else { return text }
-        return [String(localized: "子 Agent"), text].compactMap { $0 }.joined(separator: " · ")
+        return [String(localized: "Child Agent"), text].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The status in a word, for VoiceOver and the collapsed space.
     var stateWord: String? {
         switch session.status?.state {
-        case "blocked": String(localized: "等你处理")
-        case "working": String(localized: "工作中")
-        case "done": unseen ? String(localized: "完成，未看过") : String(localized: "已完成")
-        case "error": String(localized: "出错")
-        case "idle": String(localized: "空闲")
+        case "blocked": String(localized: "Needs you")
+        case "working": String(localized: "Working")
+        case "done": unseen ? String(localized: "Done, not yet seen") : String(localized: "Completed")
+        case "error": String(localized: "Error")
+        case "idle": String(localized: "Idle")
         // A known Agent CLI that reports nothing (yet).
-        default: session.status == nil && session.isAgent ? String(localized: "运行中") : nil
+        default: session.status == nil && session.isAgent ? String(localized: "Running") : nil
         }
     }
 
@@ -204,11 +204,11 @@ extension HomeRow {
         case "blocked", "error": session.status?.message
         default: nil
         }
-        return [pinnedWord, title, session.parent != nil ? String(localized: "子 Agent") : nil, stateWord, activity, place(awayFromSpace: awayFromSpace)]
-            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: String(localized: "，"))
+        return [pinnedWord, title, session.parent != nil ? String(localized: "Child Agent") : nil, stateWord, activity, place(awayFromSpace: awayFromSpace)]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: String(localized: "detail.separator", defaultValue: ", "))
     }
 
-    private var pinnedWord: String? { session.pinned ? String(localized: "已置顶") : nil }
+    private var pinnedWord: String? { session.pinned ? String(localized: "Pinned") : nil }
 
     /// Search by what the row shows and where it lives.
     func matches(_ query: String) -> Bool {
@@ -235,9 +235,9 @@ enum HomeSummary: Equatable {
 
     var word: String {
         switch self {
-        case .blocked: String(localized: "有 Agent 等你处理")
-        case .working: String(localized: "有 Agent 在工作")
-        case .unseen: String(localized: "有未看过的完成")
+        case .blocked: String(localized: "An Agent needs you")
+        case .working: String(localized: "An Agent is working")
+        case .unseen: String(localized: "Unseen results")
         }
     }
 }
@@ -247,10 +247,10 @@ enum Ago {
     static func text(milliseconds: Int64) -> String {
         let seconds = max(milliseconds, 0) / 1000
         switch seconds {
-        case ..<60: return String(localized: "刚刚")
-        case ..<3600: return String(localized: "\(seconds / 60) 分钟前")
-        case ..<86400: return String(localized: "\(seconds / 3600) 小时前")
-        default: return String(localized: "\(seconds / 86400) 天前")
+        case ..<60: return String(localized: "just now")
+        case ..<3600: return String(localized: "\(seconds / 60)m ago")
+        case ..<86400: return String(localized: "\(seconds / 3600)h ago")
+        default: return String(localized: "\(seconds / 86400)d ago")
         }
     }
 }

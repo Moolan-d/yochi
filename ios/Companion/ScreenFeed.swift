@@ -142,10 +142,10 @@ struct DialogRunner {
 
     func run(_ plan: DialogActionPlan, on dialog: BlockedDialog) async -> Outcome {
         guard !plan.steps.contains(where: { if case .paste = $0 { true } else { false } }) else {
-            return .failed(String(localized: "这个回答要输入文字，请在电脑上完成"))
+            return .failed(String(localized: "This answer needs typing. Finish it on the computer"))
         }
         guard feed.result.fingerprint?.matches(dialog.fingerprint) == true else {
-            return .failed(String(localized: "终端里的对话框已变化，请看最新内容"))
+            return .failed(String(localized: "The dialog in the terminal changed. Check what it shows now"))
         }
         // Screens after this one count; the screen a key brings can arrive
         // before the reply to the key does.
@@ -158,20 +158,20 @@ struct DialogRunner {
                 case .pressed: break
                 case .failed(let kind, let message):
                     let reason = switch kind {
-                    case "not_found", "finished": String(localized: "会话已结束")
-                    case "unavailable", "machine_unknown": String(localized: "未连接或 herdr-core 不可用")
+                    case "not_found", "finished": String(localized: "The session has ended")
+                    case "unavailable", "machine_unknown": String(localized: "Not connected, or herdr-core is unavailable")
                     default: message
                     }
                     return .failed(reason)
-                case .unknown: return .failed(String(localized: "按键结果未知，请在电脑上确认"))
+                case .unknown: return .failed(String(localized: "Not sure the key went through. Check on the computer"))
                 }
             case .expect(let expectation):
                 let met = await waitForScreen(since: since) { observation in
                     expectation.isMet(by: observation, fingerprint: dialog.fingerprint)
                 }
-                if !met { return .failed(String(localized: "终端画面和预期不一致，已停止按键，请在电脑上查看")) }
+                if !met { return .failed(String(localized: "The terminal doesn't look as expected, so key presses stopped. Check on the computer")) }
             case .paste:
-                return .failed(String(localized: "这个回答要输入文字，请在电脑上完成"))
+                return .failed(String(localized: "This answer needs typing. Finish it on the computer"))
             }
         }
         let confirmed = await waitForScreen(since: since, orWorking: true) { observation in

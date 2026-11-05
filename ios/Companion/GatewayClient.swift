@@ -316,7 +316,7 @@ final class GatewayClient {
         switch await request({ Request(id: $0, session: session) }) {
         case .changes(let list): return .success(list)
         case .failed(let kind, let message): return .failure(ChangesError(kind: kind, message: message))
-        default: return .failure(ChangesError(kind: "unknown", message: String(localized: "没有收到结果")))
+        default: return .failure(ChangesError(kind: "unknown", message: String(localized: "No result came back")))
         }
     }
 
@@ -331,7 +331,7 @@ final class GatewayClient {
         switch await request({ Request(id: $0, session: session, path: path) }) {
         case .changeDiff(let patch, let truncated): return .success(FileDiff(patch: patch, truncated: truncated))
         case .failed(let kind, let message): return .failure(ChangesError(kind: kind, message: message))
-        default: return .failure(ChangesError(kind: "unknown", message: String(localized: "没有收到结果")))
+        default: return .failure(ChangesError(kind: "unknown", message: String(localized: "No result came back")))
         }
     }
 
@@ -354,11 +354,11 @@ final class GatewayClient {
 
     private func request(_ make: (String) -> some Encodable) async -> Reply {
         guard phase == .connected, let socket else {
-            return .failed(kind: "unavailable", message: String(localized: "未连接"))
+            return .failed(kind: "unavailable", message: String(localized: "Not connected"))
         }
         let id = UUID().uuidString
         guard let data = try? JSONEncoder().encode(make(id)) else {
-            return .failed(kind: "invalid_params", message: String(localized: "请求编码失败"))
+            return .failed(kind: "invalid_params", message: String(localized: "Couldn't encode the request"))
         }
         return await withCheckedContinuation { continuation in
             pending[id] = Pending(socket: socket, continuation: continuation)
@@ -392,7 +392,7 @@ final class GatewayClient {
 
     private func run(_ config: GatewayConfig) async {
         guard let url = config.url else {
-            phase = .failed(String(localized: "地址无效：\(config.host)"))
+            phase = .failed(String(localized: "Invalid address: \(config.host)"))
             return
         }
         var delay = Duration.seconds(1)
@@ -518,7 +518,7 @@ final class GatewayClient {
     }
 
     private func describe(_ error: Error) -> String {
-        if error is DecodingError { return String(localized: "Gateway 返回了无法识别的数据") }
+        if error is DecodingError { return String(localized: "The Gateway sent data the app doesn't recognize") }
         return error.localizedDescription
     }
 }

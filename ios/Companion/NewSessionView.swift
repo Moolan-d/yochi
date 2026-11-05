@@ -20,10 +20,10 @@ struct NewSessionView: View {
 
     enum Program: String, CaseIterable, Identifiable {
         case agent = "Claude Code"
-        case shell = "终端"
+        case shell = "Terminal"
 
         var id: String { rawValue }
-        var title: String { self == .agent ? rawValue : String(localized: "终端") }
+        var title: String { self == .agent ? rawValue : String(localized: "Terminal") }
         /// Empty argv is the machine's own shell.
         var argv: [String] { self == .agent ? ["claude"] : [] }
     }
@@ -65,9 +65,9 @@ struct NewSessionView: View {
         NavigationStack {
             Form {
                 if !machines.isEmpty {
-                    Section("机器") {
-                        Picker("机器", selection: $machine) {
-                            Text("本机").tag(String?.none)
+                    Section("Machine") {
+                        Picker("Machine", selection: $machine) {
+                            Text("This Mac").tag(String?.none)
                             ForEach(machines, id: \.self) { name in
                                 Text(name).tag(String?.some(name))
                             }
@@ -76,8 +76,8 @@ struct NewSessionView: View {
                         .onChange(of: machine) { _, _ in pickedSpace = nil }
                     }
                 }
-                Section("程序") {
-                    Picker("程序", selection: $program) {
+                Section("Program") {
+                    Picker("Program", selection: $program) {
                         ForEach(Program.allCases) { program in
                             Text(program.title).tag(program)
                         }
@@ -86,7 +86,7 @@ struct NewSessionView: View {
                     .accessibilityIdentifier("newSessionProgram")
                 }
                 Section {
-                    TextField("目录", text: $directory, prompt: Text("/Users/you/project"))
+                    TextField("Directory", text: $directory, prompt: Text("/Users/you/project"))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textContentType(nil)
@@ -95,7 +95,7 @@ struct NewSessionView: View {
                     Text(directoryHint)
                 }
                 if !recentDirectories.isEmpty {
-                    Section("最近目录") {
+                    Section("Recent Directories") {
                         ForEach(recentDirectories, id: \.self) { path in
                             Button {
                                 directory = path
@@ -118,7 +118,7 @@ struct NewSessionView: View {
                 }
                 Section {
                     Picker("Space", selection: space) {
-                        Text("新 Space").tag("")
+                        Text("New Space").tag("")
                         ForEach(machineSpaces) { space in
                             Text(space.name).tag(space.id)
                         }
@@ -126,8 +126,8 @@ struct NewSessionView: View {
                     .accessibilityIdentifier("newSessionSpace")
                 } footer: {
                     Text(space.wrappedValue.isEmpty
-                         ? "Herdr 桌面端会新建一个 Space 收进它，按目录命名。"
-                         : "Herdr 桌面端会在这个 Space 里新开一个标签页收进它。")
+                         ? "Herdr desktop creates a Space for it, named after the directory."
+                         : "Herdr desktop opens a new tab for it in this Space.")
                 }
                 if let failure {
                     Section {
@@ -137,18 +137,18 @@ struct NewSessionView: View {
                     }
                 }
             }
-            .navigationTitle("新建")
+            .navigationTitle("New")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: create) {
                         if creating {
                             ProgressView()
                         } else {
-                            Text("创建")
+                            Text("Create")
                         }
                     }
                     .disabled(creating || !connected)
@@ -160,9 +160,9 @@ struct NewSessionView: View {
     }
 
     private var directoryHint: String {
-        let fallback = machine == nil ? String(localized: "herdr-core 的当前目录") : String(localized: "该机器的 home 目录")
-        let trust = program == .agent ? String(localized: "Claude Code 第一次进入新目录时可能在终端里询问是否信任。") : ""
-        return String(localized: "留空则使用\(fallback)。\(trust)")
+        let fallback = machine == nil ? String(localized: "herdr-core's current directory") : String(localized: "the machine's home directory")
+        let trust = program == .agent ? String(localized: "The first time Claude Code opens a directory, it may ask in the terminal whether to trust it.") : ""
+        return String(localized: "Leave empty to use \(fallback). \(trust)")
     }
 
     private func create() {
@@ -180,9 +180,9 @@ struct NewSessionView: View {
                 // Name the directory that was actually sent: a stray invisible
                 // character makes the core report a missing program instead.
                 let sent = directory.trimmingCharacters(in: .whitespacesAndNewlines)
-                failure = sent.isEmpty ? message : String(localized: "在「\(sent)」启动失败：\(message)")
+                failure = sent.isEmpty ? message : String(localized: "Couldn't start in “\(sent)”: \(message)")
             case .unknown:
-                failure = String(localized: "结果未知，请返回列表查看是否已创建")
+                failure = String(localized: "Result unknown. Go back to the list to see whether it was created")
             }
         }
     }

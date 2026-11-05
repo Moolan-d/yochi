@@ -1,8 +1,9 @@
 name: Companion
 options:
   bundleIdPrefix: dev.yochi
-  # The interface is written in Chinese; Localizable.xcstrings adds English.
-  developmentLanguage: zh-Hans
+  # The interface is written in English; Localizable.xcstrings adds Chinese.
+  # Any other system language falls back to English.
+  developmentLanguage: en
   deploymentTarget:
     iOS: "18.0"
 settings:
@@ -34,7 +35,7 @@ targets:
         # scrolling.
         CADisableMinimumFrameDurationOnPhone: true
         # Lists both languages in iOS Settings > Yochi > Language.
-        CFBundleLocalizations: [zh-Hans, en]
+        CFBundleLocalizations: [en, zh-Hans]
         CFBundleURLTypes:
           # `yochi://pair?…` from the QR code `yochi pair` shows.
           - CFBundleURLName: dev.yochi.app
@@ -44,7 +45,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.yochi.app$(BUNDLE_ID_SUFFIX)
         # Home-screen name; the Xcode project and targets keep the codename "Companion".
         INFOPLIST_KEY_CFBundleDisplayName: Yochi
-        INFOPLIST_KEY_NSCameraUsageDescription: 拍照发给 Agent。
+        INFOPLIST_KEY_NSCameraUsageDescription: Take photos to send to an Agent.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES

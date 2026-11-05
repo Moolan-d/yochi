@@ -34,13 +34,13 @@ struct FileChange: Decodable, Hashable, Identifiable {
 
         var title: String {
             switch self {
-            case .modified: String(localized: "修改")
-            case .added: String(localized: "新增")
-            case .deleted: String(localized: "删除")
-            case .renamed: String(localized: "改名")
-            case .typeChanged: String(localized: "类型改变")
-            case .unmerged: String(localized: "冲突")
-            case .untracked: String(localized: "未跟踪")
+            case .modified: String(localized: "Modified")
+            case .added: String(localized: "Added")
+            case .deleted: String(localized: "Deleted")
+            case .renamed: String(localized: "Renamed")
+            case .typeChanged: String(localized: "Type changed")
+            case .unmerged: String(localized: "Conflict")
+            case .untracked: String(localized: "Untracked")
             }
         }
     }
@@ -61,16 +61,16 @@ struct FileChange: Decodable, Hashable, Identifiable {
 
     /// The directory, or 「根目录」.
     var directory: String {
-        guard let slash = path.lastIndex(of: "/") else { return String(localized: "根目录") }
+        guard let slash = path.lastIndex(of: "/") else { return String(localized: "root") }
         return String(path[..<slash])
     }
 
     /// What the row says under the name.
     var detail: String {
         switch status {
-        case .added: String(localized: "\(directory) · 新文件")
-        case .untracked: String(localized: "\(directory) · 未跟踪")
-        case .renamed: String(localized: "\(directory) · 改名自 \(oldPath.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "")")
+        case .added: String(localized: "\(directory) · new file")
+        case .untracked: String(localized: "\(directory) · untracked")
+        case .renamed: String(localized: "\(directory) · renamed from \(oldPath.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "")")
         default: directory
         }
     }
@@ -78,12 +78,12 @@ struct FileChange: Decodable, Hashable, Identifiable {
     var accessibilityLabel: String {
         var parts = [name, status.title]
         if isBinary {
-            parts.append(String(localized: "二进制文件"))
+            parts.append(String(localized: "binary file"))
         } else {
-            if let added, added > 0 { parts.append(String(localized: "增加 \(added) 行")) }
-            if let deleted, deleted > 0 { parts.append(String(localized: "删除 \(deleted) 行")) }
+            if let added, added > 0 { parts.append(String(localized: "\(added) lines added")) }
+            if let deleted, deleted > 0 { parts.append(String(localized: "\(deleted) lines deleted")) }
         }
-        return parts.joined(separator: String(localized: "，"))
+        return parts.joined(separator: String(localized: "detail.separator", defaultValue: ", "))
     }
 
     init(path: String, oldPath: String? = nil, status: Status, added: Int?, deleted: Int?) {
@@ -141,11 +141,11 @@ struct ParsedDiff: Equatable {
         var noNewline = false
 
         var accessibilityLabel: String {
-            let text = text.isEmpty ? String(localized: "空行") : text
+            let text = text.isEmpty ? String(localized: "blank line") : text
             switch kind {
-            case .context: return String(localized: "第 \(number) 行：\(text)")
-            case .added: return String(localized: "第 \(number) 行，增加：\(text)")
-            case .deleted: return String(localized: "第 \(number) 行，删除：\(text)")
+            case .context: return String(localized: "Line \(number): \(text)")
+            case .added: return String(localized: "Line \(number), added: \(text)")
+            case .deleted: return String(localized: "Line \(number), deleted: \(text)")
             }
         }
     }

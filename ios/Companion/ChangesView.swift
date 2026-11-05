@@ -33,42 +33,42 @@ struct ChangesView: View {
                 } header: {
                     summary(list)
                 } footer: {
-                    Text(list.truncated ? "只列出前 \(list.files.count) 个文件。手机上只读，不能暂存或提交。" : "手机上只读，不能暂存或提交。")
+                    Text(list.truncated ? "Showing the first \(list.files.count) files. Read-only on the phone: nothing can be staged or committed." : "Read-only on the phone: nothing can be staged or committed.")
                 }
                 if let askToCommit {
                     Section {
-                        Button("让 Agent 提交", systemImage: "checkmark.seal") { askToCommit() }
+                        Button("Ask Agent to Commit", systemImage: "checkmark.seal") { askToCommit() }
                             .accessibilityIdentifier("askToCommit")
                     } footer: {
-                        Text("把「\(Self.commitRequest)」填进输入框，回到对话后由你发出。")
+                        Text("Puts “\(Self.commitRequest)” in the message field. You send it from the conversation.")
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
         .overlay { placeholder }
-        .navigationTitle("改动")
+        .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
         .task { await refresh() }
         .onChange(of: turn) { _, _ in Task { await refresh() } }
     }
 
-    static let commitRequest = String(localized: "请提交这些改动")
+    static let commitRequest = String(localized: "Please commit these changes")
 
     private func summary(_ list: ChangeList) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("\(list.repo) · 相对 HEAD")
+            Text("\(list.repo) · against HEAD")
                 .font(.headline)
                 .foregroundStyle(.primary)
             HStack(spacing: 6) {
-                Text("\(list.files.count) 个文件")
+                Text("\(list.files.count) files")
                 Text("+\(list.added)").foregroundStyle(.green)
                 Text("−\(list.deleted)").foregroundStyle(.red)
             }
             .font(.subheadline.monospacedDigit())
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(list.files.count) 个文件，增加 \(list.added) 行，删除 \(list.deleted) 行")
+            .accessibilityLabel("Files: \(list.files.count), lines added: \(list.added), lines deleted: \(list.deleted)")
         }
         .textCase(nil)
         .padding(.bottom, 4)
@@ -79,20 +79,20 @@ struct ChangesView: View {
     @ViewBuilder private var placeholder: some View {
         switch load {
         case .loading:
-            ProgressView("正在读取改动…")
+            ProgressView("Loading changes…")
         case .loaded(let list) where list.files.isEmpty:
-            ContentUnavailableView("没有改动", systemImage: "checkmark.circle",
-                                   description: Text("\(list.repo) 和 HEAD 一致，也没有未跟踪的文件。"))
+            ContentUnavailableView("No Changes", systemImage: "checkmark.circle",
+                                   description: Text("\(list.repo) matches HEAD, with no untracked files."))
         case .failed(let error) where error.kind == "not_git":
-            ContentUnavailableView("不是 git 仓库", systemImage: "folder.badge.questionmark",
-                                   description: Text("这个会话的目录不在 git 仓库里。"))
+            ContentUnavailableView("Not a Git Repository", systemImage: "folder.badge.questionmark",
+                                   description: Text("This session's directory isn't in a Git repository."))
         case .failed(let error):
             ContentUnavailableView {
-                Label("读取失败", systemImage: "exclamationmark.triangle")
+                Label("Couldn't Load", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(error.message)
             } actions: {
-                Button("重试") { Task { await refresh() } }
+                Button("Retry") { Task { await refresh() } }
                     .buttonStyle(.bordered)
             }
         case .loaded:
@@ -130,7 +130,7 @@ private struct FileChangeRow: View {
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(file.accessibilityLabel)
-        .accessibilityHint("查看这个文件的改动")
+        .accessibilityHint("Shows this file's changes")
     }
 }
 
@@ -142,7 +142,7 @@ struct ChangeCounts: View {
     var body: some View {
         Group {
             if added == nil && deleted == nil {
-                Text("二进制").foregroundStyle(.secondary)
+                Text("Binary").foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 4) {
                     Text("+\(added ?? 0)").foregroundStyle(.green)
@@ -199,29 +199,29 @@ struct ChangeDiffView: View {
         Group {
             switch load {
             case .loading:
-                ProgressView("正在读取…")
+                ProgressView("Loading…")
             case .failed(let error):
                 ContentUnavailableView {
-                    Label(error.kind == "changed" ? "文件列表已变化" : "读取失败", systemImage: "exclamationmark.triangle")
+                    Label(error.kind == "changed" ? "The File List Changed" : "Couldn't Load", systemImage: "exclamationmark.triangle")
                 } description: {
-                    Text(error.kind == "changed" ? String(localized: "返回改动页刷新后再打开。") : error.message)
+                    Text(error.kind == "changed" ? String(localized: "Go back to Changes to refresh it, then open this again.") : error.message)
                 } actions: {
                     if error.kind != "changed" {
-                        Button("重试") { Task { await refresh() } }
+                        Button("Retry") { Task { await refresh() } }
                             .buttonStyle(.bordered)
                     }
                 }
             case .loaded(let diff, _) where diff.binary:
-                ContentUnavailableView("二进制文件", systemImage: "doc",
-                                       description: Text("二进制文件的改动无法显示。"))
+                ContentUnavailableView("binary file", systemImage: "doc",
+                                       description: Text("Changes to binary files can't be shown."))
             case .loaded(let diff, _) where diff.hunks.isEmpty:
-                ContentUnavailableView("没有文字改动", systemImage: "doc.text",
-                                       description: Text(file.status == .renamed ? "只是改了名。" : "内容没变，可能只改了权限。"))
+                ContentUnavailableView("No Text Changes", systemImage: "doc.text",
+                                       description: Text(file.status == .renamed ? "Only renamed." : "The content didn't change. Maybe only its permissions did."))
             case .loaded(let diff, let truncated):
                 ScrollView {
                     DiffView(diff: diff)
                     if truncated {
-                        Text("改动太长，只显示了开头的部分。")
+                        Text("The change is too long; only the beginning is shown.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .padding()
@@ -241,7 +241,7 @@ struct ChangeDiffView: View {
                     .font(.caption)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(file.accessibilityLabel)，在 \(file.directory)")
+                .accessibilityLabel("\(file.accessibilityLabel), in \(file.directory)")
                 .accessibilityAddTraits(.isHeader)
             }
         }
@@ -271,7 +271,7 @@ struct DiffView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(diff.hunks) { hunk in
                 HStack(spacing: 6) {
-                    Text("@@ 第 \(hunk.line) 行").fontWeight(.semibold).fixedSize()
+                    Text("@@ line \(hunk.line)").fontWeight(.semibold).fixedSize()
                     Text(hunk.context).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .font(.system(.footnote, design: .monospaced))
@@ -280,7 +280,7 @@ struct DiffView: View {
                 .padding(.vertical, 6)
                 .background(Color(.secondarySystemBackground))
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("从第 \(hunk.line) 行开始的改动")
+                .accessibilityLabel("Changes from line \(hunk.line)")
                 .accessibilityAddTraits(.isHeader)
                 ForEach(hunk.lines) { line in
                     DiffLineRow(line: line, numberWidth: numberWidth)
@@ -307,7 +307,7 @@ private struct DiffLineRow: View {
                 Text(line.text.replacingOccurrences(of: "\t", with: "    "))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if line.noNewline {
-                    Text("文件末尾没有换行").font(.caption2).foregroundStyle(.secondary)
+                    Text("No newline at end of file").font(.caption2).foregroundStyle(.secondary)
                 }
             }
         }

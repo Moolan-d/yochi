@@ -21,14 +21,14 @@ struct TerminalTextSheet: View {
     var body: some View {
         NavigationStack {
             TerminalTextView(text: selection.text, anchor: selection.anchor, selectedText: $selectedText)
-                .navigationTitle("选取文字")
+                .navigationTitle("Select Text")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("取消") { dismiss() }
+                        Button("Cancel") { dismiss() }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("复制") {
+                        Button("Copy") {
                             UIPasteboard.general.string = selectedText
                             onCopied()
                             dismiss()

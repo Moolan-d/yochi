@@ -76,11 +76,11 @@ struct EditInfo: Decodable, Equatable {
     }
 
     /// 「编辑 A.swift」 or 「新建 A.swift，12 行」.
-    var title: String { created ? String(localized: "新建 \(name)，\(added) 行") : String(localized: "编辑 \(name)") }
+    var title: String { created ? String(localized: "Created \(name), \(added) lines") : String(localized: "Edited \(name)") }
 
     var accessibilityLabel: String {
-        if created { return String(localized: "新建 \(name)，\(added) 行，在 \(directory)") }
-        return String(localized: "编辑 \(name)，增加 \(added) 行，删除 \(deleted) 行，在 \(directory)")
+        if created { return String(localized: "Created \(name), \(added) lines, in \(directory)") }
+        return String(localized: "Edited \(name), \(added) lines added, \(deleted) deleted, in \(directory)")
     }
 
     private enum CodingKeys: String, CodingKey { case path, added, deleted, patch, created, truncated }
@@ -133,13 +133,13 @@ struct Subtask: Decodable, Equatable {
     func timing(state: ConversationItem.ToolState?, now: Date) -> String? {
         switch state {
         case .running, nil:
-            guard let startedMs else { return background ? String(localized: "后台") : String(localized: "运行中") }
+            guard let startedMs else { return background ? String(localized: "Background") : String(localized: "Running") }
             let elapsed = Elapsed.text(milliseconds: Int64(now.timeIntervalSince1970 * 1000) - startedMs)
-            return background ? String(localized: "后台 · \(elapsed)") : String(localized: "运行中 \(elapsed)")
+            return background ? String(localized: "Background · \(elapsed)") : String(localized: "Running \(elapsed)")
         case .done:
-            return durationMs.map { String(localized: "用时 \(Elapsed.text(milliseconds: $0))") }
+            return durationMs.map { String(localized: "Took \(Elapsed.text(milliseconds: $0))") }
         case .error:
-            return String(localized: "失败")
+            return String(localized: "Failed")
         }
     }
 }
@@ -157,9 +157,9 @@ enum Elapsed {
     /// The same, for VoiceOver: 12 秒, 2 分 30 秒.
     static func spoken(milliseconds: Int64) -> String {
         let seconds = max(0, milliseconds / 1000)
-        if seconds < 60 { return String(localized: "\(seconds) 秒") }
-        if seconds < 3600 { return String(localized: "\(seconds / 60) 分 \(seconds % 60) 秒") }
-        return String(localized: "\(seconds / 3600) 小时 \(seconds % 3600 / 60) 分")
+        if seconds < 60 { return String(localized: "\(seconds)s") }
+        if seconds < 3600 { return String(localized: "\(seconds / 60)m \(seconds % 60)s") }
+        return String(localized: "\(seconds / 3600)h \(seconds % 3600 / 60)m")
     }
 }
 
@@ -212,9 +212,9 @@ struct TodoProgress: Equatable {
     }
 
     /// An `activeForm` that already says 正在 isn't said twice.
-    private var line: String { doing.hasPrefix("正在") ? doing : String(localized: "正在：\(doing)") }
-    var text: String { String(localized: "\(line)（\(done)/\(total)）") }
-    var accessibilityLabel: String { String(localized: "\(line)，已完成 \(done) 项，共 \(total) 项") }
+    private var line: String { doing.hasPrefix("正在") ? doing : String(localized: "todo.doing", defaultValue: "\(doing)") }
+    var text: String { String(localized: "\(line) (\(done)/\(total))") }
+    var accessibilityLabel: String { String(localized: "\(line), \(done) of \(total) done") }
 }
 
 enum PeerDirection: String, Decodable {
@@ -295,7 +295,7 @@ final class ConversationFeed {
     func start(_ config: GatewayConfig, session: String) {
         stop()
         guard let url = config.conversationURL(session: session) else {
-            phase = .failed(String(localized: "地址无效：\(config.host)"))
+            phase = .failed(String(localized: "Invalid address: \(config.host)"))
             return
         }
         let socket = GatewaySocket(url: url, token: config.token, maximumMessageSize: 32 << 20)
@@ -322,8 +322,8 @@ final class ConversationFeed {
             if case .closed = phase { return }
             let status = socket.status
             let reason = switch status {
-            case 401: String(localized: "配对已失效")
-            case 404: String(localized: "会话已不存在")
+            case 401: String(localized: "Pairing no longer valid")
+            case 404: String(localized: "The session no longer exists")
             default: error.localizedDescription
             }
             phase = .failed(reason)
@@ -385,7 +385,7 @@ final class ConversationFeed {
             if self.mode != mode { self.mode = mode }
         case .closed(let reason):
             pending = nil
-            phase = .closed(reason: reason == "finished" ? String(localized: "会话已结束") : reason)
+            phase = .closed(reason: reason == "finished" ? String(localized: "The session has ended") : reason)
         case .unknown:
             break
         }
@@ -424,7 +424,7 @@ enum ConversationMessage: Decodable {
         case "mode":
             self = .mode(try c.decode(String.self, forKey: .mode))
         case "closed":
-            self = .closed(reason: (try? c.decode(String.self, forKey: .reason)) ?? String(localized: "会话已结束"))
+            self = .closed(reason: (try? c.decode(String.self, forKey: .reason)) ?? String(localized: "The session has ended"))
         default:
             self = .unknown
         }
