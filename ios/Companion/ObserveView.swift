@@ -375,25 +375,27 @@ struct ObserveView: View {
     }
 
     /// The terminal's text size is a per-install preference; a taken-over
-    /// terminal is attached again at the grid the new size fits.
+    /// terminal is attached again at the grid the new size fits. The menu
+    /// stays open so the size can be stepped and read off the header.
     @ViewBuilder private var textSizeControls: some View {
         ControlGroup {
-            Button("Smaller Text", systemImage: "textformat.size.smaller") {
+            Button("Smaller Text", systemImage: "minus") {
                 terminalFontSize = TerminalTextSize.clamped(terminalFontSize - 1)
             }
             .disabled(terminalFontSize <= TerminalTextSize.range.lowerBound)
-            Button("Larger Text", systemImage: "textformat.size.larger") {
+            Button("Default Text Size", systemImage: "arrow.counterclockwise") {
+                terminalFontSize = TerminalTextSize.standard
+            }
+            .disabled(terminalFontSize == TerminalTextSize.standard)
+            Button("Larger Text", systemImage: "plus") {
                 terminalFontSize = TerminalTextSize.clamped(terminalFontSize + 1)
             }
             .disabled(terminalFontSize >= TerminalTextSize.range.upperBound)
         } label: {
-            Text("Text Size \(Int(terminalFontSize))")
+            Text("Text Size · \(Int(terminalFontSize)) pt")
         }
-        if terminalFontSize != TerminalTextSize.standard {
-            Button("Default Text Size", systemImage: "arrow.counterclockwise") {
-                terminalFontSize = TerminalTextSize.standard
-            }
-        }
+        .controlGroupStyle(.compactMenu)
+        .menuActionDismissBehavior(.disabled)
     }
 
     private func subtitle(at now: Date) -> String {
@@ -541,26 +543,33 @@ struct ObserveView: View {
         ToolbarItem(placement: .topBarTrailing) { moreMenu }
     }
 
-    /// Everything that is not the page itself sits behind one button: the
-    /// other terminals in the Agent's Herdr tab to switch to, the changes,
-    /// and the terminal's text size.
+    /// Everything that is not the page itself sits behind one button, one
+    /// kind per section: the terminals in the Agent's Herdr tab to switch
+    /// to, the changes, and the terminal's text size.
     private var moreMenu: some View {
-        let mates = tabMates(of: session.id, sessions: client.sessions, spaces: client.spaces)
+        let panes = tabPanes
         return Menu {
-            if !mates.isEmpty {
-                Section("Same Tab") {
-                    ForEach(mates) { mate in
-                        Button {
-                            open(mate)
-                        } label: {
-                            Label(mate.title, systemImage: mate.isAgent ? "sparkles" : "terminal")
-                            Text([mate.program, mate.folder].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+            if panes.count > 1 {
+                Section {
+                    Menu {
+                        Picker("Switch Pane", selection: Binding(get: { session.id }, set: switchPane(to:))) {
+                            ForEach(panes) { pane in
+                                // System menus wrap titles over lines; one line each, cut to fit.
+                                Button {} label: {
+                                    Label(MenuLine.fit(pane.title), systemImage: pane.isAgent ? "sparkles" : "terminal")
+                                    Text(MenuLine.fit(paneDetail(pane), style: .subheadline))
+                                }
+                                .tag(pane.id)
+                            }
                         }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Label("Switch Pane", systemImage: "rectangle.split.2x1")
                     }
                 }
             }
             Section {
-                Button("Changes", systemImage: "arrow.triangle.pull") { showingChanges = true }
+                Button("Changes", systemImage: "plusminus") { showingChanges = true }
             }
             if !isConversation {
                 Section { textSizeControls }
@@ -569,6 +578,24 @@ struct ObserveView: View {
             Label("More", systemImage: "ellipsis")
         }
         .accessibilityIdentifier("moreMenu")
+    }
+
+    /// This terminal and the others in its Herdr tab, in pane order.
+    private var tabPanes: [Session] {
+        let mates = tabMates(of: session.id, sessions: client.sessions, spaces: client.spaces)
+        guard !mates.isEmpty else { return [] }
+        let order = client.spaces.lazy.flatMap(\.tabs).first(where: { $0.sessions.contains(session.id) })?.sessions ?? []
+        let byID = Dictionary((mates + [session]).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return order.compactMap { byID[$0] }
+    }
+
+    private func paneDetail(_ pane: Session) -> String {
+        [pane.program, pane.folder].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func switchPane(to id: String) {
+        guard id != session.id, let pane = client.sessions.first(where: { $0.id == id }) else { return }
+        open(pane)
     }
 
     private var paneTab: PaneTab? {
@@ -752,5 +779,26 @@ private struct DeliveryBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// One line of a system menu item. Menus wrap a long title over up to three
+/// lines and ignore `lineLimit`, so the text is cut to the width a menu row
+/// gives it, at the current Dynamic Type size, with an ellipsis.
+enum MenuLine {
+    /// What a row of a phone's menu leaves for text beside a checkmark and an icon.
+    static let width: CGFloat = 145
+
+    static func fit(_ text: String, style: UIFont.TextStyle = .body, width: CGFloat = width) -> String {
+        let font = UIFont.preferredFont(forTextStyle: style)
+        func measure(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        guard measure(text) > width else { return text }
+        let characters = Array(text)
+        var low = 0, high = characters.count
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if measure(String(characters[..<mid]) + "…") <= width { low = mid } else { high = mid - 1 }
+        }
+        return String(characters[..<low]).trimmingCharacters(in: .whitespaces) + "…"
     }
 }

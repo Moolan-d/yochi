@@ -44,13 +44,20 @@ final class CompanionUITests: XCTestCase {
 
         // The terminal's text size is a phone-side preference; changing it
         // rebuilds the surface and attaches again for core's exact screen.
+        // The menu stays open while the size steps; its header follows.
         app.buttons["moreMenu"].tap()
+        XCTAssert(text(app, containing: "字号 · 9 pt").waitForExistence(timeout: 5), "no text size header")
+        XCTAssertFalse(app.buttons["恢复默认字号"].isEnabled, "the default size can be restored at the default")
         snapshot("3 more menu")
         app.buttons["增大字号"].tap()
+        XCTAssert(text(app, containing: "字号 · 10 pt").waitForExistence(timeout: 5),
+                  "the menu closed or kept the old size after a step")
+        snapshot("3 larger text")
+        app.buttons["恢复默认字号"].tap()
+        XCTAssert(text(app, containing: "字号 · 9 pt").waitForExistence(timeout: 5), "the default size was not restored")
+        app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15),
                   "terminal did not re-attach after the font size change")
-        app.buttons["moreMenu"].tap()
-        app.buttons["恢复默认字号"].tap()
 
         // A long press opens the visible rows in a selectable sheet; Copy is
         // one tap and confirms on the terminal page.
@@ -1074,10 +1081,16 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(menu.waitForExistence(timeout: 15), "no More menu")
         XCTAssertEqual(menu.label, "更多")
         menu.tap()
-        let first = app.collectionViews.buttons.firstMatch
-        XCTAssert(first.waitForExistence(timeout: 5), "the menu is empty")
+        let switcher = app.buttons["切换 Pane"]
+        XCTAssert(switcher.waitForExistence(timeout: 5), "no Switch Pane in the menu")
         snapshot("1 more menu")
-        let title = first.label.components(separatedBy: ",").first ?? first.label
+        switcher.tap()
+        // The open terminal is the selected one; take the first other.
+        let other = app.collectionViews.buttons.allElementsBoundByIndex.first { !$0.isSelected && $0.label != "切换 Pane" }
+        XCTAssert(other?.exists == true, "the tab lists no other terminal")
+        guard let first = other else { return }
+        let title = (first.label.components(separatedBy: ",").first ?? first.label)
+            .replacingOccurrences(of: "…", with: "")
         first.tap()
         XCTAssert(app.navigationBars.staticTexts[title].waitForExistence(timeout: 10)
                   || text(app, containing: title).waitForExistence(timeout: 5), "\(title) did not open")
@@ -1125,6 +1138,21 @@ final class CompanionUITests: XCTestCase {
         snapshot("3 first pane again")
         XCTAssert(back.contains("alpha-pane") && !back.contains("beta-pane"),
                   "coming back shows another terminal: \(back)")
+
+        // The More menu lists the tab's panes, the open one selected.
+        app.buttons["moreMenu"].tap()
+        app.buttons["切换 Pane"].tap()
+        // Both names are cut to one line at the same point; the panes come in tab order.
+        let panes = app.collectionViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "companion-uites"))
+        let paneB = panes.element(boundBy: 1)
+        XCTAssert(paneB.waitForExistence(timeout: 5), "Switch Pane does not list the second pane")
+        XCTAssert(panes.element(boundBy: 0).isSelected, "the open pane is not the selected one")
+        snapshot("4 switch pane menu")
+        paneB.tap()
+        XCTAssert(text(app, containing: "companion-uitest-pane-b").waitForExistence(timeout: 10),
+                  "the menu did not switch to the second pane")
+        XCTAssert(waitForViewport(app, terminal, containing: "beta-pane").contains("beta-pane"),
+                  "the menu switch kept showing the first pane's terminal")
 
         // Each switch took the last one's place: Back leads home.
         leaveAndUnpair(app)

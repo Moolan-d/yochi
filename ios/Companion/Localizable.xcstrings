@@ -2862,16 +2862,6 @@
         }
       }
     },
-    "Same Tab" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同一个 Tab"
-          }
-        }
-      }
-    },
     "Sample Conversation" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3243,6 +3233,16 @@
         }
       }
     },
+    "Switch Pane" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换 Pane"
+          }
+        }
+      }
+    },
     "Switch model" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3323,12 +3323,12 @@
         }
       }
     },
-    "Text Size %lld" : {
+    "Text Size · %lld pt" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "字号 %lld"
+            "value" : "字号 · %lld pt"
           }
         }
       }
