@@ -328,12 +328,18 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - **文本帧**（控制）：
   ```jsonc
   {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸收下首屏（只读时再重排）
+  {"type": "attached", "cols": 49, "rows": 45, "resume": "9f2c…", "keep_ms": 30000}  // 带 resumable=1 时
+  {"type": "resumed", "resume": "41ab…", "keep_ms": 30000}  // 接回了；之后的二进制帧接着 offset 往下
   {"type": "size", "cols": 160, "rows": 48}       // 终端尺寸变了（其他客户端，或接管后自己的 resize）
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
   {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
   ```
 - **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后会错位——App 检测到全屏界面（首屏里的 `ESC[?1049h` 等切换）时不重排，按 core 的网格原样显示并缩放到手机宽度，可双指放大；程序进入或退出全屏时重新 attach。
 - **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。
+
+**掉线续传。** 加 `resumable=1` 时 `attached` 多带 `resume`（token）和 `keep_ms`。之后连接若不是因 App 发 `{"type": "detach"}` 而断开（网络掉、App 进后台、关连接），Gateway 不断开 core 的 attach，保留 `keep_ms`（30 秒）：接管的尺寸照旧，core 的输出记下等补发，期间不归还 credit。App 用 `/v0/observe?session=<id>&resume=<token>&offset=<已收到的二进制字节数>` 接回（不再带 `takeover` 等参数），Gateway 回 `resumed`（带新 token，旧的作废），从第 `offset` 个字节起补发，再接着转发；保留期间尺寸变了会紧接着发 `size`。原连接还没断时也可以接回（tailnet 换到 Relay），原连接随之关闭。token 只认原设备和原会话；不认识、已过期、`offset` 超出已发字节数或缓冲（最近 4 MiB）里已没有时返回 `410`（经 Relay 为 close code 4410），App 改为重新 attach。不带 `resumable=1` 的连接断开即放手，和原来一样。App 离开终端页时先发 `{"type": "detach"}` 再关连接，Gateway 立即放手；任何连接都接受这条消息。
+
+**心跳。** Gateway 在 `/v0/observe` 上每 15 秒发一次 WebSocket ping，45 秒没收到 App 任何消息（含 pong）就当掉线处理：可续传的流进入保留，其余直接放手。
 
 ### 读屏（Screen）
 

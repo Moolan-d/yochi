@@ -42,6 +42,16 @@ final class TerminalViewTests: XCTestCase {
             URLQueryItem(name: "session", value: "t1"), URLQueryItem(name: "takeover", value: "1"),
             URLQueryItem(name: "cols", value: "49"), URLQueryItem(name: "rows", value: "45"),
         ])
+        let resumable = try XCTUnwrap(config.observeURL(session: "t1", resumable: true))
+        XCTAssertEqual(URLComponents(url: resumable, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "session", value: "t1"), URLQueryItem(name: "resumable", value: "1")])
+        // Coming back names only the stream and how far the phone got.
+        let back = try XCTUnwrap(config.observeURL(session: "t1", takeover: TerminalGrid(cols: 49, rows: 45),
+                                                   resume: "tok", offset: 1234))
+        XCTAssertEqual(URLComponents(url: back, resolvingAgainstBaseURL: false)?.queryItems, [
+            URLQueryItem(name: "session", value: "t1"), URLQueryItem(name: "resume", value: "tok"),
+            URLQueryItem(name: "offset", value: "1234"),
+        ])
     }
 
     @MainActor

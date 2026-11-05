@@ -304,6 +304,46 @@ final class SessionFeedsTests: XCTestCase {
         model.stop()
     }
 
+    /// The Gateway keeps a resumable stream a while after the connection
+    /// drops; the observer comes back with the token and the bytes it has.
+    func testAStreamCanBePickedUpWhereItWas() throws {
+        let observer = TerminalObserver()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        observer.start(config, session: "t1", takeover: TerminalGrid(cols: 70, rows: 53))
+        XCTAssertFalse(observer.canComeBack, "nothing to come back to before the Gateway says so")
+        try observer.receive(control: #"{"type":"attached","cols":70,"rows":53,"resume":"tok1","keep_ms":30000}"#)
+        XCTAssertTrue(observer.canComeBack)
+        observer.suspend()
+        XCTAssertTrue(observer.isSuspended)
+        XCTAssertTrue(observer.comeBack())
+        XCTAssertTrue(observer.reconnecting)
+        XCTAssertFalse(observer.isSuspended)
+        try observer.receive(control: #"{"type":"resumed","resume":"tok2","keep_ms":30000}"#)
+        XCTAssertFalse(observer.reconnecting)
+        // Leaving for good forgets the stream.
+        observer.stop()
+        XCTAssertFalse(observer.canComeBack)
+        XCTAssertFalse(observer.comeBack())
+    }
+
+    /// An older Gateway sends no token: the background is as leaving, and
+    /// coming back takes over afresh.
+    func testWithoutAResumeTokenTheBackgroundLetsGo() {
+        TerminalCell.forget()
+        TerminalCell.remember(CGSize(width: 5.5, height: 11), fontSize: 9)
+        defer { TerminalCell.forget() }
+        let model = TerminalModel()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 600))
+        model.resume(config, session: "t1", fontSize: 9)
+        model.observer.attached(cols: 70, rows: 53)
+        model.suspend()
+        XCTAssertFalse(model.observer.isSuspended)
+        model.resume(config, session: "t1", fontSize: 9)
+        XCTAssertEqual(model.attempt, 2)
+        model.stop()
+    }
+
     /// Claude Code and other full-screen programs keep their history
     /// themselves and scroll on the mouse wheel. Taken over, the wheel
     /// reports Ghostty writes for a drag reach the Gateway, and a tap's

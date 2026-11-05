@@ -6,7 +6,9 @@
 //! - `/v0/observe?session=<id>` streams one terminal: control as text,
 //!   terminal bytes as binary messages. With `takeover=1&cols=&rows=` the
 //!   terminal takes the phone's size while it is watched, and the app's
-//!   scrolling reaches a full-screen program as the mouse wheel.
+//!   scrolling reaches a full-screen program as the mouse wheel. With
+//!   `resumable=1` a dropped stream waits for the phone to come back with
+//!   `resume=<token>&offset=<bytes>` (`resume.rs`); `detach` ends it at once.
 //! - `/v0/conversation?session=<id>` follows the conversation of the Agent in
 //!   one terminal, read from its transcript.
 //! - `/v0/screen?session=<id>` sends one terminal's screen as styled text while

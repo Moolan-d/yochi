@@ -100,8 +100,9 @@ struct TerminalPane: View {
         .onChange(of: scenePhase) { _, phase in
             guard visible else { return }
             switch phase {
-            // Let go, so the desktop has its size back while the phone is away.
-            case .background: model.pause()
+            // Let go of the connection; the Gateway keeps the stream (and a
+            // takeover's size) a little while for the app to come back to.
+            case .background: model.suspend()
             case .active: model.resume(config, session: session, fontSize: fontSize)
             default: break
             }
@@ -127,6 +128,8 @@ struct TerminalPane: View {
         if model.desktop != nil {
             Group {
                 switch observer.phase {
+                case .observing where observer.reconnecting:
+                    BannerLabel(text: "正在重新连接…", systemImage: "arrow.triangle.2.circlepath")
                 case .observing where model.yielded:
                     HStack {
                         BannerLabel(text: "桌面正在使用这个终端，按桌面尺寸显示", systemImage: "desktopcomputer")
@@ -217,6 +220,8 @@ final class TerminalModel {
     @ObservationIgnored private var waitingForSize = false
     /// The page left while taking over; coming back takes over afresh.
     @ObservationIgnored private var released = false
+    /// The page isn't showing (left, or the app is in the background).
+    @ObservationIgnored private var away = false
     @ObservationIgnored private var resizeRestart: Task<Void, Never>?
     @ObservationIgnored private var resizeSend: Task<Void, Never>?
     @ObservationIgnored private var takebackCheck: Task<Void, Never>?
@@ -235,6 +240,13 @@ final class TerminalModel {
             desktop != TerminalGrid(cols: cols, rows: rows)
         } else { false }
         let same = target.map { $0.session == session && $0.config == config && $0.fontSize == fontSize } ?? false
+        away = false
+        // Back from the background: pick the stream up where it was, or
+        // attach afresh if the Gateway stopped waiting.
+        if observer.isSuspended {
+            if !same || !observer.comeBack() { start(config, session: session, fontSize: fontSize) }
+            return
+        }
         // Still holding it, e.g. the app only went inactive.
         if takeover != nil, !released, !failed, same, !waitingForSize { return }
         let canTakeOver = phoneGrid(fontSize: fontSize) != nil
@@ -248,13 +260,32 @@ final class TerminalModel {
         feed.resume()
     }
 
-    /// The page left; a takeover lets go, watching output waits in the feed
-    /// until the page comes back.
+    /// The app went to the background with the page showing: let go of the
+    /// connection but not the stream, so coming back soon carries on where it
+    /// was, and a takeover keeps the phone's size meanwhile. Without a stream
+    /// to come back to (an older Gateway, or the first paint not shown yet)
+    /// it is as leaving.
+    func suspend() {
+        guard observer.canComeBack, surface?.view.hasShown == true else {
+            pause()
+            return
+        }
+        resizeRestart?.cancel()
+        resizeSend?.cancel()
+        takebackCheck?.cancel()
+        waitingForSize = false
+        away = true
+        observer.suspend()
+    }
+
+    /// The page left; a takeover lets go at once, watching output waits in
+    /// the feed until the page comes back.
     func pause() {
         resizeRestart?.cancel()
         resizeSend?.cancel()
         takebackCheck?.cancel()
         waitingForSize = false
+        away = true
         if takeover != nil {
             observer.stop()
             released = true
@@ -292,6 +323,12 @@ final class TerminalModel {
         takeover = yielded ? nil : phoneGrid(fontSize: fontSize)
         attempt += 1
         observer.onBytes = { feed.receive($0) }
+        // The Gateway lost the stream while the connection was down: attach
+        // afresh if the page is showing; otherwise the page does on returning.
+        observer.onExpired = { [weak self] in
+            guard let self, !self.away, let target = self.target else { return }
+            start(target.config, session: target.session, fontSize: target.fontSize)
+        }
         // Taken over, a full-screen program's own history scrolls with the wheel.
         if takeover != nil { feed.onWheel = { [observer] in observer.wheel($0) } }
         observer.start(config, session: session, takeover: takeover)
