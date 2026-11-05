@@ -10,11 +10,11 @@ enum PermissionMode: String, CaseIterable, Sendable {
 
     var title: String {
         switch self {
-        case .default: String(localized: "普通")
-        case .acceptEdits: String(localized: "自动接受编辑")
-        case .plan: String(localized: "计划")
-        case .auto: String(localized: "自动")
-        case .bypassPermissions: String(localized: "跳过所有权限")
+        case .default: String(localized: "Default")
+        case .acceptEdits: String(localized: "Accept Edits")
+        case .plan: String(localized: "Plan")
+        case .auto: String(localized: "Auto")
+        case .bypassPermissions: String(localized: "Bypass Permissions")
         }
     }
 
@@ -75,24 +75,24 @@ struct PermissionModeSwitcher {
 
     func run(to target: PermissionMode) async -> Outcome {
         guard let screen = feed.screen, var current = PermissionMode.read(screen) else {
-            return .failed(String(localized: "终端里看不到当前模式，请在电脑上切换"))
+            return .failed(String(localized: "The terminal doesn't show the current mode. Switch on the computer"))
         }
         for _ in 0..<maxPresses {
             if current == target { return .done }
-            guard !agentWorking() else { return .failed(String(localized: "Agent 开始工作了，已停止切换")) }
+            guard !agentWorking() else { return .failed(String(localized: "The Agent started working, so switching stopped")) }
             let since = feed.revision
             switch await press(["shift+tab"]) {
             case .pressed: break
             case .failed(let kind, let message):
-                return .failed(kind == "not_found" || kind == "finished" ? String(localized: "会话已结束") : message)
-            case .unknown: return .failed(String(localized: "按键结果未知，请在电脑上确认当前模式"))
+                return .failed(kind == "not_found" || kind == "finished" ? String(localized: "The session has ended") : message)
+            case .unknown: return .failed(String(localized: "Not sure the key went through. Check the current mode on the computer"))
             }
             guard let next = await nextMode(since: since, after: current) else {
-                return .failed(String(localized: "终端画面和预期不一致，已停止切换，请在电脑上查看"))
+                return .failed(String(localized: "The terminal doesn't look as expected, so switching stopped. Check on the computer"))
             }
             current = next
         }
-        return current == target ? .done : .failed(String(localized: "没有切到「\(target.title)」，请在电脑上查看"))
+        return current == target ? .done : .failed(String(localized: "Didn't switch to “\(target.title)”. Check on the computer"))
     }
 
     /// The mode on the first fresh screen that shows a different one.

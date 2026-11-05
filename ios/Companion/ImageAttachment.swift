@@ -150,12 +150,12 @@ struct AttachmentStrip: View {
                 .accessibilityHidden(true)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("图片 \(number)")
+            .accessibilityLabel("Image \(number)")
             .accessibilityValue(stateText(attachment.state))
-            .accessibilityAction(named: "移除") { remove(attachment.id) }
+            .accessibilityAction(named: "Remove") { remove(attachment.id) }
             .accessibilityActions {
                 if case .failed = attachment.state {
-                    Button("重试") { retry(attachment.id) }
+                    Button("Retry") { retry(attachment.id) }
                 }
             }
             .accessibilityIdentifier("attachment-\(number)")
@@ -184,9 +184,9 @@ struct AttachmentStrip: View {
 
     private func stateText(_ state: ImageAttachment.State) -> String {
         switch state {
-        case .uploading: String(localized: "上传中")
-        case .uploaded: String(localized: "已上传")
-        case .failed(let message): String(localized: "上传失败：\(message)，可重试")
+        case .uploading: String(localized: "Uploading")
+        case .uploaded: String(localized: "Uploaded")
+        case .failed(let message): String(localized: "Upload failed: \(message). You can retry")
         }
     }
 }

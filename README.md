@@ -60,7 +60,7 @@ The phone reaches the Gateway over your **tailnet** or, when it isn't on one, th
 - **Read-only changes.** See what a session has changed in its git repository, diffs included, without the phone ever naming a path or running a command.
 - **Start new sessions.** Start an agent from a recent directory, filed into the right Space.
 - **Two ways in, neither required.** Tailnet and Relay are independent. Run either or both. A phone paired over the Relay moves to the tailnet on its own once the Mac joins one.
-- **English and Chinese.** The app follows the iPhone's language. Text the Gateway writes itself, such as some notices and errors, is still in Chinese for now.
+- **English and Chinese.** The app follows the iPhone's language, and so does the text the Gateway writes itself, such as notices and errors. A Chinese iPhone gets Chinese; any other language gets English.
 
 ## How it fits together
 

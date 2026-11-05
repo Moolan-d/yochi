@@ -36,37 +36,37 @@ struct SessionListView: View {
     private var emptyState: some View {
         switch client.phase {
         case .disconnected, .connecting:
-            ProgressView("正在连接…")
+            ProgressView("Connecting…")
         case .failed(let reason):
             ContentUnavailableView {
-                Label("无法连接 Gateway", systemImage: "wifi.exclamationmark")
+                Label("Can't Connect to the Gateway", systemImage: "wifi.exclamationmark")
             } description: {
                 Text(reason)
             } actions: {
-                Button("重试", action: retry)
+                Button("Retry", action: retry)
                     .buttonStyle(.borderedProminent)
             }
         case .unauthorized:
             ContentUnavailableView {
-                Label("配对已失效", systemImage: "key.slash")
+                Label("Pairing no longer valid", systemImage: "key.slash")
             } description: {
-                Text("Gateway 不再接受此 iPhone，可能已在主 Mac 上移除了它的配对。")
+                Text("The Gateway no longer accepts this iPhone. Its pairing may have been removed on the main Mac.")
             } actions: {
-                Button("重新配对", action: reenter)
+                Button("Pair Again", action: reenter)
                     .buttonStyle(.borderedProminent)
             }
         case .connected where !client.coreConnected:
             ContentUnavailableView(
-                "无法访问 herdr-core",
+                "Can't Reach herdr-core",
                 systemImage: "bolt.horizontal.circle",
-                description: Text("Gateway 已连接，但主 Mac 上的 herdr-core 没有响应。"))
+                description: Text("Connected to the Gateway, but herdr-core on the main Mac isn't responding."))
         case .connected:
             ContentUnavailableView {
-                Label("没有运行中的 Agent", systemImage: "terminal")
+                Label("No Agents Running", systemImage: "terminal")
             } description: {
-                Text("新建一个，或在 Herdr 中让 Agent 开始运行。")
+                Text("Start one here, or start an Agent in Herdr.")
             } actions: {
-                Button("新建", action: newSession)
+                Button("New", action: newSession)
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -76,11 +76,11 @@ struct SessionListView: View {
 extension GatewayClient {
     var statusText: String {
         switch phase {
-        case .disconnected: String(localized: "未连接")
-        case .connecting: String(localized: "正在连接…")
-        case .connected: coreConnected ? String(localized: "已连接") : String(localized: "herdr-core 不可用")
-        case .failed(let reason): String(localized: "连接失败：\(reason)")
-        case .unauthorized: String(localized: "配对已失效")
+        case .disconnected: String(localized: "Not connected")
+        case .connecting: String(localized: "Connecting…")
+        case .connected: coreConnected ? String(localized: "Connected") : String(localized: "herdr-core unavailable")
+        case .failed(let reason): String(localized: "Couldn't connect: \(reason)")
+        case .unauthorized: String(localized: "Pairing no longer valid")
         }
     }
 }
@@ -162,7 +162,7 @@ struct HomeList<Banner: View>: View {
                             link(row, awayFromSpace: true)
                         }
                     } header: {
-                        Label("需要你", systemImage: "hand.raised.fill")
+                        Label("Needs You", systemImage: "hand.raised.fill")
                             .font(.headline)
                             .foregroundStyle(.orange)
                             .textCase(nil)
@@ -174,7 +174,7 @@ struct HomeList<Banner: View>: View {
                 }
             }
         }
-        .searchable(text: $searchText, prompt: "搜索 Agent、仓库、Space")
+        .searchable(text: $searchText, prompt: "Search Agents, repos, Spaces")
         .task(id: searchText) {
             let text = searchText
             // Clearing the field shows the whole list again at once.
@@ -187,12 +187,12 @@ struct HomeList<Banner: View>: View {
         .overlay {
             if searching && found.isEmpty {
                 ContentUnavailableView {
-                    Label("没有匹配「\(query)」的 Agent", systemImage: "magnifyingglass")
+                    Label("No Agents Match “\(query)”", systemImage: "magnifyingglass")
                 } description: {
-                    Text("换个词试试，或新建一个。")
+                    Text("Try another word, or start a new one.")
                 } actions: {
                     if let newSession {
-                        Button("新建", action: newSession)
+                        Button("New", action: newSession)
                             .buttonStyle(.borderedProminent)
                     }
                 }
@@ -241,7 +241,7 @@ struct HomeList<Banner: View>: View {
             }
         } label: {
             HStack {
-                Label(group.agents.isEmpty ? "\(group.terminals.count) 个终端" : "另有 \(group.terminals.count) 个终端",
+                Label(group.agents.isEmpty ? "\(group.terminals.count) terminals" : "\(group.terminals.count) more terminals",
                       systemImage: "terminal")
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -254,7 +254,7 @@ struct HomeList<Banner: View>: View {
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
-        .accessibilityValue(open ? "已展开" : "已收起")
+        .accessibilityValue(open ? "Expanded" : "Collapsed")
         .accessibilityIdentifier("terminalsToggle")
     }
 
@@ -297,7 +297,7 @@ private struct GroupHeader: View {
                             .foregroundStyle(summary.color)
                             .accessibilityHidden(true)
                     }
-                    Text("\(group.agents.count) 个 Agent")
+                    Text("\(group.agents.count) Agents")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -313,11 +313,11 @@ private struct GroupHeader: View {
         .buttonStyle(.plain)
         .textCase(nil)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([group.title, group.machine].compactMap { $0 }.joined(separator: String(localized: "，")))
+        .accessibilityLabel([group.title, group.machine].compactMap { $0 }.joined(separator: String(localized: "detail.separator", defaultValue: ", ")))
         .accessibilityValue(collapsed
-            ? ([String(localized: "已收起"), String(localized: "\(group.agents.count) 个 Agent"), group.summary?.word].compactMap { $0 }.joined(separator: String(localized: "，")))
-            : String(localized: "已展开"))
-        .accessibilityHint(collapsed ? "展开这个 Space" : "收起这个 Space")
+            ? ([String(localized: "Collapsed"), String(localized: "\(group.agents.count) Agents"), group.summary?.word].compactMap { $0 }.joined(separator: String(localized: "detail.separator", defaultValue: ", ")))
+            : String(localized: "Expanded"))
+        .accessibilityHint(collapsed ? "Expands this Space" : "Collapses this Space")
         .accessibilityAddTraits([.isHeader, .isButton])
         .accessibilityIdentifier("groupHeader")
     }
@@ -369,7 +369,7 @@ private struct AgentRow: View {
                 }
                 activity
                 if queued {
-                    Label("排队中", systemImage: "clock")
+                    Label("Queued", systemImage: "clock")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -386,7 +386,7 @@ private struct AgentRow: View {
         .padding(.leading, session.parent != nil && !awayFromSpace ? indent : 0)
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([row.accessibilityLabel(awayFromSpace: awayFromSpace), queued ? String(localized: "有排队中的消息") : nil].compactMap { $0 }.joined(separator: String(localized: "，")))
+        .accessibilityLabel([row.accessibilityLabel(awayFromSpace: awayFromSpace), queued ? String(localized: "has a queued message") : nil].compactMap { $0 }.joined(separator: String(localized: "detail.separator", defaultValue: ", ")))
     }
 
     @ViewBuilder

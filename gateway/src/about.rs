@@ -7,6 +7,7 @@ use crate::changes;
 use crate::conversation::Conversation;
 use crate::core::Client;
 use crate::herdr::CoreView;
+use crate::lang::Lang;
 use crate::session::Session;
 use crate::transcript::{self, Located, Tail};
 use anyhow::Result;
@@ -134,7 +135,8 @@ impl Lookup {
 }
 
 async fn lookup(hc: &str, machine: Option<&str>, cwd: &str) -> Lookup {
-    match changes::git(hc, machine, cwd, &["rev-parse", "--show-toplevel", "--git-common-dir"]).await {
+    // Its failures only reach the log, which is in English.
+    match changes::git(hc, machine, cwd, &["rev-parse", "--show-toplevel", "--git-common-dir"], Lang::English).await {
         Ok(output) if output.code == Some(0) => Lookup::Found(parse_repo(cwd, &String::from_utf8_lossy(&output.stdout))),
         // Not in a repository, or a bare one.
         Ok(_) => Lookup::Found(None),

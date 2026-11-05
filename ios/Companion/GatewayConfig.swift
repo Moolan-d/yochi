@@ -14,13 +14,25 @@ struct GatewayConfig: Equatable {
     var device: String?
 
     var url: URL? {
-        Self.endpoint(host: host, path: "/v0/ws")
+        endpoint("/v0/ws")
+    }
+
+    func endpoint(_ path: String, query: [URLQueryItem] = []) -> URL? {
+        Self.endpoint(host: host, path: path, query: query)
     }
 
     /// Without a tailnet address the endpoint names `relayOnlyHost`, which
-    /// `GatewaySocket` reaches only through the Relay.
-    static func endpoint(host: String, path: String) -> URL? {
-        URL(string: "ws://\(address(host))\(path)")
+    /// `GatewaySocket` reaches only through the Relay. Every endpoint carries
+    /// `lang`, so the words the Gateway writes itself match the app's.
+    static func endpoint(host: String, path: String, query: [URLQueryItem] = []) -> URL? {
+        guard var components = URLComponents(string: "ws://\(address(host))\(path)") else { return nil }
+        components.queryItems = query + [URLQueryItem(name: "lang", value: language)]
+        return components.url
+    }
+
+    /// The language the app shows: `en`, or `zh-Hans` for Chinese.
+    static var language: String {
+        Bundle.main.preferredLocalizations.first ?? "en"
     }
 
     /// Never resolves (RFC 6761), so nothing goes to the tailnet by mistake.

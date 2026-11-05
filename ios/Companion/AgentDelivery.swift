@@ -99,11 +99,11 @@ enum AgentDelivery: Equatable {
 
     var state: String {
         switch self {
-        case .sending: String(localized: "发送中…")
+        case .sending: String(localized: "Sending…")
         case .sent(_, _, let status, let started): AgentMessagePresentation.accepted(status: status, started: started)
         case .turnCompleted(_, let status): AgentMessagePresentation.afterTurn(status: status)
         case .failed(_, let kind, let message): Self.failure(kind: kind, message: message)
-        case .unknown: String(localized: "结果未知，可能已发送")
+        case .unknown: String(localized: "Result unknown; it may have been sent")
         }
     }
 
@@ -111,10 +111,10 @@ enum AgentDelivery: Equatable {
     /// core's quiet rule is all `terminal.send` waits for.
     var shellState: String {
         switch self {
-        case .sending: String(localized: "发送中…")
-        case .sent, .turnCompleted: String(localized: "已送达")
+        case .sending: String(localized: "Sending…")
+        case .sent, .turnCompleted: String(localized: "Delivered")
         case .failed(_, let kind, let message): Self.failure(kind: kind, message: message)
-        case .unknown: String(localized: "结果未知，请看终端确认")
+        case .unknown: String(localized: "Result unknown. Check the terminal")
         }
     }
 
@@ -140,14 +140,14 @@ enum AgentDelivery: Equatable {
     /// The kind is the user-facing reason; core and Gateway prose is detail.
     private static func failure(kind: String, message: String) -> String {
         switch kind {
-        case "blocked": String(localized: "Agent 正在等待确认，尚未发送")
-        case "not_found", "finished": String(localized: "会话已结束")
-        case "machine_unknown", "unavailable": String(localized: "未连接或 herdr-core 不可用")
-        case "status_mismatch": String(localized: "Agent 状态已变化，请重试")
-        case "too_long": String(localized: "消息过长（最多 16 KiB）")
-        case "invalid_params": String(localized: "消息为空或参数无效")
-        case "config": String(localized: "herdr-core 配置不可用")
-        default: message.isEmpty ? String(localized: "发送失败") : String(localized: "发送失败（\(message)）")
+        case "blocked": String(localized: "The Agent is waiting for a confirmation; not sent yet")
+        case "not_found", "finished": String(localized: "The session has ended")
+        case "machine_unknown", "unavailable": String(localized: "Not connected, or herdr-core is unavailable")
+        case "status_mismatch": String(localized: "The Agent's state changed. Try again")
+        case "too_long": String(localized: "The message is too long (16 KiB at most)")
+        case "invalid_params": String(localized: "The message is empty or invalid")
+        case "config": String(localized: "herdr-core's configuration is unavailable")
+        default: message.isEmpty ? String(localized: "Couldn't send") : String(localized: "Couldn't send (\(message))")
         }
     }
 }

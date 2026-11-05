@@ -27,7 +27,7 @@ final class TerminalObserver {
     func start(_ config: GatewayConfig, session: String, takeover: TerminalGrid? = nil) {
         stop()
         guard let url = config.observeURL(session: session, takeover: takeover) else {
-            phase = .failed(String(localized: "地址无效：\(config.host)"))
+            phase = .failed(String(localized: "Invalid address: \(config.host)"))
             return
         }
         let socket = GatewaySocket(url: url, token: config.token, maximumMessageSize: 32 << 20)
@@ -95,8 +95,8 @@ final class TerminalObserver {
             if case .closed = phase { return }
             let status = socket.status
             let reason = switch status {
-            case 401: String(localized: "配对已失效")
-            case 404: String(localized: "会话已不存在")
+            case 401: String(localized: "Pairing no longer valid")
+            case 404: String(localized: "The session no longer exists")
             default: error.localizedDescription
             }
             phase = .failed(reason)
@@ -146,31 +146,26 @@ private struct ObserveMessage: Decodable {
         case .text(let text): text
         case .record(let reason, let exitCode):
             switch reason {
-            case "exited": exitCode.map { String(localized: "程序已退出（退出码 \($0)）") } ?? String(localized: "程序已退出")
-            case "killed": String(localized: "会话已被结束")
-            case "core_lost": String(localized: "与 herdr-core 的连接已断开")
-            case "server_stop", "host_shutdown": String(localized: "herdr-core 已停止")
+            case "exited": exitCode.map { String(localized: "The program exited (code \($0))") } ?? String(localized: "The program exited")
+            case "killed": String(localized: "The session was ended")
+            case "core_lost": String(localized: "Lost the connection to herdr-core")
+            case "server_stop", "host_shutdown": String(localized: "herdr-core stopped")
             case let other?: other
-            case nil: String(localized: "会话已结束")
+            case nil: String(localized: "The session has ended")
             }
-        case nil: String(localized: "会话已结束")
+        case nil: String(localized: "The session has ended")
         }
     }
 }
 
 extension GatewayConfig {
     func observeURL(session: String, takeover: TerminalGrid? = nil) -> URL? {
-        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
-            return nil
-        }
-        components.path = "/v0/observe"
         var items = [URLQueryItem(name: "session", value: session)]
         if let takeover {
             items += [URLQueryItem(name: "takeover", value: "1"),
                       URLQueryItem(name: "cols", value: String(takeover.cols)),
                       URLQueryItem(name: "rows", value: String(takeover.rows))]
         }
-        components.queryItems = items
-        return components.url
+        return endpoint("/v0/observe", query: items)
     }
 }

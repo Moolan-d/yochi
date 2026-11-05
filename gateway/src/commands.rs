@@ -6,6 +6,7 @@
 
 use crate::exec::{Program, exec};
 use crate::herdr::CoreView;
+use crate::lang::Lang;
 use serde::Serialize;
 use std::collections::HashSet;
 use tokio::sync::watch;
@@ -43,7 +44,7 @@ pub enum Response {
     CommandsFailed { id: String, kind: String, message: String },
 }
 
-pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, request: Request) -> Response {
+pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, request: Request, lang: Lang) -> Response {
     let failed = |kind: &str, message: String| Response::CommandsFailed { id: request.id.clone(), kind: kind.into(), message };
     let Some((machine, cwd)) = view
         .borrow()
@@ -52,10 +53,10 @@ pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, request: Request) 
         .find(|session| session.id == request.session)
         .map(|session| (session.machine.clone(), session.cwd.clone()))
     else {
-        return failed("not_found", "会话不存在或已结束".into());
+        return failed("not_found", lang.pick(crate::agent::GONE_ZH, crate::agent::GONE_EN).into());
     };
-    match exec(hc, machine.as_deref(), &cwd, Program::Line(SCRIPT), None, SCRIPT_TIMEOUT_SECS).await {
-        Ok(output) if output.cut => failed("timeout", "列命令超时".into()),
+    match exec(hc, machine.as_deref(), &cwd, Program::Line(SCRIPT), None, SCRIPT_TIMEOUT_SECS, lang).await {
+        Ok(output) if output.cut => failed("timeout", lang.pick("列命令超时", "Timed out listing the commands").into()),
         Ok(output) => Response::CommandList { id: request.id, commands: parse(&String::from_utf8_lossy(&output.stdout)) },
         Err(failure) => failed(&failure.kind, failure.message),
     }

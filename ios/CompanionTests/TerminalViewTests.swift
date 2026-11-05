@@ -36,11 +36,12 @@ final class TerminalViewTests: XCTestCase {
         let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
         let watch = try XCTUnwrap(config.observeURL(session: "t1"))
         XCTAssertEqual(URLComponents(url: watch, resolvingAgainstBaseURL: false)?.queryItems,
-                       [URLQueryItem(name: "session", value: "t1")])
+                       [URLQueryItem(name: "session", value: "t1"), URLQueryItem(name: "lang", value: GatewayConfig.language)])
         let take = try XCTUnwrap(config.observeURL(session: "t1", takeover: TerminalGrid(cols: 49, rows: 45)))
         XCTAssertEqual(URLComponents(url: take, resolvingAgainstBaseURL: false)?.queryItems, [
             URLQueryItem(name: "session", value: "t1"), URLQueryItem(name: "takeover", value: "1"),
             URLQueryItem(name: "cols", value: "49"), URLQueryItem(name: "rows", value: "45"),
+            URLQueryItem(name: "lang", value: GatewayConfig.language),
         ])
     }
 

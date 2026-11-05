@@ -144,18 +144,18 @@ struct ObserveView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .navigationDestination(isPresented: $showingChanges) { changesPage }
-        .confirmationDialog("仍然发送消息？", isPresented: $confirmingBlocked, titleVisibility: .visible) {
-            Button("仍然发送") { send(force: true) }
+        .confirmationDialog("Send the Message Anyway?", isPresented: $confirmingBlocked, titleVisibility: .visible) {
+            Button("Send Anyway") { send(force: true) }
             // iOS 26 can drop `.cancel` here; an explicit plain button remains.
-            Button("不发送") {}
+            Button("Don't Send") {}
         } message: {
-            Text("Agent 正在等待确认，消息可能被当作对话框的回答")
+            Text("The Agent is waiting for a confirmation; your message may be taken as the answer")
         }
-        .confirmationDialog("发送 /exit 会结束这个会话", isPresented: $confirmingExit, titleVisibility: .visible) {
-            Button("填入 /exit", role: .destructive) { draft = "/exit" }
-            Button("取消") {}
+        .confirmationDialog("Sending /exit ends this session", isPresented: $confirmingExit, titleVisibility: .visible) {
+            Button("Insert /exit", role: .destructive) { draft = "/exit" }
+            Button("Cancel") {}
         } message: {
-            Text("Claude Code 退出后，终端里的程序也就结束了")
+            Text("Once Claude Code quits, the program in the terminal ends")
         }
         .onChange(of: draft) { _, draft in
             AgentMessageStore.saveDraft(draft, host: config.host, session: session.id)
@@ -306,7 +306,7 @@ struct ObserveView: View {
                         .padding(.horizontal, 6)
                 }
                 HStack(alignment: .bottom, spacing: 4) {
-                    TextField(isConversation ? "给 Agent 发消息" : "输入命令", text: $draft, axis: .vertical)
+                    TextField(isConversation ? "Message the Agent" : "Enter a command", text: $draft, axis: .vertical)
                         .lineLimit(1...6)
                         .font(.body)
                         .padding(.leading, 14)
@@ -331,7 +331,7 @@ struct ObserveView: View {
                                 .contentShape(Rectangle().inset(by: -5))
                             }
                             .disabled(stopping)
-                            .accessibilityLabel("停止 Agent")
+                            .accessibilityLabel("Stop Agent")
                             .accessibilityIdentifier("stopAgent")
                         } else {
                             Button { send() } label: {
@@ -348,8 +348,8 @@ struct ObserveView: View {
                                 .contentShape(Rectangle().inset(by: -5))
                             }
                             .disabled(!canSend)
-                            .accessibilityLabel(isConversation ? (queuesMessage ? "排队发送" : "发送消息") : "发送命令")
-                            .accessibilityHint(queuesMessage ? "这一轮结束后发出" : "")
+                            .accessibilityLabel(isConversation ? (queuesMessage ? "Queue Message" : "Send Message") : "Send Command")
+                            .accessibilityHint(queuesMessage ? "Sends when this turn ends" : "")
                             .accessibilityIdentifier("sendAgentMessage")
                         }
                     }
@@ -369,31 +369,31 @@ struct ObserveView: View {
     /// terminal is attached again at the grid the new size fits.
     private var textSizeMenu: some View {
         Menu {
-            Section("字号 \(Int(terminalFontSize))") {
-                Button("增大字号", systemImage: "textformat.size.larger") {
+            Section("Text Size \(Int(terminalFontSize))") {
+                Button("Larger Text", systemImage: "textformat.size.larger") {
                     terminalFontSize = TerminalTextSize.clamped(terminalFontSize + 1)
                 }
                 .disabled(terminalFontSize >= TerminalTextSize.range.upperBound)
-                Button("减小字号", systemImage: "textformat.size.smaller") {
+                Button("Smaller Text", systemImage: "textformat.size.smaller") {
                     terminalFontSize = TerminalTextSize.clamped(terminalFontSize - 1)
                 }
                 .disabled(terminalFontSize <= TerminalTextSize.range.lowerBound)
                 if terminalFontSize != TerminalTextSize.standard {
-                    Button("恢复默认字号") { terminalFontSize = TerminalTextSize.standard }
+                    Button("Default Text Size") { terminalFontSize = TerminalTextSize.standard }
                 }
             }
         } label: {
             Image(systemName: "textformat.size")
         }
-        .accessibilityLabel("终端字号")
+        .accessibilityLabel("Terminal Text Size")
         .accessibilityIdentifier("terminalTextSize")
     }
 
     private func subtitle(at now: Date) -> String {
-        let place = currentSession.machine ?? String(localized: "本机")
+        let place = currentSession.machine ?? String(localized: "This Mac")
         if let working = currentSession.working(at: now) { return "\(working) · \(place)" }
-        if isConversation { return String(localized: "对话 · \(place)") }
-        var parts = [String(localized: "终端"), place]
+        if isConversation { return String(localized: "Conversation · \(place)") }
+        var parts = [String(localized: "Terminal"), place]
         if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
         return parts.joined(separator: " · ")
     }
@@ -408,12 +408,12 @@ struct ObserveView: View {
     /// Esc for a dialog the phone can't read, if the screen still shows it.
     private func press(_ key: String, on excerpt: GenericDialogExcerpt) async -> String? {
         guard screen.result.fingerprint?.matches(excerpt.fingerprint) == true else {
-            return String(localized: "终端里的对话框已变化，请看最新内容")
+            return String(localized: "The dialog in the terminal changed. Check what it shows now")
         }
         switch await client.pressKeys(session: session.id, keys: [key]) {
         case .pressed: return nil
         case .failed(_, let message): return message
-        case .unknown: return String(localized: "按键结果未知")
+        case .unknown: return String(localized: "Not sure the key went through")
         }
     }
 
@@ -452,12 +452,12 @@ struct ObserveView: View {
     private var composerMenu: some View {
         Menu {
             Section {
-                Button("照片图库", systemImage: "photo.on.rectangle") { pickingPhotos = true }
-                Button("拍照", systemImage: "camera") { takingPhoto = true }
+                Button("Photo Library", systemImage: "photo.on.rectangle") { pickingPhotos = true }
+                Button("Take Photo", systemImage: "camera") { takingPhoto = true }
                     .disabled(!CameraPicker.isAvailable)
             }
             .disabled(attachments.count >= ImageAttachment.limit)
-            Section("填入输入框") {
+            Section("Insert into Message") {
                 ForEach(QuickCommand.phrases, id: \.self) { phrase in
                     Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
                 }
@@ -472,7 +472,7 @@ struct ObserveView: View {
         .tint(.secondary)
         .frame(width: 44, height: 44)
         .disabled(isSending)
-        .accessibilityLabel("添加图片或快捷语")
+        .accessibilityLabel("Add Image or Phrase")
         .accessibilityIdentifier("composerMenu")
     }
 
@@ -499,7 +499,7 @@ struct ObserveView: View {
                 session: session.id, name: attachment.name, data: attachment.jpeg) {
             case .done(let path): .uploaded(path: path)
             case .failed(_, let message): .failed(message)
-            case .unknown: .failed(String(localized: "结果未知"))
+            case .unknown: .failed(String(localized: "Result unknown"))
             }
             // Removed while it uploaded: its path stays out of the draft.
             guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
@@ -528,12 +528,12 @@ struct ObserveView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityHint(isConversation
-                ? "可查看对话、批准或回答 Agent 的请求、发送整段消息，都不会接管终端或改变桌面上的终端尺寸。"
-                : "可查看终端、运行 shell 命令、按常用按键。查看期间终端按手机尺寸排版，桌面上的终端会暂时变小，离开即还原。")
+                ? "Read the conversation, approve or answer the Agent, and send whole messages, all without taking over the terminal or resizing it on the desktop."
+                : "View the terminal, run shell commands and press common keys. While you look, the terminal is laid out at phone size and shrinks on the desktop until you leave.")
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             tabMenu
-            Button("改动", systemImage: "arrow.triangle.pull") { showingChanges = true }
+            Button("Changes", systemImage: "arrow.triangle.pull") { showingChanges = true }
                 .accessibilityIdentifier("changesButton")
             if !isConversation { textSizeMenu }
         }
@@ -544,8 +544,8 @@ struct ObserveView: View {
     @ViewBuilder private var tabMenu: some View {
         let mates = tabMates(of: session.id, sessions: client.sessions, spaces: client.spaces)
         if !mates.isEmpty {
-            Menu("同一个 Tab 的终端", systemImage: "rectangle.split.2x1") {
-                Section("同一个 Tab") {
+            Menu("Terminals in the Same Tab", systemImage: "rectangle.split.2x1") {
+                Section("Same Tab") {
                     ForEach(mates) { mate in
                         Button {
                             open(mate)
@@ -603,7 +603,7 @@ struct ObserveView: View {
     /// another one starts the switch; the chip changes once the screen agrees.
     private func modeChip(_ mode: PermissionMode) -> some View {
         Menu {
-            Picker("权限模式", selection: Binding(get: { mode }, set: switchMode(to:))) {
+            Picker("Permission Mode", selection: Binding(get: { mode }, set: switchMode(to:))) {
                 ForEach(PermissionMode.targets(including: seenModes), id: \.self) { target in
                     Label(target.title, systemImage: target.symbol).tag(target)
                 }
@@ -625,9 +625,9 @@ struct ObserveView: View {
         .controlSize(.small)
         .tint(mode == .bypassPermissions ? .red : .secondary)
         .disabled(!canSwitchMode)
-        .accessibilityLabel("权限模式")
+        .accessibilityLabel("Permission Mode")
         .accessibilityValue(mode.title)
-        .accessibilityHint(canSwitchMode ? "按 Shift+Tab 切换，每按一次核对终端画面" : "Agent 工作中或终端里有对话框时不能切换")
+        .accessibilityHint(canSwitchMode ? "Switches with Shift+Tab, checking the terminal after each press" : "Can't switch while the Agent is working or a dialog is open")
         .accessibilityIdentifier("permissionMode")
     }
 
@@ -673,8 +673,8 @@ private struct QueuedBanner: View {
     let withdraw: () -> Void
 
     private var title: String {
-        if let failure = message.failure { return String(localized: "没有发出：\(failure)") }
-        return release == .ask ? String(localized: "这一轮早已结束，要现在发吗？") : String(localized: "排队中 · 这一轮结束后发出")
+        if let failure = message.failure { return String(localized: "Not sent: \(failure)") }
+        return release == .ask ? String(localized: "This turn ended a while ago. Send it now?") : String(localized: "Queued · sends when this turn ends")
     }
 
     var body: some View {
@@ -695,13 +695,13 @@ private struct QueuedBanner: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("queuedMessage")
             if release == .ask {
-                Button("发送", action: send)
+                Button("Send", action: send)
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("sendQueued")
             }
-            Button("撤回", action: withdraw)
+            Button("Withdraw", action: withdraw)
                 .buttonStyle(.bordered)
-                .accessibilityHint("放回输入框")
+                .accessibilityHint("Move Back to Message")
                 .accessibilityIdentifier("withdrawQueued")
         }
         .controlSize(.small)

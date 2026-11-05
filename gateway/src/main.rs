@@ -8,6 +8,7 @@ mod devices;
 mod exec;
 mod following;
 mod herdr;
+mod lang;
 mod layout;
 mod noise;
 mod observe;
