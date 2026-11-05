@@ -78,6 +78,63 @@ final class TerminalViewTests: XCTestCase {
         XCTAssertTrue(feed.isFullScreen)
     }
 
+    @MainActor
+    func testMouseReportingFollowsTheModeSwitches() {
+        let feed = TerminalFeed()
+        XCTAssertFalse(feed.reportsMouse)
+        feed.receive(Data("\u{1b}[?1000h\u{1b}[?1006h".utf8))
+        XCTAssertTrue(feed.reportsMouse)
+        XCTAssertFalse(feed.isFullScreen)
+        // Several modes in one switch, and one split across chunks.
+        feed.receive(Data("\u{1b}[?1000;1002l\u{1b}[?10".utf8))
+        XCTAssertFalse(feed.reportsMouse)
+        feed.receive(Data("03;1049h".utf8))
+        XCTAssertTrue(feed.reportsMouse)
+        XCTAssertTrue(feed.isFullScreen)
+        feed.receive(Data("\u{1b}[?1003l\u{1b}[?25h".utf8))
+        XCTAssertFalse(feed.reportsMouse)
+        XCTAssertTrue(feed.isFullScreen)
+    }
+
+    /// The text follows the finger between rows: Ghostty a row ahead on the
+    /// edge lines come in from, the surface shifted by the rest.
+    func testHistoryScrollSplitsIntoRowAndShift() {
+        var scroll = HistoryScroll(cell: 10, row: 50, lastRow: 50)
+        XCTAssertEqual(scroll.frame.row, 50)
+        XCTAssertEqual(scroll.frame.shift, 0)
+        scroll.move(by: -4)
+        // Older lines come in at the top: row 49, cut 6 points off its top.
+        XCTAssertEqual(scroll.frame.row, 49)
+        XCTAssertEqual(scroll.frame.shift, -6, accuracy: 0.001)
+        scroll.move(by: 1)
+        // Newer lines come in at the bottom: row 50, shifted 3 points down.
+        XCTAssertEqual(scroll.frame.row, 50)
+        XCTAssertEqual(scroll.frame.shift, 3, accuracy: 0.001)
+        scroll.move(by: 100)
+        XCTAssertEqual(scroll.frame.row, 50)
+        XCTAssertTrue(scroll.atRest)
+        scroll.move(by: -1000)
+        XCTAssertEqual(scroll.position, 0)
+        XCTAssertEqual(scroll.frame.row, 0)
+    }
+
+    func testAGlideComesToRestOnARow() {
+        var scroll = HistoryScroll(cell: 10, row: 50, lastRow: 100)
+        scroll.move(by: -3)
+        let flick = HistoryGlide(from: scroll, velocity: -1000)
+        XCTAssertEqual(flick.target.truncatingRemainder(dividingBy: 10), 0)
+        XCTAssertLessThan(flick.target, 497 - 400)
+        // Starts at the finger's speed.
+        let slope = (flick.position(at: 0.001) - flick.start) / 0.001
+        XCTAssertEqual(slope, -1000, accuracy: 30)
+        XCTAssertTrue(flick.isDone(at: 10))
+        let release = HistoryGlide(from: scroll, velocity: 0)
+        XCTAssertEqual(release.target, 500)
+        XCTAssertTrue(release.isDone(at: 0.5))
+        // A flick past the start of the history stops there.
+        XCTAssertEqual(HistoryGlide(from: scroll, velocity: -100_000).target, 0)
+    }
+
     /// Ghostty writes a drag on a full-screen program as wheel reports (or,
     /// without mouse reporting, cursor up and down); only those go back.
     func testOnlyWheelReportsGoBackToTheProgram() {

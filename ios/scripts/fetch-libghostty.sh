@@ -11,9 +11,27 @@ CHECKSUM=2d9a26e80c3836c450f03ea2cf9d191841d9093d4f61c1cea466d2fc8e215dbb
 
 cd "$(dirname "$0")/.."
 dest=Vendor/libghostty-spm
+# Small changes of our own on top of the pinned revision; the stamp names
+# them, so editing a patch re-applies them without downloading again.
+patches=$(ls scripts/libghostty-patches/*.patch)
+stamp="$REVISION $(cat $patches | shasum -a 256 | cut -d' ' -f1)"
 
-if [ -f "$dest/.revision" ] && [ "$(cat "$dest/.revision")" = "$REVISION" ] && [ -d "$dest/GhosttyKit.xcframework" ]; then
+apply_patches() {
+    git -C "$dest" checkout --quiet -- Sources
+    for patch in $patches; do
+        git -C "$dest" apply "$PWD/$patch"
+    done
+    echo "$stamp" > "$dest/.revision"
+}
+
+if [ -f "$dest/.revision" ] && [ "$(cat "$dest/.revision")" = "$stamp" ] && [ -d "$dest/GhosttyKit.xcframework" ]; then
     echo "libghostty-spm $REVISION already present"
+    exit 0
+fi
+
+if [ -d "$dest/GhosttyKit.xcframework" ] && [ "$(git -C "$dest" rev-parse HEAD 2>/dev/null)" = "$REVISION" ]; then
+    apply_patches
+    echo "libghostty-spm $REVISION re-patched"
     exit 0
 fi
 
@@ -46,5 +64,5 @@ if count != 1:
 open(path, "w").write(patched)
 EOF
 
-echo "$REVISION" > "$dest/.revision"
+apply_patches
 echo "libghostty-spm $REVISION ready in $dest"

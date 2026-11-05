@@ -1,0 +1,34 @@
+diff --git a/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+Lifecycle.swift b/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+Lifecycle.swift
+index 77d0017..da1d6b2 100644
+--- a/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+Lifecycle.swift
++++ b/Sources/GhosttyTerminal/Platform/UIKit/UITerminalView+Lifecycle.swift
+@@ -216,6 +216,12 @@
+             core.fitToSize()
+         }
+ 
++        /// Draws the surface now, in this turn's Core Animation transaction,
++        /// rather than at the next display-link tick.
++        public func renderNow() {
++            core.renderNow()
++        }
++
+         override open func traitCollectionDidChange(
+             _ previousTraitCollection: UITraitCollection?
+         ) {
+diff --git a/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift b/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
+index db17f0d..9b2661d 100644
+--- a/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
++++ b/Sources/GhosttyTerminal/Surface/TerminalSurfaceCoordinator.swift
+@@ -608,6 +608,12 @@ final class TerminalSurfaceCoordinator {
+         return size.width > 0 && size.height > 0
+     }
+ 
++    /// Draws now instead of at the next display-link tick, so a change the
++    /// host makes this turn (a scroll) lands in the same frame as its own.
++    func renderNow() {
++        renderImmediately()
++    }
++
+     private func renderImmediately() {
+         guard canRenderFrame else {
+             releaseDisplayLink()
