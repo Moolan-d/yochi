@@ -66,9 +66,12 @@ final class CompanionUITests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
 
         endSearch(app)
-        app.buttons["设置"].tap()
-        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5))
+        app.buttons["home.settings"].tap()
+        XCTAssert(app.buttons["settings.gateway"].waitForExistence(timeout: 5), "no Gateway row in settings")
         snapshot("4 settings")
+        app.buttons["settings.gateway"].tap()
+        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5))
+        snapshot("4 gateway settings")
         app.buttons["取消配对"].tap()
         XCTAssert(app.sheets["取消与此 Gateway 的配对？"].waitForExistence(timeout: 5))
         snapshot("5 unpair prompt")
@@ -78,6 +81,15 @@ final class CompanionUITests: XCTestCase {
         confirm(app, "取消配对")
         XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 10), "pairing form did not return")
         snapshot("6 unpaired")
+
+        // Settings opens before pairing too, with nothing to show for the Gateway.
+        app.buttons["设置"].tap()
+        let notPaired = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "未配对")).firstMatch
+        XCTAssert(notPaired.waitForExistence(timeout: 5), "unpaired settings did not open")
+        XCTAssertFalse(app.buttons["settings.gateway"].exists, "unpaired settings offered a Gateway page")
+        snapshot("7 unpaired settings")
+        app.buttons["完成"].tap()
+        XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 5), "unpaired settings did not close")
     }
 
     /// Opening the terminal takes it over at the phone's grid, so a
@@ -225,7 +237,7 @@ final class CompanionUITests: XCTestCase {
         let open = springboard.buttons.matching(NSPredicate(format: "label IN {'打开', 'Open'}")).firstMatch
         waitForReplacePrompt(app, open: open)
         app.buttons["保留当前配对"].tap()
-        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 5), "keeping the pairing dropped it")
+        XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 5), "keeping the pairing dropped it")
         XCTAssert(app.cells.buttons.firstMatch.exists, "sessions gone after keeping the pairing")
         XCUIDevice.shared.system.open(URL(string: "yochi://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
         waitForReplacePrompt(app, open: open)
@@ -259,9 +271,10 @@ final class CompanionUITests: XCTestCase {
         }
         XCTAssert(pair.isEnabled, "the link did not fill the form")
         pair.tap()
-        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 30), "pairing through the Relay did not finish")
+        XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 30), "pairing through the Relay did not finish")
 
-        app.buttons["设置"].tap()
+        app.buttons["home.settings"].tap()
+        app.buttons["settings.gateway"].tap()
         let path = app.descendants(matching: .any)["gateway.path"]
         XCTAssert(path.waitForExistence(timeout: 10), "no connection path in settings")
         XCTAssert(describes(path, "Relay"), "not connected through the Relay: \(path.label)")
@@ -278,7 +291,8 @@ final class CompanionUITests: XCTestCase {
         endSearch(app)
 
         // The Gateway names its tailnet address once the tailnet is back on.
-        app.buttons["设置"].tap()
+        app.buttons["home.settings"].tap()
+        app.buttons["settings.gateway"].tap()
         let onTailnet = NSPredicate { _, _ in self.describes(path, "Tailnet") }
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: onTailnet, evaluatedWith: nil)], timeout: 40), .completed,
                        "never moved to the tailnet: \(path.label)")
@@ -1063,7 +1077,7 @@ final class CompanionUITests: XCTestCase {
         snapshot("2 opened")
         // The switch took the first session's place: Back leads home.
         app.navigationBars.buttons.firstMatch.tap()
-        XCTAssert(app.buttons["设置"].waitForExistence(timeout: 10), "Back did not lead home")
+        XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 10), "Back did not lead home")
         unpair(app)
     }
 
@@ -1264,7 +1278,7 @@ final class CompanionUITests: XCTestCase {
             print("perf-first terminal \(name) grid=\(grid) ms=\(Int(Date.now.timeIntervalSince(start) * 1000))")
             RunLoop.current.run(until: .now.addingTimeInterval(3))
             app.navigationBars.buttons.firstMatch.tap()
-            XCTAssert(Self.closeSearch(app).waitForExistence(timeout: 10) || app.buttons["设置"].exists)
+            XCTAssert(Self.closeSearch(app).waitForExistence(timeout: 10) || app.buttons["home.settings"].exists)
             RunLoop.current.run(until: .now.addingTimeInterval(1))
         }
         unpair(app)
@@ -1315,7 +1329,7 @@ final class CompanionUITests: XCTestCase {
         if observing {
             XCTAssert(composer(app).waitForExistence(timeout: 15), "pairing did not finish")
         } else {
-            XCTAssert(app.buttons["设置"].waitForExistence(timeout: 15), "pairing did not finish")
+            XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 15), "pairing did not finish")
         }
     }
 
@@ -1375,7 +1389,7 @@ final class CompanionUITests: XCTestCase {
     @MainActor
     private func endSearch(_ app: XCUIApplication) {
         let close = Self.closeSearch(app)
-        guard !app.buttons["设置"].exists, close.exists else { return }
+        guard !app.buttons["home.settings"].exists, close.exists else { return }
         // Coming back to the list gives the search field its focus again,
         // and the keyboard slides up under where close was: let it settle.
         if app.keyboards.firstMatch.waitForExistence(timeout: 2) {
@@ -1387,8 +1401,10 @@ final class CompanionUITests: XCTestCase {
     @MainActor
     private func unpair(_ app: XCUIApplication) {
         endSearch(app)
-        app.buttons["设置"].tap()
-        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5), "no settings sheet")
+        app.buttons["home.settings"].tap()
+        XCTAssert(app.buttons["settings.gateway"].waitForExistence(timeout: 5), "no settings sheet")
+        app.buttons["settings.gateway"].tap()
+        XCTAssert(app.staticTexts["设备 ID"].waitForExistence(timeout: 5), "no Gateway settings")
         app.buttons["取消配对"].tap()
         confirm(app, "取消配对")
         XCTAssert(app.textFields["配对码"].waitForExistence(timeout: 10), "did not unpair")

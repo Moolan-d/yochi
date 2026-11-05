@@ -43,6 +43,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.yochi.app$(BUNDLE_ID_SUFFIX)
+        # The generated Info.plist takes its version from these; Settings
+        # shows it under About.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         # Home-screen name; the Xcode project and targets keep the codename "Companion".
         INFOPLIST_KEY_CFBundleDisplayName: Yochi
         INFOPLIST_KEY_NSCameraUsageDescription: Take photos to send to an Agent.

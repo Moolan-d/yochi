@@ -39,10 +39,8 @@ struct ContentView: View {
                                 Button("New", systemImage: "plus") { showingNewSession = true }
                                     .disabled(client.phase != .connected)
                                 Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                                    .accessibilityIdentifier("home.settings")
                             }
-                        }
-                        .sheet(isPresented: $showingSettings) {
-                            GatewaySettingsView(client: client, config: config, onForget: forget)
                         }
                         .sheet(isPresented: $showingNewSession) {
                             NewSessionView(client: client) { session in
@@ -59,7 +57,15 @@ struct ContentView: View {
                         self.config = config
                     }
                     .navigationTitle("Yochi")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                        }
+                    }
                 }
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(client: client, config: config, onForget: forget)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -273,62 +279,6 @@ struct PairingView: View {
             onPaired(try await invite.pair())
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-}
-
-struct GatewaySettingsView: View {
-    let client: GatewayClient
-    let config: GatewayConfig
-    var onForget: () -> Void
-    @State private var confirmingForget = false
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Gateway") {
-                    LabeledContent("Address", value: config.host.isEmpty ? String(localized: "Relay only") : config.host)
-                        .accessibilityIdentifier("gateway.host")
-                    LabeledContent("Status", value: client.statusText)
-                    if let path = client.path {
-                        LabeledContent("Connection", value: path == .relay ? String(localized: "Relay (end-to-end encrypted)") : "Tailnet")
-                            .accessibilityIdentifier("gateway.path")
-                    }
-                    if let core = client.coreName {
-                        LabeledContent("Main Mac", value: core)
-                    }
-                }
-                if let device = config.device {
-                    Section {
-                        LabeledContent("Device ID", value: device)
-                            .textSelection(.enabled)
-                    } footer: {
-                        Text("Run yochi devices on the main Mac to see every paired device.")
-                    }
-                }
-                Section {
-                    Button("Unpair", role: .destructive) { confirmingForget = true }
-                } footer: {
-                    Text("This iPhone will remove its pairing with that Gateway. If connected, the Gateway removes this device too; otherwise run yochi revoke on the main Mac.")
-                }
-            }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .confirmationDialog("Unpair from This Gateway?", isPresented: $confirmingForget, titleVisibility: .visible) {
-                Button("Unpair", role: .destructive) {
-                    dismiss()
-                    onForget()
-                }
-                Button("Keep Pairing") {}
-            } message: {
-                Text("To connect again, run yochi pair on the main Mac.")
-            }
         }
     }
 }
