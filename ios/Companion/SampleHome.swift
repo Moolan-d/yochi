@@ -12,7 +12,7 @@ struct SampleHomeView: View {
     var body: some View {
         NavigationStack {
             HomeList(home: home, queued: { $0 == "t4" }, newSession: {}) {}
-                .navigationTitle("Agent")
+                .navigationTitle(String(localized: "home.title", defaultValue: "Agent"))
                 .navigationDestination(for: Session.self) { session in
                     Text(session.title).navigationTitle(session.title)
                 }
@@ -53,9 +53,48 @@ struct SampleHomeView: View {
         ]
         """#
         let decoder = JSONDecoder()
-        let decodedSessions = (try? decoder.decode([Session].self, from: Data(sessions.utf8))) ?? []
-        let decodedSpaces = (try? decoder.decode([Space].self, from: Data(spaces.utf8))) ?? []
+        let decodedSessions = (try? decoder.decode([Session].self, from: Data(SampleText.localized(sessions).utf8))) ?? []
+        let decodedSpaces = (try? decoder.decode([Space].self, from: Data(SampleText.localized(spaces).utf8))) ?? []
         return makeHome(sessions: decodedSessions, spaces: decodedSpaces)
     }
+}
+
+/// The samples' made-up text in English, for screenshots taken with the
+/// system in English. The UI tests read the Chinese.
+enum SampleText {
+    static func localized(_ json: String) -> String {
+        guard Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true else { return json }
+        return english.sorted { $0.0.count > $1.0.count }
+            .reduce(json) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
+    }
+
+    private static let english: [(String, String)] = [
+        // Home
+        ("服务助手页面自动断联后重连卡住", "Support page hangs reconnecting after a drop"),
+        ("要运行 npm test，允许吗？", "Run npm test?"),
+        ("主页改版", "Home page redesign"),
+        ("正在写主页列表", "Writing the home list"),
+        ("查路线图剩余项", "Check what's left on the roadmap"),
+        ("补单元测试", "Add unit tests"),
+        ("升级 Caddy 配置", "Upgrade the Caddy config"),
+        ("整理日志轮转", "Tidy up log rotation"),
+        ("小程序", "mini-app"),
+        ("运维", "ops"),
+        // Conversation
+        ("把会话列表的空状态改一下，顺便查查路线图里还剩什么", "Fix the session list's empty state, and check what's left on the roadmap"),
+        ("读会话列表的代码", "Read the session list code"),
+        ("改空状态", "Fix the empty state"),
+        ("正在查路线图", "Checking the roadmap"),
+        ("查路线图", "Check the roadmap"),
+        ("没有会话", "No sessions"),
+        ("还没有会话", "No sessions yet"),
+        ("在 Mac 上开一个终端，或点右上角新建。", "Open a terminal on your Mac, or tap New."),
+        ("# 空状态", "# Empty states"),
+        ("没有会话时说明怎样开一个", "With no sessions, explain how to start one"),
+        ("配对失效时引导重新配对", "When pairing has lapsed, lead to pairing again"),
+        ("跑一遍 UI 测试", "Run the UI tests"),
+        ("空状态的文案改好了，网页版要不要同步？", "The empty-state copy is done. Should the web version match?"),
+        ("要，**网页版**下周一起改。先把 iOS 的提交了。", "Yes, the **web version** changes next week. Commit the iOS part first."),
+    ]
 }
 #endif

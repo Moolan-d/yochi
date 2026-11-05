@@ -76,11 +76,11 @@ struct SessionListView: View {
 extension GatewayClient {
     var statusText: String {
         switch phase {
-        case .disconnected: "未连接"
-        case .connecting: "正在连接…"
-        case .connected: coreConnected ? "已连接" : "herdr-core 不可用"
-        case .failed(let reason): "连接失败：\(reason)"
-        case .unauthorized: "配对已失效"
+        case .disconnected: String(localized: "未连接")
+        case .connecting: String(localized: "正在连接…")
+        case .connected: coreConnected ? String(localized: "已连接") : String(localized: "herdr-core 不可用")
+        case .failed(let reason): String(localized: "连接失败：\(reason)")
+        case .unauthorized: String(localized: "配对已失效")
         }
     }
 }
@@ -313,10 +313,10 @@ private struct GroupHeader: View {
         .buttonStyle(.plain)
         .textCase(nil)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([group.title, group.machine].compactMap { $0 }.joined(separator: "，"))
+        .accessibilityLabel([group.title, group.machine].compactMap { $0 }.joined(separator: String(localized: "，")))
         .accessibilityValue(collapsed
-            ? (["已收起", "\(group.agents.count) 个 Agent", group.summary?.word].compactMap { $0 }.joined(separator: "，"))
-            : "已展开")
+            ? ([String(localized: "已收起"), String(localized: "\(group.agents.count) 个 Agent"), group.summary?.word].compactMap { $0 }.joined(separator: String(localized: "，")))
+            : String(localized: "已展开"))
         .accessibilityHint(collapsed ? "展开这个 Space" : "收起这个 Space")
         .accessibilityAddTraits([.isHeader, .isButton])
         .accessibilityIdentifier("groupHeader")
@@ -386,7 +386,7 @@ private struct AgentRow: View {
         .padding(.leading, session.parent != nil && !awayFromSpace ? indent : 0)
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([row.accessibilityLabel(awayFromSpace: awayFromSpace), queued ? "有排队中的消息" : nil].compactMap { $0 }.joined(separator: "，"))
+        .accessibilityLabel([row.accessibilityLabel(awayFromSpace: awayFromSpace), queued ? String(localized: "有排队中的消息") : nil].compactMap { $0 }.joined(separator: String(localized: "，")))
     }
 
     @ViewBuilder

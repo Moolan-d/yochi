@@ -97,7 +97,7 @@ struct ConversationPane: View {
                 switch feed.phase {
                 case .failed(let reason):
                     HStack {
-                        BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
+                        BannerLabel(text: String(localized: "连接中断：\(reason)"), systemImage: "wifi.exclamationmark")
                         Button("重试", action: retry).buttonStyle(.bordered)
                     }
                 case .closed(let reason):
@@ -335,7 +335,7 @@ private struct ToolRow: View {
 
     private var answer: String? {
         guard let answers = item.answers, !answers.isEmpty else { return nil }
-        return answers.values.sorted().joined(separator: "、")
+        return answers.values.sorted().joined(separator: String(localized: "、"))
     }
 
     var body: some View {
@@ -348,7 +348,7 @@ private struct ToolRow: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name ?? "工具")
+                        Text(item.name ?? String(localized: "工具"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         if let summary = item.summary, !summary.isEmpty {
@@ -385,7 +385,7 @@ private struct ToolRow: View {
         .padding(10)
         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("工具 \(item.name ?? "")：\(item.summary ?? "")，\(stateText)\(answer.map { "，已选：\($0)" } ?? "")")
+        .accessibilityLabel("工具 \(item.name ?? "")：\(item.summary ?? "")，\(stateText)\(answer.map { String(localized: "，已选：\($0)") } ?? "")")
         .accessibilityHint(item.output == nil ? "" : "轻点两下显示或隐藏输出")
     }
 
@@ -403,9 +403,9 @@ private struct ToolRow: View {
 
     private var stateText: String {
         switch item.state {
-        case .running: "运行中"
-        case .error: "出错"
-        case .done, nil: "已完成"
+        case .running: String(localized: "运行中")
+        case .error: String(localized: "出错")
+        case .done, nil: String(localized: "已完成")
         }
     }
 
@@ -441,8 +441,12 @@ struct TaskRow: View {
     private var failed: Bool { item.state == .error }
 
     var heading: String {
-        let who = subagent == nil ? "后台任务" : "子代理"
-        return "\(who)\(failed ? "失败" : "完成")"
+        switch (subagent == nil, failed) {
+        case (true, false): String(localized: "后台任务完成")
+        case (true, true): String(localized: "后台任务失败")
+        case (false, false): String(localized: "子代理完成")
+        case (false, true): String(localized: "子代理失败")
+        }
     }
 
     var detail: String { subagent ?? item.summary ?? "" }

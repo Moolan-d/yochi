@@ -1,6 +1,8 @@
 name: Companion
 options:
   bundleIdPrefix: dev.yochi
+  # The interface is written in Chinese; Localizable.xcstrings adds English.
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "18.0"
 settings:
@@ -31,6 +33,8 @@ targets:
         # including the terminal's, which asks for 120 while drawing and
         # scrolling.
         CADisableMinimumFrameDurationOnPhone: true
+        # Lists both languages in iOS Settings > Yochi > Language.
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleURLTypes:
           # `yochi://pair?…` from the QR code `yochi pair` shows.
           - CFBundleURLName: dev.yochi.app

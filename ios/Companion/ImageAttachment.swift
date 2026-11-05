@@ -184,9 +184,9 @@ struct AttachmentStrip: View {
 
     private func stateText(_ state: ImageAttachment.State) -> String {
         switch state {
-        case .uploading: "上传中"
-        case .uploaded: "已上传"
-        case .failed(let message): "上传失败：\(message)，可重试"
+        case .uploading: String(localized: "上传中")
+        case .uploaded: String(localized: "已上传")
+        case .failed(let message): String(localized: "上传失败：\(message)，可重试")
         }
     }
 }

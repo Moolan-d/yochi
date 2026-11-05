@@ -25,7 +25,7 @@ struct ContentView: View {
                 if let config {
                     SessionListView(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
                                     newSession: { showingNewSession = true })
-                        .navigationTitle("Agent")
+                        .navigationTitle(String(localized: "home.title", defaultValue: "Agent"))
                         .navigationDestination(for: Session.self) { session in
                             ObserveView(session: session, config: config, client: client) { path.append($0) }
                         }
@@ -78,7 +78,7 @@ struct ContentView: View {
             // iOS drops `.cancel` buttons from this popover, so keeping is a plain button.
             Button("保留当前配对") {}
         } message: { _ in
-            Text("此 iPhone 与 \(config?.host ?? "当前 Gateway") 的配对将被删除。")
+            Text("此 iPhone 与 \(config?.host ?? String(localized: "当前 Gateway")) 的配对将被删除。")
         }
         .onChange(of: config, initial: true) { _, config in
             if let config { client.connect(config) }
@@ -247,11 +247,11 @@ struct GatewaySettingsView: View {
         NavigationStack {
             Form {
                 Section("Gateway") {
-                    LabeledContent("地址", value: config.host.isEmpty ? "仅经 Relay" : config.host)
+                    LabeledContent("地址", value: config.host.isEmpty ? String(localized: "仅经 Relay") : config.host)
                         .accessibilityIdentifier("gateway.host")
                     LabeledContent("状态", value: client.statusText)
                     if let path = client.path {
-                        LabeledContent("连接方式", value: path == .relay ? "Relay（端到端加密）" : "Tailnet")
+                        LabeledContent("连接方式", value: path == .relay ? String(localized: "Relay（端到端加密）") : "Tailnet")
                             .accessibilityIdentifier("gateway.path")
                     }
                     if let core = client.coreName {

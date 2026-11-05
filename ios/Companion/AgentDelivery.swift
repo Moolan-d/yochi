@@ -99,11 +99,11 @@ enum AgentDelivery: Equatable {
 
     var state: String {
         switch self {
-        case .sending: "发送中…"
+        case .sending: String(localized: "发送中…")
         case .sent(_, _, let status, let started): AgentMessagePresentation.accepted(status: status, started: started)
         case .turnCompleted(_, let status): AgentMessagePresentation.afterTurn(status: status)
         case .failed(_, let kind, let message): Self.failure(kind: kind, message: message)
-        case .unknown: "结果未知，可能已发送"
+        case .unknown: String(localized: "结果未知，可能已发送")
         }
     }
 
@@ -111,10 +111,10 @@ enum AgentDelivery: Equatable {
     /// core's quiet rule is all `terminal.send` waits for.
     var shellState: String {
         switch self {
-        case .sending: "发送中…"
-        case .sent, .turnCompleted: "已送达"
+        case .sending: String(localized: "发送中…")
+        case .sent, .turnCompleted: String(localized: "已送达")
         case .failed(_, let kind, let message): Self.failure(kind: kind, message: message)
-        case .unknown: "结果未知，请看终端确认"
+        case .unknown: String(localized: "结果未知，请看终端确认")
         }
     }
 
@@ -140,14 +140,14 @@ enum AgentDelivery: Equatable {
     /// The kind is the user-facing reason; core and Gateway prose is detail.
     private static func failure(kind: String, message: String) -> String {
         switch kind {
-        case "blocked": "Agent 正在等待确认，尚未发送"
-        case "not_found", "finished": "会话已结束"
-        case "machine_unknown", "unavailable": "未连接或 herdr-core 不可用"
-        case "status_mismatch": "Agent 状态已变化，请重试"
-        case "too_long": "消息过长（最多 16 KiB）"
-        case "invalid_params": "消息为空或参数无效"
-        case "config": "herdr-core 配置不可用"
-        default: message.isEmpty ? "发送失败" : "发送失败（\(message)）"
+        case "blocked": String(localized: "Agent 正在等待确认，尚未发送")
+        case "not_found", "finished": String(localized: "会话已结束")
+        case "machine_unknown", "unavailable": String(localized: "未连接或 herdr-core 不可用")
+        case "status_mismatch": String(localized: "Agent 状态已变化，请重试")
+        case "too_long": String(localized: "消息过长（最多 16 KiB）")
+        case "invalid_params": String(localized: "消息为空或参数无效")
+        case "config": String(localized: "herdr-core 配置不可用")
+        default: message.isEmpty ? String(localized: "发送失败") : String(localized: "发送失败（\(message)）")
         }
     }
 }

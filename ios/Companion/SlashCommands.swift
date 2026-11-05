@@ -7,11 +7,11 @@ struct SlashCommand: Decodable, Hashable, Identifiable {
 
         var title: String {
             switch self {
-            case .builtin: "内置"
-            case .project: "项目"
-            case .user: "个人"
+            case .builtin: String(localized: "内置")
+            case .project: String(localized: "项目")
+            case .user: String(localized: "个人")
             case .skill: "skill"
-            case .other: "其他"
+            case .other: String(localized: "其他")
             }
         }
     }
@@ -47,27 +47,27 @@ enum SlashCompletion {
     /// checked against its `/` menu. Ones that open a picker or panel are
     /// answered through the screen-read dialog cards; `/exit` comes last.
     static let builtins: [SlashCommand] = [
-        ("/compact", "压缩对话，腾出上下文"),
-        ("/clear", "清空上下文，开始新对话"),
-        ("/context", "查看上下文用量"),
-        ("/model", "切换模型"),
-        ("/effort", "设置思考强度"),
-        ("/fast", "开关快速模式"),
-        ("/resume", "恢复之前的对话"),
-        ("/rewind", "把代码或对话回退到之前某一步"),
-        ("/btw", "不打断当前工作，问个小问题"),
-        ("/goal", "设定 Agent 停下前要检查的目标"),
-        ("/init", "生成 CLAUDE.md"),
-        ("/memory", "编辑 CLAUDE.md 和记忆设置"),
-        ("/usage", "查看费用和用量"),
-        ("/status", "查看版本、模型、账号和连接"),
-        ("/add-dir", "添加工作目录"),
-        ("/permissions", "管理工具权限规则"),
-        ("/mcp", "管理 MCP 服务器"),
-        ("/export", "导出对话"),
-        ("/doctor", "检查安装和配置"),
-        ("/help", "帮助和全部命令"),
-        ("/exit", "退出 Claude Code，会话随之结束"),
+        ("/compact", String(localized: "压缩对话，腾出上下文")),
+        ("/clear", String(localized: "清空上下文，开始新对话")),
+        ("/context", String(localized: "查看上下文用量")),
+        ("/model", String(localized: "切换模型")),
+        ("/effort", String(localized: "设置思考强度")),
+        ("/fast", String(localized: "开关快速模式")),
+        ("/resume", String(localized: "恢复之前的对话")),
+        ("/rewind", String(localized: "把代码或对话回退到之前某一步")),
+        ("/btw", String(localized: "不打断当前工作，问个小问题")),
+        ("/goal", String(localized: "设定 Agent 停下前要检查的目标")),
+        ("/init", String(localized: "生成 CLAUDE.md")),
+        ("/memory", String(localized: "编辑 CLAUDE.md 和记忆设置")),
+        ("/usage", String(localized: "查看费用和用量")),
+        ("/status", String(localized: "查看版本、模型、账号和连接")),
+        ("/add-dir", String(localized: "添加工作目录")),
+        ("/permissions", String(localized: "管理工具权限规则")),
+        ("/mcp", String(localized: "管理 MCP 服务器")),
+        ("/export", String(localized: "导出对话")),
+        ("/doctor", String(localized: "检查安装和配置")),
+        ("/help", String(localized: "帮助和全部命令")),
+        ("/exit", String(localized: "退出 Claude Code，会话随之结束")),
     ].map { SlashCommand(name: $0.0, description: $0.1, source: .builtin) }
 
     /// What follows the slash while the draft is still just a command name.

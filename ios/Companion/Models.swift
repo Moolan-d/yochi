@@ -80,7 +80,7 @@ struct Session: Decodable, Identifiable, Hashable {
     /// 「工作中 · 12s」 while the Agent works and the Gateway says since when.
     func working(at now: Date) -> String? {
         guard status?.state == "working", let statusMs else { return nil }
-        return "工作中 · \(Elapsed.text(milliseconds: Int64(now.timeIntervalSince1970 * 1000) - statusMs))"
+        return String(localized: "工作中 · \(Elapsed.text(milliseconds: Int64(now.timeIntervalSince1970 * 1000) - statusMs))")
     }
 }
 

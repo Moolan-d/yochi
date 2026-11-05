@@ -23,6 +23,7 @@ struct NewSessionView: View {
         case shell = "终端"
 
         var id: String { rawValue }
+        var title: String { self == .agent ? rawValue : String(localized: "终端") }
         /// Empty argv is the machine's own shell.
         var argv: [String] { self == .agent ? ["claude"] : [] }
     }
@@ -78,7 +79,7 @@ struct NewSessionView: View {
                 Section("程序") {
                     Picker("程序", selection: $program) {
                         ForEach(Program.allCases) { program in
-                            Text(program.rawValue).tag(program)
+                            Text(program.title).tag(program)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -159,9 +160,9 @@ struct NewSessionView: View {
     }
 
     private var directoryHint: String {
-        let fallback = machine == nil ? "herdr-core 的当前目录" : "该机器的 home 目录"
-        let trust = program == .agent ? "Claude Code 第一次进入新目录时可能在终端里询问是否信任。" : ""
-        return "留空则使用\(fallback)。\(trust)"
+        let fallback = machine == nil ? String(localized: "herdr-core 的当前目录") : String(localized: "该机器的 home 目录")
+        let trust = program == .agent ? String(localized: "Claude Code 第一次进入新目录时可能在终端里询问是否信任。") : ""
+        return String(localized: "留空则使用\(fallback)。\(trust)")
     }
 
     private func create() {
@@ -179,9 +180,9 @@ struct NewSessionView: View {
                 // Name the directory that was actually sent: a stray invisible
                 // character makes the core report a missing program instead.
                 let sent = directory.trimmingCharacters(in: .whitespacesAndNewlines)
-                failure = sent.isEmpty ? message : "在「\(sent)」启动失败：\(message)"
+                failure = sent.isEmpty ? message : String(localized: "在「\(sent)」启动失败：\(message)")
             case .unknown:
-                failure = "结果未知，请返回列表查看是否已创建"
+                failure = String(localized: "结果未知，请返回列表查看是否已创建")
             }
         }
     }

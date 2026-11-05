@@ -137,11 +137,11 @@ struct SubtaskRow: View {
     /// Read once, not every second: 「子任务 Find items，运行中」.
     private var accessibilityLabel: String {
         let state = switch item.state {
-        case .running, nil: subtask.background ? "在后台运行" : "运行中"
-        case .done: subtask.durationMs.map { "用时 \(Elapsed.spoken(milliseconds: $0))" } ?? "已完成"
-        case .error: "失败"
+        case .running, nil: subtask.background ? String(localized: "在后台运行") : String(localized: "运行中")
+        case .done: subtask.durationMs.map { String(localized: "用时 \(Elapsed.spoken(milliseconds: $0))") } ?? String(localized: "已完成")
+        case .error: String(localized: "失败")
         }
-        return "子任务 \(subtask.name)，\(state)"
+        return String(localized: "子任务 \(subtask.name)，\(state)")
     }
 }
 
@@ -223,9 +223,9 @@ private struct TodoLine: View {
 
     private var stateText: String {
         switch entry.status {
-        case .pending: "未开始"
-        case .inProgress: "进行中"
-        case .completed: "已完成"
+        case .pending: String(localized: "未开始")
+        case .inProgress: String(localized: "进行中")
+        case .completed: String(localized: "已完成")
         }
     }
 }
@@ -237,8 +237,8 @@ struct PeerRow: View {
     @State private var expanded = false
 
     private var sent: Bool { item.direction == .sent }
-    private var who: String { item.name.flatMap { $0.isEmpty ? nil : $0 } ?? "另一个 Agent" }
-    var heading: String { sent ? "发给 \(who)" : "来自 \(who)" }
+    private var who: String { item.name.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "另一个 Agent") }
+    var heading: String { sent ? String(localized: "发给 \(who)") : String(localized: "来自 \(who)") }
     private var text: String { item.text ?? "" }
     /// The Markdown without its marks, for the collapsed line and VoiceOver.
     var plainText: String {
@@ -282,7 +282,7 @@ struct PeerRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(heading)\(item.state == .error ? "，没有送达" : "")：\(plainText)")
+            .accessibilityLabel("\(heading)\(item.state == .error ? String(localized: "，没有送达") : "")：\(plainText)")
             .accessibilityHint("轻点两下显示或隐藏全文")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("peerRow")

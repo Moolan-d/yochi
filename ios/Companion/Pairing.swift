@@ -118,9 +118,9 @@ enum PairingError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .badAddress: "地址无效"
-        case .rejected: "配对码不正确或已过期。请在主 Mac 上重新运行 yochi pair。"
-        case .unexpected: "Gateway 返回了无法识别的响应"
+        case .badAddress: String(localized: "地址无效")
+        case .rejected: String(localized: "配对码不正确或已过期。请在主 Mac 上重新运行 yochi pair。")
+        case .unexpected: String(localized: "Gateway 返回了无法识别的响应")
         }
     }
 }

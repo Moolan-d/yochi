@@ -390,10 +390,10 @@ struct ObserveView: View {
     }
 
     private func subtitle(at now: Date) -> String {
-        let place = currentSession.machine ?? "本机"
+        let place = currentSession.machine ?? String(localized: "本机")
         if let working = currentSession.working(at: now) { return "\(working) · \(place)" }
-        if isConversation { return "对话 · \(place)" }
-        var parts = ["终端", place]
+        if isConversation { return String(localized: "对话 · \(place)") }
+        var parts = [String(localized: "终端"), place]
         if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
         return parts.joined(separator: " · ")
     }
@@ -408,12 +408,12 @@ struct ObserveView: View {
     /// Esc for a dialog the phone can't read, if the screen still shows it.
     private func press(_ key: String, on excerpt: GenericDialogExcerpt) async -> String? {
         guard screen.result.fingerprint?.matches(excerpt.fingerprint) == true else {
-            return "终端里的对话框已变化，请看最新内容"
+            return String(localized: "终端里的对话框已变化，请看最新内容")
         }
         switch await client.pressKeys(session: session.id, keys: [key]) {
         case .pressed: return nil
         case .failed(_, let message): return message
-        case .unknown: return "按键结果未知"
+        case .unknown: return String(localized: "按键结果未知")
         }
     }
 
@@ -499,7 +499,7 @@ struct ObserveView: View {
                 session: session.id, name: attachment.name, data: attachment.jpeg) {
             case .done(let path): .uploaded(path: path)
             case .failed(_, let message): .failed(message)
-            case .unknown: .failed("结果未知")
+            case .unknown: .failed(String(localized: "结果未知"))
             }
             // Removed while it uploaded: its path stays out of the draft.
             guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
@@ -673,8 +673,8 @@ private struct QueuedBanner: View {
     let withdraw: () -> Void
 
     private var title: String {
-        if let failure = message.failure { return "没有发出：\(failure)" }
-        return release == .ask ? "这一轮早已结束，要现在发吗？" : "排队中 · 这一轮结束后发出"
+        if let failure = message.failure { return String(localized: "没有发出：\(failure)") }
+        return release == .ask ? String(localized: "这一轮早已结束，要现在发吗？") : String(localized: "排队中 · 这一轮结束后发出")
     }
 
     var body: some View {

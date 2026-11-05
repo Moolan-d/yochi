@@ -10,11 +10,11 @@ enum PermissionMode: String, CaseIterable, Sendable {
 
     var title: String {
         switch self {
-        case .default: "普通"
-        case .acceptEdits: "自动接受编辑"
-        case .plan: "计划"
-        case .auto: "自动"
-        case .bypassPermissions: "跳过所有权限"
+        case .default: String(localized: "普通")
+        case .acceptEdits: String(localized: "自动接受编辑")
+        case .plan: String(localized: "计划")
+        case .auto: String(localized: "自动")
+        case .bypassPermissions: String(localized: "跳过所有权限")
         }
     }
 
@@ -75,24 +75,24 @@ struct PermissionModeSwitcher {
 
     func run(to target: PermissionMode) async -> Outcome {
         guard let screen = feed.screen, var current = PermissionMode.read(screen) else {
-            return .failed("终端里看不到当前模式，请在电脑上切换")
+            return .failed(String(localized: "终端里看不到当前模式，请在电脑上切换"))
         }
         for _ in 0..<maxPresses {
             if current == target { return .done }
-            guard !agentWorking() else { return .failed("Agent 开始工作了，已停止切换") }
+            guard !agentWorking() else { return .failed(String(localized: "Agent 开始工作了，已停止切换")) }
             let since = feed.revision
             switch await press(["shift+tab"]) {
             case .pressed: break
             case .failed(let kind, let message):
-                return .failed(kind == "not_found" || kind == "finished" ? "会话已结束" : message)
-            case .unknown: return .failed("按键结果未知，请在电脑上确认当前模式")
+                return .failed(kind == "not_found" || kind == "finished" ? String(localized: "会话已结束") : message)
+            case .unknown: return .failed(String(localized: "按键结果未知，请在电脑上确认当前模式"))
             }
             guard let next = await nextMode(since: since, after: current) else {
-                return .failed("终端画面和预期不一致，已停止切换，请在电脑上查看")
+                return .failed(String(localized: "终端画面和预期不一致，已停止切换，请在电脑上查看"))
             }
             current = next
         }
-        return current == target ? .done : .failed("没有切到「\(target.title)」，请在电脑上查看")
+        return current == target ? .done : .failed(String(localized: "没有切到「\(target.title)」，请在电脑上查看"))
     }
 
     /// The mode on the first fresh screen that shows a different one.

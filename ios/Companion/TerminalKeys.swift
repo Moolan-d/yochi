@@ -11,11 +11,11 @@ struct TerminalKey: Identifiable {
     /// What a shell needs beside the command line: stop, complete, recall
     /// history, confirm, cancel. Agents are driven from the conversation.
     static let bar: [TerminalKey] = [
-        TerminalKey(id: "ctrl+c", label: "⌃C", symbol: nil, spoken: "Control C，中断"),
-        TerminalKey(id: "tab", label: "⇥", symbol: "arrow.right.to.line", spoken: "Tab，补全"),
-        TerminalKey(id: "up", label: "↑", symbol: "arrow.up", spoken: "上"),
-        TerminalKey(id: "down", label: "↓", symbol: "arrow.down", spoken: "下"),
-        TerminalKey(id: "enter", label: "⏎", symbol: "return", spoken: "回车"),
+        TerminalKey(id: "ctrl+c", label: "⌃C", symbol: nil, spoken: String(localized: "Control C，中断")),
+        TerminalKey(id: "tab", label: "⇥", symbol: "arrow.right.to.line", spoken: String(localized: "Tab，补全")),
+        TerminalKey(id: "up", label: "↑", symbol: "arrow.up", spoken: String(localized: "上")),
+        TerminalKey(id: "down", label: "↓", symbol: "arrow.down", spoken: String(localized: "下")),
+        TerminalKey(id: "enter", label: "⏎", symbol: "return", spoken: String(localized: "回车")),
         TerminalKey(id: "esc", label: "esc", symbol: nil, spoken: "Esc"),
     ]
 }
@@ -45,7 +45,7 @@ final class KeyPresser {
                     failure = Self.describe(kind: kind, message: message)
                 case .unknown:
                     queued.removeAll()
-                    failure = "按键结果未知，请看终端确认"
+                    failure = String(localized: "按键结果未知，请看终端确认")
                 }
             }
             draining = false
@@ -54,10 +54,10 @@ final class KeyPresser {
 
     private static func describe(kind: String, message: String) -> String {
         switch kind {
-        case "not_found", "finished": "按键未送达：会话已结束"
-        case "machine_unknown", "unavailable": "按键未送达：未连接或 herdr-core 不可用"
-        case "timeout": "按键结果未知，请看终端确认"
-        default: "按键未送达：\(message)"
+        case "not_found", "finished": String(localized: "按键未送达：会话已结束")
+        case "machine_unknown", "unavailable": String(localized: "按键未送达：未连接或 herdr-core 不可用")
+        case "timeout": String(localized: "按键结果未知，请看终端确认")
+        default: String(localized: "按键未送达：\(message)")
         }
     }
 }
@@ -137,7 +137,7 @@ private struct KeyCapStyle: ButtonStyle {
 
 /// Text the composer can fill in; the user still taps send.
 enum QuickCommand {
-    static let phrases = ["继续", "好的，按你的建议做", "先停下，说明你接下来的计划"]
+    static let phrases = [String(localized: "继续"), String(localized: "好的，按你的建议做"), String(localized: "先停下，说明你接下来的计划")]
 
     static func insert(_ command: String, into draft: String) -> String {
         if draft.isEmpty { return command }

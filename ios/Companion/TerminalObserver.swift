@@ -27,7 +27,7 @@ final class TerminalObserver {
     func start(_ config: GatewayConfig, session: String, takeover: TerminalGrid? = nil) {
         stop()
         guard let url = config.observeURL(session: session, takeover: takeover) else {
-            phase = .failed("地址无效：\(config.host)")
+            phase = .failed(String(localized: "地址无效：\(config.host)"))
             return
         }
         let socket = GatewaySocket(url: url, token: config.token, maximumMessageSize: 32 << 20)
@@ -95,8 +95,8 @@ final class TerminalObserver {
             if case .closed = phase { return }
             let status = socket.status
             let reason = switch status {
-            case 401: "配对已失效"
-            case 404: "会话已不存在"
+            case 401: String(localized: "配对已失效")
+            case 404: String(localized: "会话已不存在")
             default: error.localizedDescription
             }
             phase = .failed(reason)
@@ -146,14 +146,14 @@ private struct ObserveMessage: Decodable {
         case .text(let text): text
         case .record(let reason, let exitCode):
             switch reason {
-            case "exited": exitCode.map { "程序已退出（退出码 \($0)）" } ?? "程序已退出"
-            case "killed": "会话已被结束"
-            case "core_lost": "与 herdr-core 的连接已断开"
-            case "server_stop", "host_shutdown": "herdr-core 已停止"
+            case "exited": exitCode.map { String(localized: "程序已退出（退出码 \($0)）") } ?? String(localized: "程序已退出")
+            case "killed": String(localized: "会话已被结束")
+            case "core_lost": String(localized: "与 herdr-core 的连接已断开")
+            case "server_stop", "host_shutdown": String(localized: "herdr-core 已停止")
             case let other?: other
-            case nil: "会话已结束"
+            case nil: String(localized: "会话已结束")
             }
-        case nil: "会话已结束"
+        case nil: String(localized: "会话已结束")
         }
     }
 }

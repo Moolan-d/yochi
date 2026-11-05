@@ -746,7 +746,7 @@ final class CompanionUITests: XCTestCase {
     @MainActor
     func testHomeSample() throws {
         for size in [nil, "UICTContentSizeCategoryAccessibilityL"] {
-            let app = XCUIApplication()
+            let app = Self.chineseApp()
             if let size { app.launchArguments += ["-UIPreferredContentSizeCategoryName", size] }
             app.launchEnvironment["COMPANION_SAMPLE_HOME"] = "1"
             app.launch()
@@ -811,7 +811,7 @@ final class CompanionUITests: XCTestCase {
     @MainActor
     func testConversationCards() throws {
         for size in [nil, "UICTContentSizeCategoryAccessibilityL"] {
-            let app = XCUIApplication()
+            let app = Self.chineseApp()
             if let size { app.launchArguments += ["-UIPreferredContentSizeCategoryName", size] }
             app.launchEnvironment["COMPANION_SAMPLE_CONVERSATION"] = "1"
             app.launch()
@@ -1111,7 +1111,7 @@ final class CompanionUITests: XCTestCase {
     /// it on a blank page, and new replies keep the list at the end.
     @MainActor
     func testConversationSampleBackToLatest() throws {
-        let app = XCUIApplication()
+        let app = Self.chineseApp()
         app.launchEnvironment["COMPANION_SAMPLE_CONVERSATION"] = "long"
         app.launch()
         let conversation = app.scrollViews["conversation"]
@@ -1230,7 +1230,7 @@ final class CompanionUITests: XCTestCase {
         pair(paired, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
         waitUntilPaired(paired)
         paired.terminate()
-        let app = XCUIApplication()
+        let app = Self.chineseApp()
         app.launch()
         waitUntilPaired(app)
         XCTAssert(app.cells.firstMatch.waitForExistence(timeout: 15), "no sessions")
@@ -1261,7 +1261,7 @@ final class CompanionUITests: XCTestCase {
             print("perf-first terminal \(name) grid=\(grid) ms=\(Int(Date.now.timeIntervalSince(start) * 1000))")
             RunLoop.current.run(until: .now.addingTimeInterval(3))
             app.navigationBars.buttons.firstMatch.tap()
-            XCTAssert(app.buttons["close"].waitForExistence(timeout: 10) || app.buttons["设置"].exists)
+            XCTAssert(Self.closeSearch(app).waitForExistence(timeout: 10) || app.buttons["设置"].exists)
             RunLoop.current.run(until: .now.addingTimeInterval(1))
         }
         unpair(app)
@@ -1280,7 +1280,7 @@ final class CompanionUITests: XCTestCase {
 
     @MainActor
     private func launchUnpaired(observing id: String? = nil, textSize: String? = nil) -> XCUIApplication {
-        let app = XCUIApplication()
+        let app = Self.chineseApp()
         if let textSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", textSize] }
         app.launchEnvironment["COMPANION_RESET"] = "1"
         if let id { app.launchEnvironment["COMPANION_OBSERVE"] = id }
@@ -1348,8 +1348,8 @@ final class CompanionUITests: XCTestCase {
     @MainActor
     private func sessionCell(_ app: XCUIApplication, name: String) -> XCUIElement {
         let cell = app.cells.buttons.matching(NSPredicate(
-            format: "label == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label CONTAINS %@",
-            name, "\(name)，", "\(name), ", "置顶，\(name)，")).firstMatch
+            format: "label == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label CONTAINS %@",
+            name, "\(name)，", "\(name)、", "\(name), ", "置顶，\(name)，")).firstMatch
         guard app.cells.firstMatch.waitForExistence(timeout: 15) else { return cell }
         let search = app.searchFields.firstMatch
         for _ in 0..<4 where !search.isHittable { app.swipeDown() }
@@ -1371,13 +1371,14 @@ final class CompanionUITests: XCTestCase {
     /// A search left from finding a row hides the toolbar.
     @MainActor
     private func endSearch(_ app: XCUIApplication) {
-        guard !app.buttons["设置"].exists, app.buttons["close"].exists else { return }
+        let close = Self.closeSearch(app)
+        guard !app.buttons["设置"].exists, close.exists else { return }
         // Coming back to the list gives the search field its focus again,
         // and the keyboard slides up under where close was: let it settle.
         if app.keyboards.firstMatch.waitForExistence(timeout: 2) {
             RunLoop.current.run(until: .now.addingTimeInterval(0.6))
         }
-        app.buttons["close"].tap()
+        close.tap()
     }
 
     @MainActor
@@ -1434,5 +1435,19 @@ final class CompanionUITests: XCTestCase {
             return ""
         }
         return value
+    }
+
+    /// The search's own close button, which the system names in the app's language.
+    @MainActor
+    private static func closeSearch(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == 'close' OR label IN {'close', '关闭'}")).firstMatch
+    }
+
+    /// The tests read the Chinese interface, whatever the simulator's language.
+    @MainActor
+    private static func chineseApp() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        return app
     }
 }

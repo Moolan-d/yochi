@@ -129,7 +129,7 @@ struct TerminalPane: View {
                 switch observer.phase {
                 case .observing where model.yielded:
                     HStack {
-                        BannerLabel(text: "桌面正在使用这个终端，按桌面尺寸显示", systemImage: "desktopcomputer")
+                        BannerLabel(text: String(localized: "桌面正在使用这个终端，按桌面尺寸显示"), systemImage: "desktopcomputer")
                         Button("按手机尺寸") { model.takeOverAgain() }
                             .buttonStyle(.bordered)
                             .accessibilityIdentifier("terminalTakeOver")
@@ -138,7 +138,7 @@ struct TerminalPane: View {
                     BannerLabel(text: reason, systemImage: "stop.circle")
                 case .failed(let reason):
                     HStack {
-                        BannerLabel(text: "连接中断：\(reason)", systemImage: "wifi.exclamationmark")
+                        BannerLabel(text: String(localized: "连接中断：\(reason)"), systemImage: "wifi.exclamationmark")
                         Button("重试", action: start).buttonStyle(.bordered)
                     }
                 default:
@@ -169,7 +169,7 @@ struct TerminalPane: View {
     /// The sheet closed after copying: confirm it somewhere the user is
     /// looking, since the sheet slides away immediately.
     private func showCopied() {
-        AccessibilityNotification.Announcement("已复制").post()
+        AccessibilityNotification.Announcement(String(localized: "已复制")).post()
         copiedNotice = true
         Task {
             try? await Task.sleep(for: .seconds(1.6))

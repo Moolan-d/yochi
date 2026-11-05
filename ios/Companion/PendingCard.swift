@@ -68,10 +68,10 @@ struct PendingCard: View {
 
     private var title: String {
         switch pending.kind {
-        case "permission": "Agent 请求批准"
-        case "question": "Agent 在问你"
-        case "auth": "Agent 需要登录"
-        default: "Agent 在等待"
+        case "permission": String(localized: "Agent 请求批准")
+        case "question": String(localized: "Agent 在问你")
+        case "auth": String(localized: "Agent 需要登录")
+        default: String(localized: "Agent 在等待")
         }
     }
 
@@ -85,7 +85,7 @@ struct PendingCard: View {
     }
 
     private var denyTitle: String {
-        pending.kind == "question" ? "取消这个提问？" : "拒绝这次请求？"
+        pending.kind == "question" ? String(localized: "取消这个提问？") : String(localized: "拒绝这次请求？")
     }
 
     @ViewBuilder
@@ -94,7 +94,7 @@ struct PendingCard: View {
             Text(question.question).font(.body)
         } else if pending.kind == "permission", let tool {
             VStack(alignment: .leading, spacing: 2) {
-                Text(tool.name ?? "工具").font(.footnote).foregroundStyle(.secondary)
+                Text(tool.name ?? String(localized: "工具")).font(.footnote).foregroundStyle(.secondary)
                 Text(tool.summary ?? "")
                     .font(.callout.monospaced())
                     .lineLimit(6)
@@ -115,13 +115,13 @@ struct PendingCard: View {
                 .buttonStyle(ChoiceStyle(role: .destructive))
                 .accessibilityIdentifier("denyPending")
                 Button { send("allow") } label: {
-                    choiceLabel("批准", choice: "allow").frame(maxWidth: .infinity)
+                    choiceLabel(String(localized: "批准"), choice: "allow").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(ChoiceStyle(role: .prominent))
                 .accessibilityIdentifier("allowPending")
             }
             .font(.body.weight(.semibold))
-            deskNote("其他选项（总是允许等）请在电脑上选择")
+            deskNote(String(localized: "其他选项（总是允许等）请在电脑上选择"))
         } else if let question {
             VStack(spacing: 8) {
                 ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
@@ -144,13 +144,13 @@ struct PendingCard: View {
                 }
             }
             HStack {
-                deskNote("其他回答请在电脑上输入")
+                deskNote(String(localized: "其他回答请在电脑上输入"))
                 Spacer()
                 Button("取消提问", role: .destructive) { confirmingDeny = true }
                     .font(.footnote)
             }
         } else {
-            deskNote("请在电脑上作答")
+            deskNote(String(localized: "请在电脑上作答"))
         }
     }
 
@@ -181,14 +181,14 @@ struct PendingCard: View {
             case .failed(let kind, let message):
                 answering = nil
                 failure = switch kind {
-                case "changed": "终端里已有变化，请看最新状态"
-                case "not_found", "finished": "会话已结束"
-                case "unavailable", "machine_unknown": "未连接或 herdr-core 不可用"
+                case "changed": String(localized: "终端里已有变化，请看最新状态")
+                case "not_found", "finished": String(localized: "会话已结束")
+                case "unavailable", "machine_unknown": String(localized: "未连接或 herdr-core 不可用")
                 default: message
                 }
             case .unknown:
                 answering = nil
-                failure = "结果未知，请在电脑上确认"
+                failure = String(localized: "结果未知，请在电脑上确认")
             }
         }
     }

@@ -29,7 +29,7 @@ struct SampleConversationView: View {
                 await playLong()
                 return
             }
-            let data = Data(Self.json(now: .now).utf8)
+            let data = Data(SampleText.localized(Self.json(now: .now)).utf8)
             if let message = try? JSONDecoder().decode(ConversationMessage.self, from: data) {
                 feed.apply(message)
             }

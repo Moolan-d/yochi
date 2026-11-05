@@ -54,7 +54,7 @@ struct ChangesView: View {
         .onChange(of: turn) { _, _ in Task { await refresh() } }
     }
 
-    static let commitRequest = "请提交这些改动"
+    static let commitRequest = String(localized: "请提交这些改动")
 
     private func summary(_ list: ChangeList) -> some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -204,7 +204,7 @@ struct ChangeDiffView: View {
                 ContentUnavailableView {
                     Label(error.kind == "changed" ? "文件列表已变化" : "读取失败", systemImage: "exclamationmark.triangle")
                 } description: {
-                    Text(error.kind == "changed" ? "返回改动页刷新后再打开。" : error.message)
+                    Text(error.kind == "changed" ? String(localized: "返回改动页刷新后再打开。") : error.message)
                 } actions: {
                     if error.kind != "changed" {
                         Button("重试") { Task { await refresh() } }

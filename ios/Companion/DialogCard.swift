@@ -92,25 +92,25 @@ struct DialogCard: View {
     /// usual ones are known; others as the footer has them.
     static func pickerAction(_ action: String) -> String {
         switch action.lowercased() {
-        case "set as default": "设为默认"
-        case "use this session only": "仅用于本会话"
-        case "select", "confirm", "choose": "选择"
+        case "set as default": String(localized: "设为默认")
+        case "use this session only": String(localized: "仅用于本会话")
+        case "select", "confirm", "choose": String(localized: "选择")
         default: action.prefix(1).uppercased() + action.dropFirst()
         }
     }
 
     private var heading: String {
         switch dialog.kind {
-        case .claudeBash: "Agent 想运行命令"
-        case .claudeFileEdit: "Agent 想修改文件"
-        case .claudeFileCreate: "Agent 想创建文件"
-        case .claudeFileRead: "Agent 想读取文件"
-        case .claudeFetch: "Agent 想访问网页"
-        case .claudePlan: "Agent 的计划等你确认"
-        case .claudeQuestion: "Agent 在问你"
-        case .claudeQuestionReview: "确认你的回答"
-        case .claudeWorkspaceTrust: "是否信任这个文件夹？"
-        case .claudePicker: "Claude Code 在等你选择"
+        case .claudeBash: String(localized: "Agent 想运行命令")
+        case .claudeFileEdit: String(localized: "Agent 想修改文件")
+        case .claudeFileCreate: String(localized: "Agent 想创建文件")
+        case .claudeFileRead: String(localized: "Agent 想读取文件")
+        case .claudeFetch: String(localized: "Agent 想访问网页")
+        case .claudePlan: String(localized: "Agent 的计划等你确认")
+        case .claudeQuestion: String(localized: "Agent 在问你")
+        case .claudeQuestionReview: String(localized: "确认你的回答")
+        case .claudeWorkspaceTrust: String(localized: "是否信任这个文件夹？")
+        case .claudePicker: String(localized: "Claude Code 在等你选择")
         }
     }
 
@@ -167,11 +167,11 @@ struct DialogCard: View {
                     details
                     VStack(spacing: 8) {
                         if let picker = dialog.picker, picker.hiddenAbove > 0 {
-                            scrollButton(forward: false, title: "上面还有 \(picker.hiddenAbove) 项")
+                            scrollButton(forward: false, title: String(localized: "上面还有 \(picker.hiddenAbove) 项"))
                         }
                         optionRows
                         if let picker = dialog.picker, picker.moreBelow {
-                            scrollButton(forward: true, title: picker.hiddenBelow.map { "下面还有 \($0) 项" } ?? "下面还有更多")
+                            scrollButton(forward: true, title: picker.hiddenBelow.map { String(localized: "下面还有 \($0) 项") } ?? String(localized: "下面还有更多"))
                         }
                     }
                 }
@@ -280,9 +280,9 @@ struct DialogCard: View {
         case .approvePersistent:
             DialogRowScanner.comparable(option.label.lowercased())
                 .contains(DialogRowScanner.comparable("always allow access to"))
-                ? "本次会话内允许 Claude 访问这个文件夹" : "会保存一条规则，以后不再询问"
-        case .approveModeSwitch: "会切换 Claude Code 的权限模式"
-        case .exitProgram: "Claude Code 会退出"
+                ? String(localized: "本次会话内允许 Claude 访问这个文件夹") : String(localized: "会保存一条规则，以后不再询问")
+        case .approveModeSwitch: String(localized: "会切换 Claude Code 的权限模式")
+        case .exitProgram: String(localized: "Claude Code 会退出")
         default: nil
         }
     }
@@ -296,9 +296,9 @@ struct DialogCard: View {
                 if isPicker { return perform(.dismiss, marker: Self.escOrdinal) }
                 confirming = Confirmation(
                     id: Self.escOrdinal,
-                    title: dialog.kind == .claudeWorkspaceTrust ? "退出 Claude Code" : "取消（Esc）",
+                    title: dialog.kind == .claudeWorkspaceTrust ? String(localized: "退出 Claude Code") : String(localized: "取消（Esc）"),
                     message: dialog.kind == .claudeWorkspaceTrust
-                        ? "不信任这个文件夹，Claude Code 会退出。" : "Agent 会停下这一轮，等你的下一条消息。",
+                        ? String(localized: "不信任这个文件夹，Claude Code 会退出。") : String(localized: "Agent 会停下这一轮，等你的下一条消息。"),
                     action: .dismiss)
             } label: {
                 HStack(spacing: 4) {
@@ -314,12 +314,12 @@ struct DialogCard: View {
     private func choose(_ option: DialogOption) {
         switch option.role {
         case .decline:
-            confirming = Confirmation(id: option.ordinal, title: "拒绝这次请求？",
-                                      message: "Agent 会停下这一轮，等你的下一条消息。",
+            confirming = Confirmation(id: option.ordinal, title: String(localized: "拒绝这次请求？"),
+                                      message: String(localized: "Agent 会停下这一轮，等你的下一条消息。"),
                                       action: .choose(ordinal: option.ordinal))
         case .exitProgram:
-            confirming = Confirmation(id: option.ordinal, title: "退出 Claude Code",
-                                      message: "不信任这个文件夹，Claude Code 会退出。",
+            confirming = Confirmation(id: option.ordinal, title: String(localized: "退出 Claude Code"),
+                                      message: String(localized: "不信任这个文件夹，Claude Code 会退出。"),
                                       action: .choose(ordinal: option.ordinal))
         case .answer where dialog.picker?.keys.isEmpty == false:
             picking = option
@@ -334,7 +334,7 @@ struct DialogCard: View {
         do {
             plan = try DialogActionPlanner.plan(action, for: dialog)
         } catch {
-            failure = "这个回答请在电脑上完成"
+            failure = String(localized: "这个回答请在电脑上完成")
             return
         }
         running = marker
@@ -344,7 +344,7 @@ struct DialogCard: View {
             running = nil
             switch outcome {
             case .done: if plan.confirmation != .steps { answered += 1 }
-            case .unconfirmed: failure = "已按键，但对话框还在，请在电脑上查看"
+            case .unconfirmed: failure = String(localized: "已按键，但对话框还在，请在电脑上查看")
             case .failed(let message): failure = message
             }
         }
@@ -442,18 +442,18 @@ struct GenericDialogCard: View {
     /// ones are known.
     static func title(_ key: DialogKeyHint) -> String {
         switch key.action.lowercased() {
-        case "continue": "继续"
-        case "confirm": "确认"
-        case "cancel": "取消"
-        case "close": "关闭"
-        case "exit": "退出"
-        case "go back", "back": "返回"
-        case "dismiss": "关闭"
+        case "continue": String(localized: "继续")
+        case "confirm": String(localized: "确认")
+        case "cancel": String(localized: "取消")
+        case "close": String(localized: "关闭")
+        case "exit": String(localized: "退出")
+        case "go back", "back": String(localized: "返回")
+        case "dismiss": String(localized: "关闭")
         default: DialogCard.pickerAction(key.action)
         }
     }
 
-    private static func confirmTitle(_ key: DialogKeyHint) -> String { "\(title(key))（\(key.key)）" }
+    private static func confirmTitle(_ key: DialogKeyHint) -> String { String(localized: "\(title(key))（\(key.key)）") }
 
     /// The rows without rules and outer blank rows, each trimmed: a desk-wide
     /// row would wrap into noise at the phone's width.
