@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="128" height="128" alt="Yochi 图标" />
+<img src=".github/assets/icon.png" width="128" height="128" alt="Yochi 图标" />
 
 # Yochi
 
@@ -13,6 +13,7 @@
 ![Rust 2024](https://img.shields.io/badge/Rust-2024-000000?logo=rust&logoColor=white)
 ![Terminal: libghostty](https://img.shields.io/badge/terminal-libghostty-3551F3)
 ![Encryption: Noise IKpsk2](https://img.shields.io/badge/relay-Noise%20IKpsk2-2E7D32)
+![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 [English](./README.md) | 简体中文
 
@@ -32,8 +33,8 @@ Yochi 不是远程桌面。主 Mac 上跑一个小小的 Gateway（`yochi`），
 <div align="center">
 <table>
   <tr>
-    <td align="center"><img src="docs/images/home.png" width="260" alt="主页：需要你处理的 Agent 在前，随后是各个 Space" /></td>
-    <td align="center"><img src="docs/images/conversation.png" width="260" alt="对话页：消息、改动、子任务和待办" /></td>
+    <td align="center"><img src=".github/assets/home.png" width="260" alt="主页：需要你处理的 Agent 在前，随后是各个 Space" /></td>
+    <td align="center"><img src=".github/assets/conversation.png" width="260" alt="对话页：消息、改动、子任务和待办" /></td>
   </tr>
   <tr>
     <td align="center"><sub><b>主页</b>：谁在等你，然后是每个 Space</sub></td>
@@ -53,6 +54,7 @@ Yochi 不是远程桌面。主 Mac 上跑一个小小的 Gateway（`yochi`），
 - [开发](#开发)
 - [目录结构](#目录结构)
 - [致谢](#致谢)
+- [许可证](#许可证)
 
 ## 功能
 
@@ -77,7 +79,7 @@ Yochi 不是远程桌面。主 Mac 上跑一个小小的 Gateway（`yochi`），
 ## 整体结构
 
 <p align="center">
-  <img src="docs/diagrams/yochi-architecture.svg" alt="Yochi 架构：手机 App、tailnet 与 Relay 两条路径、主 Mac 上的 Gateway、herdr-core 和远端机器" />
+  <img src=".github/assets/yochi-architecture.svg" alt="Yochi 架构：手机 App、tailnet 与 Relay 两条路径、主 Mac 上的 Gateway、herdr-core 和远端机器" />
 </p>
 
 | 组件 | 运行位置 | 作用 |
@@ -92,7 +94,7 @@ Yochi 不是远程桌面。主 Mac 上跑一个小小的 Gateway（`yochi`），
 ### 会话如何显示
 
 <p align="center">
-  <img src="docs/diagrams/yochi-sessions.svg" alt="Herdr 的 Host、Space、Tab、Pane、Terminal 层级如何对应到 Yochi 主页" />
+  <img src=".github/assets/yochi-sessions.svg" alt="Herdr 的 Host、Space、Tab、Pane、Terminal 层级如何对应到 Yochi 主页" />
 </p>
 
 Herdr 的层级是 Host → Space → Tab → Pane → Terminal。手机上用不了这么多层：
@@ -220,7 +222,7 @@ yochi [OPTIONS] [COMMAND]
   - 配对链接带着 Gateway 的静态公钥和一次性密钥。
   - Relay 只转发不透明的帧，需要的只是你自己生成的注册密钥，部署在你自己的账号里。
 
-这些取舍的来龙去脉见 [`docs/adr/`](docs/adr)，协议见 [`protocol/README.md`](protocol/README.md)，术语见 [`GLOSSARY.md`](GLOSSARY.md)。
+协议见 [`protocol/README.md`](protocol/README.md)。
 
 ## 开发
 
@@ -254,9 +256,6 @@ gateway/        Rust Gateway 与 `yochi` CLI
 ios/            SwiftUI App（XcodeGen 工程，libghostty 由脚本下载）
 relay/          可自部署的 Relay：Cloudflare Worker 或 Node + Docker
 protocol/       App ↔ Gateway 的有版本接口
-docs/adr/       架构决策记录
-docs/diagrams/  上面两张图的 Excalidraw 源文件
-GLOSSARY.md     项目术语：Terminal、Agent、Space、Takeover……
 ```
 
 ## 致谢
@@ -265,3 +264,7 @@ GLOSSARY.md     项目术语：Terminal、Agent、Space、Takeover……
 - [Heeler](https://github.com/ZingerLittleBee/Heeler)（Apache-2.0）：ANSI 屏幕模型和 Claude Code 对话框解析移植自它。
 - [Alma Relay](https://github.com/yetone/alma-relay)（MIT）：`relay/` fork 自它，只保留了 WebSocket 隧道，见 [`relay/LICENSE`](relay/LICENSE)。
 - Herdr：Yochi 是 herdr-core 的客户端，依赖它的会话运行时。
+
+## 许可证
+
+Yochi 采用 [Apache License 2.0](LICENSE) 许可。`relay/` fork 自 Alma Relay，仍沿用 [MIT 许可](relay/LICENSE)。第三方署名见 [NOTICE](NOTICE)。

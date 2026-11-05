@@ -11,3 +11,7 @@ xcuserdata/
 DerivedData/
 /ios/Companion/Info.plist
 /ios/Local.xcconfig
+
+# Local notes: design records, task plans, diagram sources, vocabulary
+/docs/
+/GLOSSARY.md

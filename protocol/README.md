@@ -1,6 +1,6 @@
 # Companion API
 
-Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
+Gateway 向 Companion App 暴露的有版本接口。
 
 ## v0
 
@@ -64,7 +64,7 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
 - 只包含 live 会话，finished 的不返回。
 - `cols` / `rows`：终端当前网格尺寸（上例省略）。
-- `spaces`：Herdr 的 Space 与 Tab（见 GLOSSARY），按 Herdr 中的顺序，本机在前；上例省略。旧版 Gateway 不发送此字段，App 按缺省为空处理。
+- `spaces`：Herdr 的 Space 与 Tab，按 Herdr 中的顺序，本机在前；上例省略。旧版 Gateway 不发送此字段，App 按缺省为空处理。
 
 ```jsonc
 "spaces": [
