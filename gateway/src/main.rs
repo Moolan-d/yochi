@@ -13,6 +13,7 @@ mod noise;
 mod observe;
 mod relay;
 mod relay_setup;
+mod resume;
 mod run;
 mod screen;
 mod server;
