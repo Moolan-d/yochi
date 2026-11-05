@@ -77,6 +77,15 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 - `id` 对 App 不透明。`name` 已是要显示的名字：没人命名的 Space 用 Herdr 自动起的名字，没人命名的 Tab 用位置序号。
 - `folder`：Herdr 在这个 Space 里启动终端的目录，可能为空；App 用它为新建会话预选 Space。旧版 Gateway 不发送此字段。
 - `sessions`：该 Tab 里的 live 会话 id，按分屏顺序；由 Agent 启动的子 Agent 不在布局里，紧跟在启动它的终端（和它之前的子 Agent）后面。
+- `layout`：Tab 的分屏树，App 用来画缩略图。节点要么是分屏：`split` 为 `row`（左右并排）或 `column`（上下堆叠），`children` 为子节点；要么是面板：`session` 为它显示的 live 会话，没有 `session` 的面板显示的是别的内容（文件浏览器）或已结束的终端。`weight` 是节点在所属分屏中的占比，缺省时按等分处理。子 Agent 不在树里。旧版 Gateway 不发送此字段。
+
+```jsonc
+"layout": {"split": "row", "children": [
+  {"weight": 0.6, "session": "t3"},
+  {"weight": 0.4, "split": "column", "children": [{"session": "t4"}, {}]}
+]}
+```
+
 - 只列出含 live 会话的 Space 和 Tab。不在任何 Space 中的会话不出现在这里，App 按机器单独列出。
 - 数据来自各机器 herdr-core 中 Herdr 桌面端的布局文档，Gateway 只读不写。某台机器读不到布局（离线、没用过 Herdr 桌面端、core 不支持 `doc.get`）时，它的会话都不在 `spaces` 中。
 

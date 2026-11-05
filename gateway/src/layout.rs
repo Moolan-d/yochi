@@ -26,6 +26,55 @@ pub struct Tab {
     pub name: String,
     /// Live session ids in pane order, then sub-agents started from them.
     pub sessions: Vec<String>,
+    /// How the tab is split, for the app to draw; none when the tab has no
+    /// layout tree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<Pane>,
+}
+
+/// A pane, or a split holding panes side by side (`row`) or stacked
+/// (`column`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Pane {
+    /// Its share of the split it sits in; missing means an equal share.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub split: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Pane>,
+    /// The live session the pane shows; none for one that shows something
+    /// else (a file browser) or a terminal that has ended.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+}
+
+impl Pane {
+    fn read(node: &Value, qualify: &dyn Fn(&str) -> String) -> Option<Pane> {
+        let weight = node["size"]["weight"].as_f64().filter(|w| w.is_finite() && *w > 0.0);
+        let split = match node["type"].as_str() {
+            Some("row") => Some("row"),
+            Some("column") => Some("column"),
+            Some("block") => None,
+            _ => return None,
+        };
+        let children = match split {
+            Some(_) => node["children"].as_array().into_iter().flatten().filter_map(|c| Pane::read(c, qualify)).collect(),
+            None => Vec::new(),
+        };
+        let session = node["content"]["terminal"].as_str().map(qualify);
+        Some(Pane { weight, split, children, session })
+    }
+
+    /// Forgets the sessions that are not live.
+    fn keep_live(&mut self, live: &HashMap<&str, &Session>) {
+        if self.session.as_deref().is_some_and(|id| !live.contains_key(id)) {
+            self.session = None;
+        }
+        for child in &mut self.children {
+            child.keep_live(live);
+        }
+    }
 }
 
 /// One machine's spaces as its document lists them: names as given (empty
@@ -56,6 +105,7 @@ pub fn read(document: &Value, machine: Option<&str>) -> Vec<Space> {
                         id: qualify(tab["id"].as_str().unwrap_or_default()),
                         name: text(&tab["name"]),
                         sessions: terminals.iter().map(|t| qualify(t)).collect(),
+                        layout: Pane::read(&tab["root"], &qualify),
                     }
                 })
                 .collect(),
@@ -83,6 +133,9 @@ pub fn arrange(spaces: Vec<Space>, sessions: &[Session]) -> Vec<Space> {
     for (s, space) in spaces.iter_mut().enumerate() {
         for (t, tab) in space.tabs.iter_mut().enumerate() {
             tab.sessions.retain(|id| live.contains_key(id.as_str()));
+            if let Some(layout) = &mut tab.layout {
+                layout.keep_live(&live);
+            }
             for id in &tab.sessions {
                 tab_of.insert(id.clone(), (s, t));
             }
@@ -166,7 +219,7 @@ mod tests {
         json!({"spaces": [
             {"id": "sp1", "name": "", "folder": "/opt/demo", "tabs": [
                 {"id": "tb1", "name": "", "root": {"type": "row", "children": [
-                    {"type": "block", "content": {"terminal": "t3"}},
+                    {"type": "block", "size": {"weight": 0.6}, "content": {"terminal": "t3"}},
                     {"type": "column", "children": [
                         {"type": "block", "content": {"terminal": "t4"}},
                         {"type": "block", "content": {"mod": "files"}},
@@ -192,6 +245,22 @@ mod tests {
         assert_eq!(spaces[0].tabs[0].sessions, ["vps/t3", "vps/t4"]);
         assert_eq!(spaces[1].tabs[0].sessions, ["vps/t5"]);
         assert!(read(&Value::Null, None).is_empty());
+    }
+
+    #[test]
+    fn keeps_the_split_tree_with_live_sessions() {
+        let remote = read(&document(), Some("vps"));
+        assert_eq!(remote[0].tabs[0].layout.as_ref().unwrap().children[0].session.as_deref(), Some("vps/t3"));
+
+        let spaces = arrange(read(&document(), None), &[session("t3", None, None), session("t5", None, None)]);
+        let layout = serde_json::to_value(spaces[0].tabs[0].layout.as_ref().unwrap()).unwrap();
+        // t4 has ended: its pane stays, empty, as does the file browser's.
+        assert_eq!(layout, json!({"split": "row", "children": [
+            {"weight": 0.6, "session": "t3"},
+            {"split": "column", "children": [{}, {}]},
+        ]}));
+        let single = serde_json::to_value(&spaces[1].tabs[0]).unwrap();
+        assert_eq!(single["layout"], json!({"session": "t5"}));
     }
 
     #[test]
