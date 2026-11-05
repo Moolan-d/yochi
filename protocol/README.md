@@ -9,6 +9,7 @@ Gateway 向 Companion App 暴露的有版本接口（见 `GLOSSARY.md`）。
 - **连接**：所有接口都是 WebSocket，地址为 `ws://<主 Mac 的 tailnet IPv4>:7420/v0/…`。Gateway 只监听 tailnet 地址，不监听 LAN 或 localhost。
 - **认证**：除配对外，都需带 HTTP 头 `Authorization: Bearer <设备 token>`。token 无效或设备已被撤销时返回 `401`。设备被撤销后，它已建立的连接会在几秒内被关闭。
 - **加密**：明文 WebSocket，依赖 Tailscale（WireGuard）加密链路。经 Relay 时见下文「经 Relay 连接」。
+- **语言**：App 在每个 `/v0/…` 地址后带查询参数 `lang=<BCP 47 语言标签>`（App 界面当前的语言，如 `en`、`zh-Hans`），经 Relay 时随 `path` 一起转发。Gateway 自己写的文字（失败原因、对话里的「已中断」「［图片］」「（另有 N 行）」等）按它选语言：`zh` 开头为中文，其余为英文。不带 `lang` 的旧 App 得到中文。herdr-core、git 和 Agent 写的内容原样转发，不翻译。旧版 Gateway 忽略 `lang`，仍发中文。
 
 ### 配对（Device Pairing）
 
@@ -297,7 +298,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
                 "options": [{"label": "Cats", "description": "…"}, {"label": "Dogs", "description": "…"}]}],
  "answers": {"Cats or Dogs?": "Cats"}}
 {"kind": "command", "id": "…", "name": "/model haiku", "output": "Set model to haiku"}
-{"kind": "notice", "id": "…", "text": "上下文已压缩"}   // 也用于「已中断」和 API 错误
+{"kind": "notice", "id": "…", "text": "上下文已压缩", "code": "compacted"}   // 也用于「已中断」（interrupted）和 API 错误
 // 子代理或后台任务的完成汇报：Claude Code 把它记成一条 user 消息，但不是用户输入的
 {"kind": "task", "id": "…", "summary": "Agent \"Find roadmap items\" finished", "state": "done",
  "text": "子代理的汇报（Markdown，后台命令没有）"}
@@ -314,6 +315,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - `todos.items[].status` 为 `pending` / `in_progress` / `completed`，删掉的项不再出现。中间没有别的条目的连续几次更新替换同一个条目，否则新起一个条目。
 - `peer.direction` 为 `sent` / `received`。发出的 `state` 先是 `running`，结果到达后为 `done` 或 `error`。`name` 对子任务是它的描述，对 `uds:` 地址是从该地址收到过的消息里对方报的名字。
 - 旧 App 不认识 `todos`、`peer` 条目，跳过；新字段忽略。
+- `notice.code` 标明是哪种提示：`interrupted`、`compacted`，以后可能有新值；API 错误等没有 `code`。App 认识的 `code` 用自己的文字显示，其余显示 `text`（已按 `lang` 选好语言）。旧版 Gateway 不发送 `code`。
 - `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
 - `mode` 原样转发 Claude Code 的值（`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`，以后可能有新值）。transcript 只在发消息时记模式：第一条消息之前没有 `mode`，在终端里切换后要到下一条消息才更新。App 优先显示屏幕底部的模式提示，切换按「按键」逐次发 `shift+tab`（ADR 0005）。
 - Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。

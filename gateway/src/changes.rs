@@ -6,6 +6,7 @@
 
 use crate::exec::{Failure, Output, Program, exec};
 use crate::herdr::CoreView;
+use crate::lang::Lang;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -90,21 +91,21 @@ fn session_place(view: &watch::Receiver<CoreView>, session: &str) -> Option<(Opt
         .map(|s| (s.machine.clone(), s.cwd.clone()))
 }
 
-pub(crate) async fn git(hc: &str, machine: Option<&str>, cwd: &str, args: &[&str]) -> Result<Output, Failure> {
+pub(crate) async fn git(hc: &str, machine: Option<&str>, cwd: &str, args: &[&str], lang: Lang) -> Result<Output, Failure> {
     let argv: Vec<&str> = GIT.iter().copied().chain(args.iter().copied()).collect();
-    exec(hc, machine, cwd, Program::Argv(&argv), None, GIT_TIMEOUT_SECS).await
+    exec(hc, machine, cwd, Program::Argv(&argv), None, GIT_TIMEOUT_SECS, lang).await
 }
 
 fn text(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_owned()
 }
 
-pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, listed: &Listed, request: Request) -> Response {
+pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, listed: &Listed, request: Request, lang: Lang) -> Response {
     let failed = |failure: Failure| Response::ChangesFailed { id: request.id.clone(), kind: failure.kind, message: failure.message };
     let Some((machine, cwd)) = session_place(view, &request.session) else {
-        return failed(Failure::new("not_found", "会话不存在或已结束"));
+        return failed(Failure::new("not_found", lang.pick(crate::agent::GONE_ZH, crate::agent::GONE_EN)));
     };
-    match collect(hc, machine.as_deref(), &cwd).await {
+    match collect(hc, machine.as_deref(), &cwd, lang).await {
         Ok((listing, files, truncated)) => {
             let repo = listing.root.rsplit('/').find(|part| !part.is_empty()).unwrap_or("/").to_owned();
             let listing = Listing { machine, ..listing };
@@ -115,26 +116,26 @@ pub async fn list(hc: &str, view: &watch::Receiver<CoreView>, listed: &Listed, r
     }
 }
 
-async fn collect(hc: &str, machine: Option<&str>, cwd: &str) -> Result<(Listing, Vec<FileChange>, bool), Failure> {
-    let top = git(hc, machine, cwd, &["rev-parse", "--show-toplevel"]).await?;
+async fn collect(hc: &str, machine: Option<&str>, cwd: &str, lang: Lang) -> Result<(Listing, Vec<FileChange>, bool), Failure> {
+    let top = git(hc, machine, cwd, &["rev-parse", "--show-toplevel"], lang).await?;
     if top.code != Some(0) {
-        return Err(Failure::new("not_git", "不是 git 仓库"));
+        return Err(Failure::new("not_git", lang.pick("不是 git 仓库", "Not a git repository")));
     }
     let root = text(&top);
-    let head = git(hc, machine, &root, &["rev-parse", "-q", "--verify", "HEAD"]).await?;
+    let head = git(hc, machine, &root, &["rev-parse", "-q", "--verify", "HEAD"], lang).await?;
     let base = if head.code == Some(0) { text(&head) } else { EMPTY_TREE.to_owned() };
 
     let status_args: Vec<&str> = DIFF.iter().copied().chain([base.as_str(), "-z", "-M", "--name-status"]).collect();
     let numstat_args: Vec<&str> = DIFF.iter().copied().chain([base.as_str(), "-z", "-M", "--numstat"]).collect();
     let (status, numstat, untracked) = tokio::join!(
-        git(hc, machine, &root, &status_args),
-        git(hc, machine, &root, &numstat_args),
-        git(hc, machine, &root, &["ls-files", "-o", "--exclude-standard", "-z"]),
+        git(hc, machine, &root, &status_args, lang),
+        git(hc, machine, &root, &numstat_args, lang),
+        git(hc, machine, &root, &["ls-files", "-o", "--exclude-standard", "-z"], lang),
     );
     let (status, numstat, untracked) = (status?, numstat?, untracked?);
     for output in [&status, &numstat, &untracked] {
         if output.code != Some(0) {
-            return Err(Failure::new("unavailable", "git 没能列出改动"));
+            return Err(Failure::new("unavailable", lang.pick("git 没能列出改动", "git couldn't list the changes")));
         }
     }
     let mut files = tracked(&status.stdout, &numstat.stdout);
@@ -147,7 +148,7 @@ async fn collect(hc: &str, machine: Option<&str>, cwd: &str) -> Result<(Listing,
     }
     if !names.is_empty() {
         let input = names.join(&0u8);
-        let counted = exec(hc, machine, &root, Program::Line(COUNT_LINES), Some(&input), GIT_TIMEOUT_SECS).await?;
+        let counted = exec(hc, machine, &root, Program::Line(COUNT_LINES), Some(&input), GIT_TIMEOUT_SECS, lang).await?;
         cut |= counted.cut;
         files.extend(untracked_files(&counted.stdout));
     }
@@ -229,17 +230,17 @@ fn untracked_files(output: &[u8]) -> Vec<FileChange> {
         .collect()
 }
 
-pub async fn diff(hc: &str, listed: &Listed, request: DiffRequest) -> Response {
+pub async fn diff(hc: &str, listed: &Listed, request: DiffRequest, lang: Lang) -> Response {
     let failed = |failure: Failure| Response::ChangeDiffFailed { id: request.id.clone(), kind: failure.kind, message: failure.message };
     let Some(listing) = listed.0.lock().unwrap().get(&request.session).cloned() else {
-        return failed(Failure::new("changed", "改动已变化，请刷新"));
+        return failed(Failure::new("changed", lang.pick("改动已变化，请刷新", "The changes have moved on; refresh them")));
     };
     let Some(file) = listing.files.get(&request.path) else {
-        return failed(Failure::new("changed", "改动已变化，请刷新"));
+        return failed(Failure::new("changed", lang.pick("改动已变化，请刷新", "The changes have moved on; refresh them")));
     };
     let output = if file.status == "?" {
         let args: Vec<&str> = DIFF.iter().copied().chain(["--no-index", "--", "/dev/null", file.path.as_str()]).collect();
-        git(hc, listing.machine.as_deref(), &listing.root, &args).await
+        git(hc, listing.machine.as_deref(), &listing.root, &args, lang).await
     } else {
         let mut specs = vec![format!(":(top,literal){}", file.path)];
         if let Some(old) = &file.old_path {
@@ -251,7 +252,7 @@ pub async fn diff(hc: &str, listed: &Listed, request: DiffRequest) -> Response {
             .chain([listing.base.as_str(), "-M", "--"])
             .chain(specs.iter().map(String::as_str))
             .collect();
-        git(hc, listing.machine.as_deref(), &listing.root, &args).await
+        git(hc, listing.machine.as_deref(), &listing.root, &args, lang).await
     };
     match output {
         // --no-index exits 1 when the files differ, which they do.
@@ -259,7 +260,7 @@ pub async fn diff(hc: &str, listed: &Listed, request: DiffRequest) -> Response {
             let (patch, cut) = clip(&String::from_utf8_lossy(&output.stdout));
             Response::ChangeDiff { id: request.id, patch, truncated: cut || output.cut }
         }
-        Ok(_) => failed(Failure::new("unavailable", "git 没能读出这个文件的改动")),
+        Ok(_) => failed(Failure::new("unavailable", lang.pick("git 没能读出这个文件的改动", "git couldn't read this file's changes"))),
         Err(failure) => failed(failure),
     }
 }
