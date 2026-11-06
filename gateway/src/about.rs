@@ -6,6 +6,7 @@
 use crate::changes;
 use crate::conversation::Conversation;
 use crate::core::Client;
+use crate::exec::{Failure, Output};
 use crate::herdr::CoreView;
 use crate::lang::Lang;
 use crate::session::Session;
@@ -20,6 +21,7 @@ use tokio::sync::watch;
 /// How often a working Agent's transcript is read again.
 const TICK: Duration = Duration::from_secs(2);
 /// When git couldn't be asked (machine away, timeout), ask again after this.
+/// A folder that is gone isn't asked again while a session is still in it.
 const RETRY: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -69,6 +71,8 @@ pub async fn run(hc: Arc<str>, mut view: watch::Receiver<CoreView>, about: watch
     let mut client: Option<Client> = None;
     loop {
         let sessions = view.borrow_and_update().sessions.clone();
+        // Forget folders no session is in, so one that comes back is asked again.
+        repos.retain(|(machine, cwd), _| sessions.iter().any(|s| s.machine == *machine && s.cwd == *cwd));
         let mut next = About::default();
         for session in sessions.iter().filter(|s| !s.cwd.is_empty()) {
             let key = (session.machine.clone(), session.cwd.clone());
@@ -123,6 +127,7 @@ pub async fn run(hc: Arc<str>, mut view: watch::Receiver<CoreView>, about: watch
     }
 }
 
+#[derive(Debug, PartialEq)]
 enum Lookup {
     Found(Option<Repo>),
     Failed(Instant),
@@ -136,14 +141,23 @@ impl Lookup {
 
 async fn lookup(hc: &str, machine: Option<&str>, cwd: &str) -> Lookup {
     // Its failures only reach the log, which is in English.
-    match changes::git(hc, machine, cwd, &["rev-parse", "--show-toplevel", "--git-common-dir"], Lang::English).await {
+    let result = changes::git(hc, machine, cwd, &["rev-parse", "--show-toplevel", "--git-common-dir"], Lang::English).await;
+    if let Err(failure) = &result {
+        eprintln!("about: git in {cwd}: {}", failure.message);
+    }
+    settle(cwd, result, Instant::now())
+}
+
+/// What git's answer in `cwd` means for the home page.
+fn settle(cwd: &str, result: Result<Output, Failure>, now: Instant) -> Lookup {
+    match result {
         Ok(output) if output.code == Some(0) => Lookup::Found(parse_repo(cwd, &String::from_utf8_lossy(&output.stdout))),
         // Not in a repository, or a bare one.
         Ok(_) => Lookup::Found(None),
-        Err(failure) => {
-            eprintln!("about: git in {cwd}: {}", failure.message);
-            Lookup::Failed(Instant::now())
-        }
+        // The folder is gone (a removed worktree) or git can't start there:
+        // asking again won't help until the session moves.
+        Err(failure) if failure.kind == "spawn_failed" => Lookup::Found(None),
+        Err(_) => Lookup::Failed(now),
     }
 }
 
@@ -245,6 +259,20 @@ mod tests {
         assert_eq!(parse_repo("/w/x/main", "/w/x/main\n/w/x.git\n"), repo("x", Some("main")), "a bare repository's worktree");
         assert_eq!(parse_repo("/w/app/lib", "/w/app/lib\n/w/app/.git/modules/lib\n"), repo("lib", None), "a submodule");
         assert_eq!(parse_repo("/w", ""), None);
+    }
+
+    #[test]
+    fn gone_folders_are_not_asked_again() {
+        let now = Instant::now();
+        let gone = Failure::new("spawn_failed", "cannot start folder /w/x: No such file or directory (os error 2)");
+        assert_eq!(settle("/w/x", Err(gone), now), Lookup::Found(None));
+        assert!(!Lookup::Found(None).stale());
+        let away = settle("/w/x", Err(Failure::new("unreachable", "no answer")), now);
+        assert_eq!(away, Lookup::Failed(now), "a machine that is away is asked again later");
+        let found = Output { code: Some(0), stdout: b"/w/app\n.git\n".to_vec(), cut: false };
+        assert_eq!(settle("/w/app", Ok(found), now), Lookup::Found(repo("app", None)));
+        let outside = Output { code: Some(128), stdout: Vec::new(), cut: false };
+        assert_eq!(settle("/w", Ok(outside), now), Lookup::Found(None));
     }
 
     #[test]
