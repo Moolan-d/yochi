@@ -73,6 +73,17 @@ struct QueuedMessage: Codable, Equatable {
         case ask
     }
 
+    /// A slash command such as `/model` or `/effort high`: the Agent's own
+    /// command, which must reach it on its own rather than inside a queued
+    /// message. A path such as `/Users/me/a.txt` is not one.
+    static func isCommand(_ text: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.first == "/", !text.contains(where: \.isNewline) else { return false }
+        let name = text.dropFirst().prefix { !$0.isWhitespace }
+        guard let first = name.first, first.isASCII, first.isLowercase else { return false }
+        return name.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || "-_:".contains($0)) }
+    }
+
     /// What to do with it now. A turn that ends waiting on the user (blocked)
     /// keeps it queued until the dialog is handled.
     func release(state: String?, turn now: UInt64) -> Release {

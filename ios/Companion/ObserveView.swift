@@ -82,8 +82,10 @@ struct ObserveView: View {
     }
 
     /// While the Agent works a message waits on the phone for the turn to end.
+    /// A slash command goes straight to the Agent, which runs or queues it on
+    /// its own, instead of joining the queued text (#4).
     private var queuesMessage: Bool {
-        isConversation && currentSession.status?.state == "working"
+        isConversation && currentSession.status?.state == "working" && !QueuedMessage.isCommand(draft)
     }
 
     private var canSend: Bool {
