@@ -1217,7 +1217,7 @@ final class CompanionUITests: XCTestCase {
 
     /// The DEBUG long sample: forty long turns, then a reply every four
     /// seconds. Back to latest from far up lands on the real end, never past
-    /// it on a blank page, and new replies keep the list at the end.
+    /// it on a blank page, and a new long reply stops with its start at the top.
     @MainActor
     func testConversationSampleBackToLatest() throws {
         let app = Self.chineseApp()
@@ -1227,9 +1227,11 @@ final class CompanionUITests: XCTestCase {
         XCTAssert(conversation.waitForExistence(timeout: 10), "no conversation")
         let latest = app.buttons["scrollToLatest"]
 
+        // The frame first: a reply part-way through its reveal may have none
+        // to test hits on.
         func showsText() -> Bool {
             conversation.staticTexts.allElementsBoundByIndex.contains {
-                $0.isHittable && conversation.frame.intersects($0.frame)
+                !$0.frame.isEmpty && conversation.frame.intersects($0.frame) && $0.isHittable
             }
         }
 
@@ -1245,10 +1247,22 @@ final class CompanionUITests: XCTestCase {
             snapshot("latest \(round)")
         }
 
-        // The last reply arrives and is revealed with the list at its end.
-        XCTAssert(text(app, containing: "第 46 段回复").waitForExistence(timeout: 30), "the last reply never came")
-        RunLoop.current.run(until: .now.addingTimeInterval(3))
-        XCTAssertFalse(latest.exists, "left behind by an arriving reply")
+        // A long reply that arrives is read from its start: the list stops
+        // with its heading under the bar instead of following it to its end.
+        if latest.exists {
+            latest.tap()
+            XCTAssert(latest.waitForNonExistence(timeout: 3), "back-to-latest did not reach the end")
+        }
+        XCTAssert(latest.waitForExistence(timeout: 12), "followed an arriving reply to its end")
+        RunLoop.current.run(until: .now.addingTimeInterval(0.5))
+        let bar = app.navigationBars.firstMatch.frame.maxY
+        let headings = conversation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "段回复"))
+            .allElementsBoundByIndex.filter { !$0.frame.isEmpty && $0.frame.minY >= bar - 20 && $0.isHittable }
+        let top = headings.map(\.frame.minY).min() ?? .infinity
+        XCTAssert(top - bar < 60, "the arriving reply's start is not at the top (\(top) below a bar ending at \(bar))")
+        snapshot("reply from its start")
+        latest.tap()
+        XCTAssert(latest.waitForNonExistence(timeout: 3), "back-to-latest did not reach the end")
         XCTAssert(showsText(), "blank after replies arrived")
         snapshot("latest after replies")
     }

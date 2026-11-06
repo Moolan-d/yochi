@@ -28,6 +28,10 @@ struct ConversationPane: View {
     @State private var viewport = CGFloat.zero
     /// Items arrived while the reader was further back.
     @State private var unseen = false
+    /// A new reply the list is following in: once its start reaches the top
+    /// of the screen the list stops there, so a long reply reads from its
+    /// beginning instead of its end (#3).
+    @State private var arriving: String?
 
     /// When the page opened, for the time to its first items.
     @State private var opened = ContinuousClock.now
@@ -83,6 +87,9 @@ struct ConversationPane: View {
                 ForEach(feed.items) { item in
                     ConversationRow(item: item, latestTodos: item.id == latestTodos,
                                     arrival: feed.arrivals[item.id])
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { top in
+                            if item.id == arriving { arrived(top: top) }
+                        }
                 }
                 if working {
                     Label {
@@ -131,15 +138,23 @@ struct ConversationPane: View {
             phase = new
             // The reader's finger decides; when it lets go at the end, the
             // list follows again.
-            if new == .interacting { pinned = false }
+            if new == .interacting {
+                pinned = false
+                arriving = nil
+            }
             if new == .idle {
                 if atBottom { pinned = true }
                 // An animated scroll aimed by estimates may end off the end.
                 settle(off: offEnd)
             }
         }
-        .onChange(of: feed.items) { _, _ in
-            if pinned { follow() } else { unseen = true }
+        .onChange(of: feed.items) { old, new in
+            if pinned {
+                if arriving == nil { arriving = newReply(old: old, new: new) }
+                follow()
+            } else {
+                unseen = true
+            }
         }
         .onChange(of: working) { _, _ in follow() }
         .onChange(of: keyboardShown) { _, _ in followAfterKeyboard() }
@@ -184,6 +199,34 @@ struct ConversationPane: View {
         .buttonStyle(.plain)
         .accessibilityLabel(unseen ? "Jump to Latest, new messages" : "Jump to Latest")
         .accessibilityIdentifier("scrollToLatest")
+    }
+
+    /// The first reply that just came in, not one that grew or a whole
+    /// conversation sent again.
+    private func newReply(old: [ConversationItem], new: [ConversationItem]) -> String? {
+        let before = Set(old.map(\.id))
+        return new.first { item in
+            item.kind == .agent && !before.contains(item.id) && feed.arrivals[item.id].map { $0.previous == nil } == true
+        }?.id
+    }
+
+    /// Where the arriving reply's start is now, from the top of the scroll
+    /// view. At the top of what the reader sees, the list stops following.
+    private func arrived(top: CGFloat) {
+        guard pinned, let id = arriving else { return }
+        // Shown whole and its start still in view: a short reply. Later rows
+        // pushing it up are followed as usual.
+        if let at = feed.arrivals[id]?.at, Date.now.timeIntervalSince(at) > 3 {
+            arriving = nil
+            return
+        }
+        // The row's top counts from the top of what the reader sees, below the bar.
+        guard top <= 8 else { return }
+        pinned = false
+        arriving = nil
+        unseen = true
+        // A follow that jumped went past the start: back to it.
+        if top < 0 { position.scrollTo(id: id, anchor: .top) }
     }
 
     /// Pinned and still, the button stays away while the content grows.

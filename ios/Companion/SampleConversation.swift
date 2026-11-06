@@ -45,7 +45,7 @@ struct SampleConversationView: View {
             items.append(["kind": "agent", "id": "a\(turn)", "text": Self.reply(turn, paragraphs: 3 + turn % 6)])
         }
         apply(["type": "conversation", "supported": true, "items": items])
-        for turn in 40..<46 {
+        for turn in 40..<100 {
             try? await Task.sleep(for: .seconds(4))
             apply(["type": "items", "items": [["kind": "agent", "id": "a\(turn)", "text": Self.reply(turn, paragraphs: 8)]]])
         }
