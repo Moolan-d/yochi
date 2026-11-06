@@ -122,6 +122,9 @@ pub struct Status {
     pub at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Unix seconds when the current connection was made, while connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
 }
 
 impl Status {
@@ -136,8 +139,8 @@ impl Status {
         serde_json::from_slice(&std::fs::read(Self::path(dir)).ok()?).ok()
     }
 
-    fn write(dir: &Path, url: &str, connected: bool, error: Option<String>) {
-        let status = Self { url: url.to_owned(), connected, at: crate::devices::now(), error };
+    fn write(dir: &Path, url: &str, since: Option<u64>, error: Option<String>) {
+        let status = Self { url: url.to_owned(), connected: since.is_some(), at: crate::devices::now(), error, since };
         let tmp = dir.join("relay-status.json.tmp");
         if let Ok(bytes) = serde_json::to_vec(&status)
             && std::fs::write(&tmp, bytes).is_ok()
@@ -166,6 +169,8 @@ pub fn install_tls() {
 pub async fn run(relay: Arc<Relay>) {
     install_tls();
     let dir = relay.store.dir().to_owned();
+    // The log has no other timestamps; this tells a restart from a redial.
+    eprintln!("{} relay: Gateway {} started", stamp(), std::process::id());
     let mut backoff = Duration::from_secs(1);
     loop {
         let config = match Config::load(&dir) {
@@ -182,13 +187,15 @@ pub async fn run(relay: Arc<Relay>) {
         };
         let started = Instant::now();
         match connect(&relay, &config, &dir).await {
-            Ok(()) => {
-                eprintln!("relay: disconnected from {}", config.url);
-                Status::write(&dir, &config.url, false, None);
+            Ok(Session { lasted, ended }) => {
+                let why = ended.to_string();
+                eprintln!("{} relay: disconnected from {} after {}: {why}", stamp(), config.url, lasted_text(lasted));
+                let error = (!matches!(ended, Ended::ConfigChanged)).then_some(why);
+                Status::write(&dir, &config.url, None, error);
             }
             Err(err) => {
-                eprintln!("relay: {}: {err:#}", config.url);
-                Status::write(&dir, &config.url, false, Some(format!("{err:#}")));
+                eprintln!("{} relay: {}: {err:#}", stamp(), config.url);
+                Status::write(&dir, &config.url, None, Some(format!("{err:#}")));
             }
         }
         if started.elapsed() > Duration::from_secs(60) {
@@ -199,7 +206,99 @@ pub async fn run(relay: Arc<Relay>) {
     }
 }
 
-/// `[kind][idLen][id][payload]`
+/// A registered connection that has ended.
+struct Session {
+    lasted: Duration,
+    ended: Ended,
+}
+
+/// Why a registered connection ended, told apart so the log says which hop
+/// dropped it (#1).
+#[derive(Debug, PartialEq)]
+enum Ended {
+    /// The relay sent a close frame: a redeploy, a newer Gateway, or the
+    /// relay's own limits.
+    Closed { code: u16, reason: String },
+    /// The socket went away without a close frame: the network, or the relay
+    /// process restarting.
+    Reset,
+    /// TLS ended without close_notify: something on the way cut the TCP connection.
+    TlsEof,
+    /// Nothing at all came back, not even pongs.
+    Silent { for_secs: u64 },
+    ConfigChanged,
+    Other(String),
+}
+
+impl std::fmt::Display for Ended {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed { code, reason } if reason.is_empty() => write!(f, "the relay closed it ({code})"),
+            Self::Closed { code, reason } => write!(f, "the relay closed it ({code} {reason})"),
+            Self::Reset => f.write_str("reset without a close frame"),
+            Self::TlsEof => f.write_str("TLS ended without close_notify"),
+            Self::Silent { for_secs } => write!(f, "nothing heard from the relay for {for_secs} s"),
+            Self::ConfigChanged => f.write_str("configuration changed"),
+            Self::Other(error) => f.write_str(error),
+        }
+    }
+}
+
+impl Ended {
+    fn from_close(frame: Option<CloseFrame>) -> Self {
+        match frame {
+            Some(CloseFrame { code, reason }) => Self::Closed { code: code.into(), reason: reason.to_string() },
+            None => Self::Closed { code: 1005, reason: String::new() },
+        }
+    }
+
+    fn from_error(error: &tungstenite::Error) -> Self {
+        use tungstenite::error::ProtocolError;
+        match error {
+            tungstenite::Error::Protocol(ProtocolError::ResetWithoutClosingHandshake) | tungstenite::Error::ConnectionClosed => {
+                Self::Reset
+            }
+            tungstenite::Error::Io(io) if io.kind() == std::io::ErrorKind::UnexpectedEof => Self::TlsEof,
+            tungstenite::Error::Io(io)
+                if matches!(io.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionAborted) =>
+            {
+                Self::Reset
+            }
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+/// `1h02m`, `14m05s`, `9s`.
+fn lasted_text(lasted: Duration) -> String {
+    let secs = lasted.as_secs();
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m{:02}s", secs / 60, secs % 60),
+        _ => format!("{}h{:02}m", secs / 3600, secs / 60 % 60),
+    }
+}
+
+/// Now, in UTC, for the log: `2026-11-05T21:49:03Z`.
+fn stamp() -> String {
+    utc(crate::devices::now())
+}
+
+fn utc(secs: u64) -> String {
+    // Days to civil date (Howard Hinnant's algorithm).
+    let days = (secs / 86400) as i64 + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let rest = secs % 86400;
+    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", rest / 3600, rest / 60 % 60, rest % 60)
+}
+
 fn encode_frame(id: &str, payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(2 + id.len() + payload.len());
     frame.push(DATA);
@@ -237,7 +336,7 @@ enum Control {
     Other,
 }
 
-async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<()> {
+async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<Session> {
     let (socket, _) = tokio::time::timeout(Duration::from_secs(15), tokio_tungstenite::connect_async(config.gateway_url()))
         .await
         .context("timed out connecting")??;
@@ -254,8 +353,10 @@ async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<()> 
         Ok(Some(Err(err))) => return Err(err.into()),
         _ => bail!("the relay did not answer the registration"),
     }
-    eprintln!("relay: connected to {}", config.url);
-    Status::write(dir, &config.url, true, None);
+    eprintln!("{} relay: connected to {}", stamp(), config.url);
+    let since = crate::devices::now();
+    let connected = Instant::now();
+    Status::write(dir, &config.url, Some(since), None);
 
     let (outgoing, mut to_relay) = mpsc::channel::<Message>(256);
     let writer = tokio::spawn(async move {
@@ -271,7 +372,7 @@ async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<()> 
     let mut last_heard = Instant::now();
     let mut ping = tokio::time::interval(PING_EVERY);
     let mut check = tokio::time::interval(CONFIG_CHECK);
-    let result = loop {
+    let ended = loop {
         tokio::select! {
             message = incoming.next() => {
                 last_heard = Instant::now();
@@ -304,8 +405,9 @@ async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<()> 
                             streams.remove(id);
                         }
                     }
-                    Some(Ok(Message::Close(_))) | None => break Ok(()),
-                    Some(Err(err)) => break Err(err.into()),
+                    Some(Ok(Message::Close(frame))) => break Ended::from_close(frame),
+                    None => break Ended::Reset,
+                    Some(Err(err)) => break Ended::from_error(&err),
                     Some(Ok(_)) => {}
                 }
             }
@@ -314,15 +416,14 @@ async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<()> 
             }
             _ = ping.tick() => {
                 if last_heard.elapsed() > SILENT_FOR {
-                    break Err(anyhow!("the relay stopped answering"));
+                    break Ended::Silent { for_secs: last_heard.elapsed().as_secs() };
                 }
                 let _ = outgoing.send(Message::Ping(Vec::new().into())).await;
-                Status::write(dir, &config.url, true, None);
+                Status::write(dir, &config.url, Some(since), None);
             }
             _ = check.tick() => {
                 if Config::load(dir).ok().flatten().as_ref() != Some(config) {
-                    eprintln!("relay: configuration changed");
-                    break Ok(());
+                    break Ended::ConfigChanged;
                 }
             }
         }
@@ -330,7 +431,7 @@ async fn connect(relay: &Arc<Relay>, config: &Config, dir: &Path) -> Result<()> 
     drop(streams);
     drop(outgoing);
     writer.abort();
-    result
+    Ok(Session { lasted: connected.elapsed(), ended })
 }
 
 /// Who a stream's handshake proved the phone to be.
@@ -555,6 +656,31 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn disconnects_say_which_hop_dropped() {
+        use tungstenite::error::ProtocolError;
+        let reset = tungstenite::Error::Protocol(ProtocolError::ResetWithoutClosingHandshake);
+        assert_eq!(Ended::from_error(&reset), Ended::Reset);
+        let eof = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "peer closed connection without sending TLS close_notify");
+        assert_eq!(Ended::from_error(&tungstenite::Error::Io(eof)), Ended::TlsEof);
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
+        assert_eq!(Ended::from_error(&tungstenite::Error::Io(refused)), Ended::Reset);
+        let closed = Ended::from_close(Some(CloseFrame { code: 1012.into(), reason: "Service Restart".into() }));
+        assert_eq!(closed.to_string(), "the relay closed it (1012 Service Restart)");
+        assert_eq!(Ended::from_close(None).to_string(), "the relay closed it (1005)");
+        assert_eq!(Ended::Silent { for_secs: 61 }.to_string(), "nothing heard from the relay for 61 s");
+    }
+
+    #[test]
+    fn log_times() {
+        assert_eq!(utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(utc(1_762_379_343), "2025-11-05T21:49:03Z");
+        assert_eq!(utc(1_709_164_800), "2024-02-29T00:00:00Z", "a leap day");
+        assert_eq!(lasted_text(Duration::from_secs(9)), "9s");
+        assert_eq!(lasted_text(Duration::from_secs(845)), "14m05s");
+        assert_eq!(lasted_text(Duration::from_secs(3720)), "1h02m");
+    }
 
     #[test]
     fn frames_round_trip() {

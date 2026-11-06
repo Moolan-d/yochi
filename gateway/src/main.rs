@@ -395,9 +395,12 @@ fn relay_command(store: &Store, action: RelayAction) -> Result<()> {
             println!("Relay      {}", config.url);
             println!("Key        {}", if config.key.is_some() { "set" } else { "none" });
             match relay::Status::load(dir) {
-                _ if relay_connected(dir, &config) => println!("Connected  yes"),
+                Some(status) if relay_connected(dir, &config) => match status.since {
+                    Some(since) => println!("Connected  yes, for {}", lasted(devices::now().saturating_sub(since))),
+                    None => println!("Connected  yes"),
+                },
                 Some(status) if status.url == config.url && !status.connected => {
-                    println!("Connected  no, {} ago{}", ago(devices::now().saturating_sub(status.at)), status.error.map(|e| format!(": {e}")).unwrap_or_default())
+                    println!("Connected  no, {}{}", ago(devices::now().saturating_sub(status.at)), status.error.map(|e| format!(": {e}")).unwrap_or_default())
                 }
                 _ => println!("Connected  unknown; is the Gateway running?"),
             }
@@ -537,6 +540,15 @@ fn list(devices: &[Device]) {
     println!("{:<8}  {:<width$}  PAIRED", "ID", "NAME");
     for device in devices {
         println!("{:<8}  {:<width$}  {}", device.id, device.name, ago(devices::now().saturating_sub(device.paired_at)));
+    }
+}
+
+/// How long something has gone on: `40 s`, `14 min`, `3 h 05 min`.
+fn lasted(seconds: u64) -> String {
+    match seconds {
+        0..60 => format!("{seconds} s"),
+        60..3600 => format!("{} min", seconds / 60),
+        _ => format!("{} h {:02} min", seconds / 3600, seconds / 60 % 60),
     }
 }
 
