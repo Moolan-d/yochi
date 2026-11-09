@@ -7,7 +7,10 @@
 //! The app holds `/v0/ws` open only while it is in the foreground, so an open
 //! one means someone is looking at Yochi already and nothing is sent.
 
+use crate::conversation::Conversation;
+use crate::core::Client;
 use crate::devices::{hex, random_bytes};
+use crate::transcript::{self, Tail};
 use crate::herdr::CoreView;
 use crate::lang::Lang;
 use crate::session::Session;
@@ -30,6 +33,12 @@ use tokio::time::Instant;
 /// usually answered or looked by then, and a blip doesn't buzz the phone.
 const DELAY: Duration = Duration::from_secs(10);
 const SEND_WITHIN: Duration = Duration::from_secs(20);
+/// How long reading the Agent's reply may hold a notification up.
+const READ_WITHIN: Duration = Duration::from_secs(5);
+/// A finished turn's reply is at the end; this many lines reach it.
+const REPLY_LINES: usize = 200;
+/// Longer first sentences are cut, in characters.
+const SENTENCE: usize = 120;
 pub const DEFAULT_SERVER: &str = "https://api.day.app";
 
 /// `push.json` in the state directory.
@@ -212,8 +221,9 @@ fn still(kind: Kind, session: &Session) -> bool {
     }
 }
 
-/// The notification's fields, in Bark's names.
-fn message(kind: Kind, session: &Session, lang: Lang) -> Value {
+/// The notification's fields, in Bark's names. `reply` is what the Agent
+/// said last, for a finished turn.
+fn message(kind: Kind, session: &Session, lang: Lang, reply: Option<String>) -> Value {
     let label = match kind {
         Kind::NeedsYou => lang.pick("需要你处理", "Needs you"),
         Kind::Failed => lang.pick("出错了", "Ran into an error"),
@@ -224,7 +234,12 @@ fn message(kind: Kind, session: &Session, lang: Lang) -> Value {
         Kind::Failed => lang.pick("停在了一个错误上", "Stopped on an error"),
         Kind::Done => lang.pick("这一轮做完了", "Finished its turn"),
     };
-    let body = session.status.as_ref().and_then(|status| status.message.clone()).unwrap_or_else(|| fallback.to_owned());
+    let said = || session.status.as_ref().and_then(|status| status.message.clone());
+    let body = match kind {
+        Kind::Done => reply.or_else(said),
+        _ => said(),
+    }
+    .unwrap_or_else(|| fallback.to_owned());
     let title = match &session.machine {
         Some(machine) => format!("{} · {machine}", session.title),
         None => session.title.clone(),
@@ -236,6 +251,66 @@ fn message(kind: Kind, session: &Session, lang: Lang) -> Value {
         "group": session.title,
         "url": format!("yochi://session?id={}", query_value(&session.id)),
         "level": if kind == Kind::Done { "active" } else { "timeSensitive" },
+    })
+}
+
+/// The first sentence of a Claude Code session's newest reply, read through
+/// the core like the conversation page reads it. None for other programs,
+/// or when the transcript can't be read in time.
+async fn last_reply(hc: &str, session: &Session) -> Option<String> {
+    let read = async {
+        let mut client = Client::connect(hc).await.ok()?;
+        let machine = session.machine.as_deref();
+        let located = transcript::locate(&mut client, machine, session.pid?).await.ok()??;
+        let lines = Tail::new(machine, &located).start_last(&mut client, REPLY_LINES).await.ok()?;
+        let mut conversation = Conversation::default();
+        conversation.apply(lines.iter().map(String::as_str));
+        first_sentence(conversation.last_reply()?)
+    };
+    tokio::time::timeout(READ_WITHIN, read).await.ok().flatten()
+}
+
+/// The first sentence of Markdown, as plain text: the first line with words
+/// outside a code block, without its list, heading or emphasis marks, up to
+/// the end of its first sentence.
+fn first_sentence(markdown: &str) -> Option<String> {
+    let mut fenced = false;
+    let line = markdown.lines().find_map(|line| {
+        let line = line.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            fenced = !fenced;
+            return None;
+        }
+        if fenced || line.starts_with('|') {
+            return None;
+        }
+        let line = line.trim_start_matches(|c: char| matches!(c, '#' | '>' | '-' | '*' | '+') || c.is_whitespace());
+        let line = match line.split_once(". ") {
+            Some((number, rest)) if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) => rest,
+            _ => line,
+        };
+        let line = line.replace("**", "").replace("__", "").replace('`', "");
+        let line = line.trim();
+        (line.chars().any(char::is_alphanumeric)).then(|| line.to_owned())
+    })?;
+    let mut chars = line.char_indices().peekable();
+    let mut end = line.len();
+    while let Some((at, c)) = chars.next() {
+        let after = at + c.len_utf8();
+        let ends = match c {
+            '。' | '！' | '？' => true,
+            '.' | '!' | '?' => chars.peek().is_none_or(|(_, next)| next.is_whitespace()),
+            _ => false,
+        };
+        if ends {
+            end = after;
+            break;
+        }
+    }
+    let sentence = &line[..end];
+    Some(match sentence.char_indices().nth(SENTENCE) {
+        Some((cut, _)) => format!("{}…", sentence[..cut].trim_end()),
+        None => sentence.to_owned(),
     })
 }
 
@@ -342,7 +417,7 @@ pub fn test_message(lang: Lang) -> Value {
 /// Watches the core's sessions and sends a notification when one needs you
 /// or finishes, if it still does after [`DELAY`] and no phone has Yochi open.
 /// `push.json` is read each time, so `yochi push` takes effect at once.
-pub async fn run(dir: PathBuf, mut view: watch::Receiver<CoreView>, phones: Arc<Phones>) {
+pub async fn run(hc: Arc<str>, dir: PathBuf, mut view: watch::Receiver<CoreView>, phones: Arc<Phones>) {
     let mut last = HashMap::new();
     let mut pending: HashMap<String, (Kind, Instant)> = HashMap::new();
     loop {
@@ -366,10 +441,14 @@ pub async fn run(dir: PathBuf, mut view: watch::Receiver<CoreView>, phones: Arc<
                     continue;
                 }
             };
-            let fields = message(kind, session, phones.lang());
-            let notification = notification_id(&session.id);
+            let (session, lang, hc) = (session.clone(), phones.lang(), hc.clone());
             tokio::spawn(async move {
-                if let Err(error) = send(&config, fields, Some(&notification)).await {
+                let reply = match kind {
+                    Kind::Done => last_reply(&hc, &session).await,
+                    _ => None,
+                };
+                let fields = message(kind, &session, lang, reply);
+                if let Err(error) = send(&config, fields, Some(&notification_id(&session.id))).await {
                     eprintln!("Notification not sent: {error:#}");
                 }
             });
@@ -443,17 +522,36 @@ mod tests {
         let mut blocked = session("vps/t1", "blocked", 1);
         blocked.machine = Some("vps".into());
         blocked.status.as_mut().unwrap().message = Some("Allow Bash: cargo test?".into());
-        let fields = message(Kind::NeedsYou, &blocked, Lang::English);
+        let fields = message(Kind::NeedsYou, &blocked, Lang::English, Some("not for a question".into()));
         assert_eq!(fields["title"], "fix tests · vps");
         assert_eq!(fields["subtitle"], "Needs you");
         assert_eq!(fields["body"], "Allow Bash: cargo test?");
         assert_eq!(fields["url"], "yochi://session?id=vps/t1");
         assert_eq!(fields["level"], "timeSensitive");
-        let done = message(Kind::Done, &session("t 2&x", "done", 2), Lang::Chinese);
+        let done = message(Kind::Done, &session("t 2&x", "done", 2), Lang::Chinese, None);
         assert_eq!(done["subtitle"], "完成了");
         assert_eq!(done["body"], "这一轮做完了");
         assert_eq!(done["url"], "yochi://session?id=t%202%26x");
         assert_eq!(done["level"], "active");
+        let replied = message(Kind::Done, &session("t2", "done", 2), Lang::English, Some("Tests pass.".into()));
+        assert_eq!(replied["body"], "Tests pass.");
+    }
+
+    #[test]
+    fn a_reply_reads_as_its_first_sentence() {
+        let first = |text| first_sentence(text);
+        assert_eq!(first("Done. All 117 tests pass."), Some("Done.".into()));
+        assert_eq!(first("Fixed it in v1.2 of the parser! Then more."), Some("Fixed it in v1.2 of the parser!".into()));
+        assert_eq!(first("改好了。测试都通过了。"), Some("改好了。".into()));
+        assert_eq!(first("## Summary\n\nMore here."), Some("Summary".into()));
+        assert_eq!(first("**Bold** start: `cargo test` passes\nsecond line"), Some("Bold start: cargo test passes".into()));
+        assert_eq!(first("```sh\ncargo test\n```\n- 1. First point. Second."), Some("First point.".into()));
+        assert_eq!(first("| a | b |\n---\nok"), Some("ok".into()));
+        assert_eq!(first("hi"), Some("hi".into()));
+        assert_eq!(first("```\nonly code\n```"), None);
+        assert_eq!(first("---"), None);
+        let long = first(&"word ".repeat(60)).unwrap();
+        assert!(long.ends_with('…') && long.chars().count() <= SENTENCE + 1, "{long}");
     }
 
     #[test]

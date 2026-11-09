@@ -208,6 +208,16 @@ impl Conversation {
         touched.iter().filter_map(|id| self.index.get(id).map(|&i| self.items[i].clone())).collect()
     }
 
+    /// The Agent's newest reply in the latest turn: what it said last,
+    /// unless the user has spoken since.
+    pub fn last_reply(&self) -> Option<&str> {
+        self.items.iter().rev().find_map(|item| match item {
+            Item::Agent { text, .. } => Some(Some(text.as_str())),
+            Item::User { .. } => Some(None),
+            _ => None,
+        })?
+    }
+
     /// The to-do in progress on the newest list, with how far the list is.
     pub fn todo_now(&self) -> Option<crate::about::TodoNow> {
         let current = self.todos.iter().find(|todo| todo.status == "in_progress")?;
@@ -854,6 +864,17 @@ mod tests {
         assert!(matches!(&changed[1], Item::Agent { text, .. } if text == "You picked **Blue**."));
         assert_eq!(conversation.items().len(), 5, "the answer replaced the tool call in place");
         assert_eq!(conversation.pending(Some(&blocked("permission"))).unwrap().tool, None);
+    }
+
+    #[test]
+    fn the_last_reply_is_the_latest_turns() {
+        let mut conversation = Conversation::default();
+        conversation.apply(SAMPLE.lines());
+        assert_eq!(conversation.last_reply(), None, "waiting on a question after the user spoke");
+        conversation.apply(ANSWER.lines());
+        assert_eq!(conversation.last_reply(), Some("You picked **Blue**."));
+        conversation.apply([r#"{"type":"user","uuid":"u9","message":{"role":"user","content":"thanks"}}"#]);
+        assert_eq!(conversation.last_reply(), None);
     }
 
     #[test]

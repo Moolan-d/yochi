@@ -68,10 +68,15 @@ impl Tail {
     /// The last [`WINDOW_LINES`] lines, or nothing yet: Claude Code writes the
     /// file only once the first message is sent.
     pub async fn start(&mut self, client: &mut Client) -> Result<Vec<String>> {
+        self.start_last(client, WINDOW_LINES).await
+    }
+
+    /// Like [`start`](Self::start), from the last `window` lines.
+    pub async fn start_last(&mut self, client: &mut Client, window: usize) -> Result<Vec<String>> {
         let Some(probe) = read(client, self.machine.as_deref(), &self.path, Some(1), Some(1)).await? else {
             return Ok(Vec::new());
         };
-        self.seen = probe.lines.saturating_sub(WINDOW_LINES);
+        self.seen = probe.lines.saturating_sub(window);
         self.more(client).await
     }
 

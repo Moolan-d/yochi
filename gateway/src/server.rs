@@ -265,7 +265,7 @@ pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiv
     tokio::spawn(about::run(hc.clone(), view.clone(), about_sender));
     let (tailnet_state, tailnet) = watch::channel(tailnet::State::Waiting);
     let phones = Arc::new(notify::Phones::default());
-    tokio::spawn(notify::run(store.dir().to_path_buf(), view.clone(), phones.clone()));
+    tokio::spawn(notify::run(hc.clone(), store.dir().to_path_buf(), view.clone(), phones.clone()));
     let state = AppState { hc, view, store, devices, changes: Arc::default(), about, tailnet, streams: Default::default(), phones };
     let app = with_mux(api(state.clone()), state.clone());
     let keys = state.store.gateway_key()?;
