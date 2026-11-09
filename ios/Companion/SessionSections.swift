@@ -10,6 +10,8 @@ struct HomeRow: Identifiable, Equatable {
     let tab: String?
     /// Finished a turn neither Herdr's desktop nor this iPhone has shown.
     let unseen: Bool
+    /// The space's id, which its tile's color comes from.
+    var spaceID: String?
 
     var id: String { session.id }
 }
@@ -34,20 +36,19 @@ struct HomeGroup: Identifiable, Equatable {
 }
 
 struct Home: Equatable {
-    /// Waiting on the user first, then finished and not looked at yet; they
-    /// stay in their own group too.
-    let needsYou: [HomeRow]
     let groups: [HomeGroup]
 }
 
-/// The home page: Agents by Herdr space, then by machine for sessions in no
-/// space. Without spaces (an older Gateway, or no Herdr layout) every
-/// machine's sessions form one group. `seen` holds the turn this iPhone last
-/// showed for each session.
+/// Every session in list order: Agents by Herdr space, then by machine for
+/// sessions in no space. Without spaces (an older Gateway, or no Herdr
+/// layout) every machine's sessions form one group. `seen` holds the turn
+/// this iPhone last showed for each session. The Inbox and its search read
+/// the rows from here.
 func makeHome(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:]) -> Home {
     let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    let row = { (session: Session, space: String?, tab: String?) in
-        HomeRow(session: session, space: space, tab: tab, unseen: isUnseen(session, seen: seen[session.id]))
+    let row = { (session: Session, space: Space?, tab: String?) in
+        HomeRow(session: session, space: space?.name, tab: tab, unseen: isUnseen(session, seen: seen[session.id]),
+                spaceID: space?.id)
     }
     var placed = Set<String>()
     var groups: [HomeGroup] = []
@@ -56,7 +57,7 @@ func makeHome(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:]
         let rows = space.tabs.flatMap { tab in
             tab.sessions.compactMap { byID[$0] }
                 .filter { placed.insert($0.id).inserted }
-                .map { row($0, space.name, namedTab(tab.name)) }
+                .map { row($0, space, namedTab(tab.name)) }
         }
         guard !rows.isEmpty else { continue }
         groups.append(HomeGroup(
@@ -75,10 +76,7 @@ func makeHome(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:]
             agents: pinnedFirst(rows.filter(\.session.isAgent)), terminals: rows.filter { !$0.session.isAgent }))
     }
 
-    // In list order, so it matches what the user sees below.
-    let agents = groups.flatMap(\.agents)
-    let needsYou = agents.filter { $0.session.status?.state == "blocked" } + agents.filter(\.unseen)
-    return Home(needsYou: needsYou, groups: groups)
+    return Home(groups: groups)
 }
 
 func isUnseen(_ session: Session, seen: UInt64?) -> Bool {
@@ -217,28 +215,6 @@ extension HomeRow {
         return [title, session.title, session.repo?.name, session.repo?.worktree, tab, space, folder, session.machine]
             .compactMap { $0 }
             .contains { $0.localizedCaseInsensitiveContains(query) }
-    }
-}
-
-extension HomeGroup {
-    /// The most pressing state among its Agents: waiting > working > unseen.
-    var summary: HomeSummary? {
-        if agents.contains(where: { $0.session.status?.state == "blocked" }) { return .blocked }
-        if agents.contains(where: { $0.session.status?.state == "working" }) { return .working }
-        if agents.contains(where: \.unseen) { return .unseen }
-        return nil
-    }
-}
-
-enum HomeSummary: Equatable {
-    case blocked, working, unseen
-
-    var word: String {
-        switch self {
-        case .blocked: String(localized: "An Agent needs you")
-        case .working: String(localized: "An Agent is working")
-        case .unseen: String(localized: "Unseen results")
-        }
     }
 }
 
