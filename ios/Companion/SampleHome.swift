@@ -51,7 +51,7 @@ struct SampleHomeView: View {
         let sessions = #"""
         [
           {"id":"t1","title":"Support page hangs reconnecting after a drop","program":"claude","command":"claude","cwd":"/Users/me/wx-mini","turn":12,
-           "status":{"state":"blocked","message":"Run npm test?"},"status_ms":\#(ms - 40_000),
+           "status":{"state":"blocked","kind":"permission","message":"Run npm test?"},"status_ms":\#(ms - 40_000),
            "repo":{"name":"wx-mini","worktree":"fix-reconnect"}},
           {"id":"t2","title":"Home page redesign","program":"claude","command":"claude","cwd":"/Users/me/companion/ios","turn":30,"pinned":true,
            "status":{"state":"working"},"status_ms":\#(ms - 135_000),

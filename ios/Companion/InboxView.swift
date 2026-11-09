@@ -51,7 +51,7 @@ struct InboxList<Banner: View>: View {
                 ForEach(inbox.sections) { section in
                     Section {
                         ForEach(section.rows) { row in
-                            agentLink(row)
+                            agentLink(row, underNeedsYou: section.kind == .needsYou)
                         }
                     } header: {
                         SectionTitle(verbatim: section.kind.title)
@@ -98,9 +98,9 @@ struct InboxList<Banner: View>: View {
         }
     }
 
-    private func agentLink(_ row: HomeRow) -> some View {
+    private func agentLink(_ row: HomeRow, underNeedsYou: Bool = false) -> some View {
         NavigationLink(value: Route.session(row.session)) {
-            InboxRow(row: row, queued: queued(row.id))
+            InboxRow(row: row, queued: queued(row.id), underNeedsYou: underNeedsYou)
         }
         .accessibilityIdentifier("session-\(row.id)")
         .homeRow()
@@ -167,12 +167,19 @@ struct HomeForm<Content: View>: View {
 struct InboxRow: View {
     let row: HomeRow
     let queued: Bool
+    /// Under the Needs You header, which already says what the pill would.
+    var underNeedsYou = false
 
     /// Large text wraps instead of cutting the title and the place short, and
     /// the state moves under them.
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var session: Session { row.session }
+
+    /// The question says it waits on the user; a pill would say it twice.
+    private var quiet: Bool {
+        if underNeedsYou, case .question = row.detail { true } else { false }
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -188,7 +195,7 @@ struct InboxRow: View {
                         .font(.headline)
                         .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                 }
-                RowDetail(detail: row.detail)
+                RowDetail(detail: row.detail, askSymbol: row.askSymbol)
                 if queued {
                     Label("Queued", systemImage: "clock")
                         .font(.subheadline)
@@ -203,12 +210,12 @@ struct InboxRow: View {
                         .truncationMode(.middle)
                 }
                 if typeSize.isAccessibilitySize {
-                    RowStatus(row: row).padding(.top, 2)
+                    RowStatus(row: row, quiet: quiet).padding(.top, 2)
                 }
             }
             if !typeSize.isAccessibilitySize {
                 Spacer(minLength: 0)
-                RowStatus(row: row)
+                RowStatus(row: row, quiet: quiet)
             }
         }
         .padding(.vertical, 2)
@@ -221,13 +228,21 @@ struct InboxRow: View {
 /// The second line: the question in dark orange, the to-do in gray.
 struct RowDetail: View {
     let detail: HomeRow.Detail?
+    /// The mark before a question.
+    var askSymbol = "questionmark.bubble"
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         switch detail {
         case .question(let text):
-            Text(text).font(.subheadline).foregroundStyle(Color.warnText).lineLimit(lines)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Image(systemName: askSymbol)
+                    .imageScale(.small)
+                Text(text).lineLimit(lines)
+            }
+            .font(.subheadline)
+            .foregroundStyle(Color.warnText)
         case .failure(let text):
             Text(text).font(.subheadline).foregroundStyle(Color.errorText).lineLimit(lines)
         case .progress(let text):

@@ -256,7 +256,7 @@ struct SpaceTerminalRow: View {
                         .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                 }
                 if session.isAgent {
-                    RowDetail(detail: row.detail)
+                    RowDetail(detail: row.detail, askSymbol: row.askSymbol)
                     if queued {
                         Label("Queued", systemImage: "clock")
                             .font(.subheadline)

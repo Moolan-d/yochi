@@ -92,6 +92,16 @@ extension HomeRow {
         }
     }
 
+    /// The mark before a blocked Agent's question: what kind of answer it
+    /// waits for.
+    var askSymbol: String {
+        switch session.status?.kind {
+        case "permission": "hand.raised"
+        case "auth": "key"
+        default: "questionmark.bubble"
+        }
+    }
+
     /// The second line of an Inbox row, when it has something to say.
     enum Detail: Equatable {
         /// What a blocked Agent asks.

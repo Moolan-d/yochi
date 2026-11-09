@@ -224,12 +224,14 @@ struct UnseenDot: View {
 /// Color is never alone: the row's label says the state in words.
 struct RowStatus: View {
     let row: HomeRow
+    /// Leaves out the Needs You pill where the row already says it.
+    var quiet = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { context in
             HStack(spacing: 8) {
                 switch row.signal {
-                case .needsYou: StatusPill(text: String(localized: "Needs You"))
+                case .needsYou: if !quiet { StatusPill(text: String(localized: "Needs You")) }
                 case .error: StatusPill(text: String(localized: "Error"), tone: .error)
                 case .working: WorkingIndicator()
                 case .unseen: UnseenDot()
