@@ -10,7 +10,8 @@ struct ContentView: View {
     /// The map of the tab's panes, shown while switching between them.
     @State private var paneHint: PaneTab?
     @State private var paneHintFade: Task<Void, Never>?
-    /// A terminal just started from the phone; opened once the list has it.
+    /// A terminal just started from the phone, or named by a notification;
+    /// opened once the list has it.
     @State private var opening: String?
     /// Opened from a pairing QR code; fills in the pairing form.
     @State private var invite: PairingInvite?
@@ -83,6 +84,15 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in
+            if let link = SessionLink(url: url) {
+                guard config != nil else { return }
+                showingSettings = false
+                showingNewSession = false
+                opening = link.id
+                // Opened from the background the list has it; from cold, its first list does.
+                openPending()
+                return
+            }
             guard let opened = PairingInvite(url: url) else { return }
             if config == nil {
                 invite = opened
@@ -180,7 +190,7 @@ struct ContentView: View {
         }
     }
 
-    /// Opens a terminal just started from the phone, once the list has it.
+    /// Opens the `opening` session once the list has it.
     private func openPending(_ sessions: [Session]? = nil) {
         guard let opening, let session = (sessions ?? client.sessions).first(where: { $0.id == opening }) else { return }
         self.opening = nil
