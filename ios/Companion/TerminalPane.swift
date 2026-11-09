@@ -222,6 +222,21 @@ final class TerminalModel {
         surface?.view.setKeyboard(shown)
     }
 
+    /// Ctrl or Alt armed for the next key, as the key bar shows them.
+    private(set) var armed: Set<TerminalPublicStickyModifier> = []
+
+    /// Arms Ctrl or Alt for the next key, or disarms it.
+    func toggleSticky(_ modifier: TerminalPublicStickyModifier) {
+        surface?.view.toggleSticky(modifier)
+        refreshSticky()
+    }
+
+    /// The surface armed, spent or disarmed a modifier.
+    func refreshSticky() {
+        guard let view = surface?.view else { return armed = [] }
+        armed = Set([.ctrl, .alt].filter(view.isArmed))
+    }
+
     /// A key for the terminal to encode and type; false when it can't, and
     /// the key goes through `terminal.keys` instead.
     func press(_ key: TerminalKeyPress) -> Bool {

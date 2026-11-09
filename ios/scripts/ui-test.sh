@@ -251,10 +251,12 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         "$GATEWAY" tailnet on > /dev/null
         until nc -z "${YOCHI_LISTEN%:*}" "${YOCHI_LISTEN##*:}" 2>/dev/null; do sleep 0.2; done
     fi
-    # Typed on the phone's own keyboard, then Return from the key bar.
+    # Typed on the phone's own keyboard with an arrow from the key bar, then
+    # written with the pencil.
     if [ "$test" = testTypesIntoTheTerminal ]; then
         screen=$(hc read companion-uitest-shell 2>/dev/null || true)
-        if ! printf '%s\n' "$screen" | grep -q '^typed$' || ! printf '%s\n' "$screen" | grep -q '^bar$'; then
+        if ! printf '%s\n' "$screen" | grep -q '^typed$' || ! printf '%s\n' "$screen" | grep -q '^baxr$' \
+            || ! printf '%s\n' "$screen" | grep -q '^composed$'; then
             echo "the shell did not run what was typed:" >&2
             printf '%s\n' "$screen" | tail -20 >&2
             failed=1

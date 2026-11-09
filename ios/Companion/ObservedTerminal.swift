@@ -445,6 +445,9 @@ struct ObservedTerminal: UIViewRepresentable {
         let keyboardShown = keyboardShown
         view.onKeyboardChange = { keyboardShown.wrappedValue = $0 }
         view.acceptsTyping = typing
+        view.onStickyChange { [weak model] in
+            DispatchQueue.main.async { model?.refreshSticky() }
+        }
     }
 }
 
