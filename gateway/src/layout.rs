@@ -178,11 +178,14 @@ pub fn arrange(spaces: Vec<Space>, sessions: &[Session]) -> Vec<Space> {
             }
         }
         space.tabs.retain(|tab| !tab.sessions.is_empty());
+    }
+    // Named only once a terminal in it is known to be live.
+    spaces.retain(|space| !space.tabs.is_empty());
+    for space in &mut spaces {
         if space.name.is_empty() {
             space.name = automatic_name(space, &live);
         }
     }
-    spaces.retain(|space| !space.tabs.is_empty());
     spaces
 }
 
@@ -198,7 +201,8 @@ fn automatic_name(space: &Space, live: &HashMap<&str, &Session>) -> String {
             }
         }
     }
-    let cwd = space.tabs[0].sessions.first().and_then(|id| live.get(id.as_str())).map_or("", |s| s.cwd.as_str());
+    let first = space.tabs.first().and_then(|tab| tab.sessions.first());
+    let cwd = first.and_then(|id| live.get(id.as_str())).map_or("", |s| s.cwd.as_str());
     cwd.trim_end_matches('/').rsplit('/').next().filter(|name| !name.is_empty()).unwrap_or("~").to_owned()
 }
 
@@ -297,6 +301,15 @@ mod tests {
         ];
         let spaces = arrange(read(&document(), None), &sessions);
         assert_eq!(spaces[0].tabs[0].sessions, ["t3", "t7", "t8", "t10", "t4"]);
+    }
+
+    /// An unnamed space whose terminals have all ended (UI tests close
+    /// theirs) is dropped, not named from a tab it no longer has.
+    #[test]
+    fn unnamed_space_with_no_live_terminal_is_dropped() {
+        let spaces = arrange(read(&document(), None), &[session("t5", None, None)]);
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].name, "infra");
     }
 
     #[test]
