@@ -1,3 +1,4 @@
+import GhosttyTerminal
 import Observation
 import SwiftUI
 
@@ -18,6 +19,22 @@ struct TerminalKey: Identifiable {
         TerminalKey(id: "enter", label: "⏎", symbol: "return", spoken: String(localized: "Return")),
         TerminalKey(id: "esc", label: "esc", symbol: nil, spoken: "Esc"),
     ]
+}
+
+extension TerminalKey {
+    /// The key for the phone's own terminal to encode, as the program's modes
+    /// want it, when the takeover can type.
+    var press: TerminalKeyPress? {
+        switch id {
+        case "ctrl+c": TerminalKeyPress(.c, modifiers: .ctrl)
+        case "tab": TerminalKeyPress(.tab)
+        case "up": TerminalKeyPress(.arrowUp)
+        case "down": TerminalKeyPress(.arrowDown)
+        case "enter": TerminalKeyPress(.enter)
+        case "esc": TerminalKeyPress(.escape)
+        default: nil
+        }
+    }
 }
 
 /// Presses keys in tap order. Taps that arrive while a request is out go in

@@ -3653,12 +3653,12 @@
         }
       }
     },
-    "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Type commands below, or use the key bar." : {
+    "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Use the keyboard button or the key bar to type." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "终端按手机尺寸排版，查看期间桌面上的终端会变小；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
+            "value" : "终端按手机尺寸排版，查看期间桌面上的终端会变小；长按可选取文字复制，拖动查看历史。点键盘按钮或用按键栏输入。"
           }
         }
       }

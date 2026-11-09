@@ -382,6 +382,51 @@ final class CompanionUITests: XCTestCase {
         unpair(app)
     }
 
+    /// A takeover types straight into the terminal: the keyboard button
+    /// gives the terminal itself the keyboard, what is typed goes to the
+    /// shell as typed, and the key bar's keys too. The script reads what
+    /// the shell ran.
+    @MainActor
+    func testTypesIntoTheTerminal() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_SHELL_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no shell session")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        let toggle = app.buttons["toggleKeyboard"]
+        toggle.tap()
+        let shown = NSPredicate(format: "label == %@", "收起键盘")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: shown, evaluatedWith: toggle)], timeout: 5), .completed,
+                       "the terminal never took the keyboard")
+        snapshot("1 typing into the terminal")
+
+        // The terminal isn't a text field to XCUITest, so `typeText` finds no
+        // focus: tap the keys of the keyboard it brought up instead.
+        let keyboard = app.keyboards.firstMatch
+        func type(_ word: String) {
+            for (index, letter) in word.split(separator: " ").enumerated() {
+                if index > 0 { keyboard.keys["space"].tap() }
+                for key in letter { keyboard.keys[String(key)].tap() }
+            }
+        }
+        type("echo typed")
+        keyboard.buttons["Return"].tap()
+        type("echo bar")
+        app.buttons["key-enter"].tap()
+        XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 2))
+        snapshot("2 typed and pressed")
+
+        toggle.tap()
+        let hidden = NSPredicate(format: "label == %@", "显示键盘")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: hidden, evaluatedWith: toggle)], timeout: 5), .completed,
+                       "the keyboard did not go away")
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
     /// Claude Code started by hand in a terminal page keeps the page its
     /// terminal: Claude Code draws at the phone's grid there, and leaving
     /// gives the desktop its size back (the script samples both). Its first

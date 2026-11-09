@@ -3,7 +3,8 @@ import Observation
 
 /// A stream of one terminal from the Gateway (`/v0/observe`): watched as
 /// it is, or taken over at the phone's grid. Text messages carry control,
-/// binary messages the terminal's bytes. Nothing is ever typed through it.
+/// binary messages the terminal's bytes. A takeover on a Gateway that says
+/// so (`canType`) also carries what the phone types.
 ///
 /// The stream outlives its connection: when the connection drops (network
 /// change, the app going to the background) the Gateway keeps the stream
@@ -24,6 +25,9 @@ final class TerminalObserver {
     private(set) var phase: Phase = .connecting
     /// The connection dropped and the observer is coming back to the stream.
     private(set) var reconnecting = false
+    /// The Gateway takes typing on this stream (`attached.input`): a takeover
+    /// on a Gateway new enough. Otherwise keys go through `terminal.keys`.
+    private(set) var canType = false
     /// The terminal's bytes, in order. Set before connecting.
     var onBytes: ((Data) -> Void)?
     /// The stream can't be picked up where it was (the Gateway waited too
@@ -47,6 +51,8 @@ final class TerminalObserver {
     /// The grid last asked for, sent again after coming back in case it was
     /// asked for while the connection was down.
     private var wanted: TerminalGrid?
+    /// The last message queued, so wheel and typing go out in the order made.
+    private var sending: Task<Void, Never>?
 
     /// With `takeover`, the terminal takes that grid while this stream is
     /// open; core gives the desktop its size back once it closes.
@@ -59,6 +65,7 @@ final class TerminalObserver {
         target = (config, session)
         received = 0
         wanted = nil
+        canType = false
         phase = .connecting
         connect(url, config: config)
     }
@@ -80,10 +87,28 @@ final class TerminalObserver {
         #if DEBUG
         wheels.append(reports)
         #endif
-        guard let socket,
-              let message = try? JSONEncoder().encode(["type": "wheel", "data": String(decoding: reports, as: UTF8.self)])
-        else { return }
-        Task { try? await socket.send(.string(String(decoding: message, as: UTF8.self))) }
+        send(["type": "wheel", "data": String(decoding: reports, as: UTF8.self)])
+    }
+
+    /// What the user typed, as the phone's terminal encoded it. Dropped on a
+    /// stream that can't type, and while the connection is down: a keystroke
+    /// replayed seconds later would do more harm than one lost.
+    func input(_ bytes: Data) {
+        guard canType else { return }
+        #if DEBUG
+        inputs.append(bytes)
+        #endif
+        send(["type": "input", "data": String(decoding: bytes, as: UTF8.self)])
+    }
+
+    private func send(_ message: [String: String]) {
+        guard let socket, let json = try? JSONEncoder().encode(message) else { return }
+        let text = String(decoding: json, as: UTF8.self)
+        let previous = sending
+        sending = Task {
+            await previous?.value
+            try? await socket.send(.string(text))
+        }
     }
 
     #if DEBUG
@@ -91,6 +116,8 @@ final class TerminalObserver {
     private(set) var resizes: [TerminalGrid] = []
     /// Every scroll passed on, for tests.
     private(set) var wheels: [Data] = []
+    /// Everything typed on a stream that can type, for tests.
+    private(set) var inputs: [Data] = []
 
     /// Core answered the attach with this grid, for tests.
     func attached(cols: Int, rows: Int) {
@@ -164,6 +191,7 @@ final class TerminalObserver {
     private func connect(_ url: URL, config: GatewayConfig) {
         let socket = GatewaySocket(url: url, token: config.token, maximumMessageSize: 32 << 20)
         self.socket = socket
+        sending = nil
         loop = Task { await follow(socket) }
     }
 
@@ -231,6 +259,7 @@ final class TerminalObserver {
         case "attached":
             token = message.resume
             keep = .milliseconds(message.keep_ms ?? 0)
+            canType = message.input ?? false
             if let cols = message.cols, let rows = message.rows {
                 phase = .observing(cols: cols, rows: rows)
             }
@@ -250,6 +279,7 @@ final class TerminalObserver {
         case "closed":
             token = nil
             reconnecting = false
+            canType = false
             phase = .closed(reason: message.reasonText)
         default:
             break
@@ -269,6 +299,8 @@ private struct ObserveMessage: Decodable {
     /// `attached` (from a Gateway that can resume) and `resumed`.
     let resume: String?
     let keep_ms: Int?
+    /// `attached` on a takeover the Gateway takes typing on.
+    let input: Bool?
 
     /// The core sends `{reason, exit_code, …}`; a failed attach sends a plain string.
     enum Reason: Decodable {

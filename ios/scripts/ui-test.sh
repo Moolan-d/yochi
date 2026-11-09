@@ -186,7 +186,7 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         alt_session=$(start_alt_session)
         extra="TEST_RUNNER_COMPANION_ALT_SESSION_NAME=companion-uitest-alt"
     fi
-    if [ "$test" = testShellCommandsRun ] || [ "$test" = testClaudeStartedInTerminal ]; then
+    if [ "$test" = testShellCommandsRun ] || [ "$test" = testClaudeStartedInTerminal ] || [ "$test" = testTypesIntoTheTerminal ]; then
         start_shell_session
         extra="TEST_RUNNER_COMPANION_SHELL_SESSION_NAME=companion-uitest-shell"
     fi
@@ -250,6 +250,16 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
         kill $tailnet_back 2>/dev/null || true
         "$GATEWAY" tailnet on > /dev/null
         until nc -z "${YOCHI_LISTEN%:*}" "${YOCHI_LISTEN##*:}" 2>/dev/null; do sleep 0.2; done
+    fi
+    # Typed on the phone's own keyboard, then Return from the key bar.
+    if [ "$test" = testTypesIntoTheTerminal ]; then
+        screen=$(hc read companion-uitest-shell 2>/dev/null || true)
+        if ! printf '%s\n' "$screen" | grep -q '^typed$' || ! printf '%s\n' "$screen" | grep -q '^bar$'; then
+            echo "the shell did not run what was typed:" >&2
+            printf '%s\n' "$screen" | tail -20 >&2
+            failed=1
+        fi
+        hc kill companion-uitest-shell >/dev/null 2>&1 || true
     fi
     # The UI test only saw "已送达"; the shell must have run each command:
     # the echo twice (sent, then ↑ ⏎), and the last one only after Ctrl+C.

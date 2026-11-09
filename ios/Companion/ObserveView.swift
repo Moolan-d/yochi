@@ -292,8 +292,18 @@ struct ObserveView: View {
                 SlashSuggestions(commands: slashMatches, pick: pickCommand)
             }
             if !isConversation {
-                TerminalKeyBar(keyboardShown: composerFocused,
-                               toggleKeyboard: { composerFocused.toggle() }) { key in
+                // A takeover that types gets the keyboard on the terminal
+                // itself; otherwise the composer is the only text input.
+                let terminal = feeds.terminal
+                TerminalKeyBar(keyboardShown: terminal.canType ? terminal.keyboardShown : composerFocused,
+                               toggleKeyboard: {
+                                   if terminal.canType {
+                                       terminal.setKeyboard(!terminal.keyboardShown)
+                                   } else {
+                                       composerFocused.toggle()
+                                   }
+                               }) { key in
+                    if let press = key.press, terminal.press(press) { return }
                     keys.press(key.id, session: session.id, client: client)
                 }
             }
