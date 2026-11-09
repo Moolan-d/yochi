@@ -29,6 +29,7 @@ struct SpacesList<Banner: View>: View {
                                 SpaceRow(space: space)
                             }
                             .accessibilityIdentifier("space-\(space.id)")
+                            .homeRow()
                         }
                         if !section.others.isEmpty {
                             OthersRow(section: section, title: String(localized: "Other Terminals"), symbol: "terminal")
@@ -149,6 +150,7 @@ struct OthersRow: View {
                 .joined(separator: String(localized: "detail.separator", defaultValue: ", ")))
         }
         .accessibilityIdentifier("others-\(section.id)")
+        .homeRow()
     }
 }
 
@@ -191,6 +193,7 @@ struct SpaceDetailView: View {
                                 SpaceTerminalRow(row: row, queued: queued(row.id))
                             }
                             .accessibilityIdentifier("session-\(row.id)")
+                            .homeRow()
                         }
                     } header: {
                         HStack {
@@ -313,6 +316,7 @@ struct OtherTerminalsView: View {
                         }
                     }
                     .accessibilityIdentifier("session-\(row.id)")
+                    .homeRow()
                 }
             }
         }

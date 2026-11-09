@@ -4,13 +4,20 @@ import SwiftUI
 /// contrast.
 enum HomeColorValues {
     /// Dark orange text for a question, and the pill's fill and text.
-    static let warnText: (light: UInt32, dark: UInt32) = (0x8F540C, 0xF2B866)
-    static let warnFill: (light: UInt32, dark: UInt32) = (0xF4E9D8, 0x4A3818)
+    static let warnText: (light: UInt32, dark: UInt32) = (0x8F540C, 0xDEA458)
+    static let warnFill: (light: UInt32, dark: UInt32) = (0xF4E9D8, 0x3E3226)
     static let errorText: (light: UInt32, dark: UInt32) = (0xA3201A, 0xFF9E96)
     static let errorFill: (light: UInt32, dark: UInt32) = (0xF9DEDB, 0x4D2220)
     /// The page behind the cards, and the cards (system grouped rows).
-    static let page: (light: UInt32, dark: UInt32) = (0xF2F3F0, 0x121211)
-    static let card: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x1C1C1E)
+    static let page: (light: UInt32, dark: UInt32) = (0xF2F3F0, 0x101213)
+    static let card: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x1D1F20)
+    /// Hairlines between rows.
+    static let separator: (light: UInt32, dark: UInt32) = (0xDEDFDB, 0x36383A)
+    /// The panes of a mini map: plain, and lit while working or blocked.
+    static let pane: (light: UInt32, dark: UInt32) = (0xD3D4D0, 0x4B4C53)
+    static let paneLit: (light: UInt32, dark: UInt32) = (0xA9C6F2, 0x49648F)
+    /// The dot in a blocked pane.
+    static let blockedDot: (light: UInt32, dark: UInt32) = (0xB8700F, 0xEFA43C)
 
     /// Text and the color it sits on; each must read at 4.5:1.
     static let pairs: [(UInt32, UInt32)] = [
@@ -33,6 +40,8 @@ extension Color {
 
     /// Warm gray behind the grouped cards.
     static let homePage = Color(pair: HomeColorValues.page)
+    static let homeCard = Color(pair: HomeColorValues.card)
+    static let homeSeparator = Color(pair: HomeColorValues.separator)
     static let warnText = Color(pair: HomeColorValues.warnText)
     static let warnFill = Color(pair: HomeColorValues.warnFill)
     static let errorText = Color(pair: HomeColorValues.errorText)
@@ -250,11 +259,11 @@ struct MiniPaneMap: View {
             for frame in layout.frames(in: CGRect(origin: .zero, size: canvas), gap: gap) {
                 let mark = frame.session.flatMap { marks[$0] } ?? .idle
                 let shape = Path(roundedRect: frame.rect, cornerRadius: 2.5, style: .continuous)
-                context.fill(shape, with: .color(mark == .idle ? Color(.tertiaryLabel).opacity(0.35) : Color.blue.opacity(0.32)))
+                context.fill(shape, with: .color(mark == .idle ? Color(pair: HomeColorValues.pane) : Color(pair: HomeColorValues.paneLit)))
                 if mark == .blocked {
                     let dot: CGFloat = min(5, min(frame.rect.width, frame.rect.height) * 0.6)
                     let spot = CGRect(x: frame.rect.midX - dot / 2, y: frame.rect.midY - dot / 2, width: dot, height: dot)
-                    context.fill(Path(ellipseIn: spot), with: .color(.warnText))
+                    context.fill(Path(ellipseIn: spot), with: .color(Color(pair: HomeColorValues.blockedDot)))
                 }
             }
         }

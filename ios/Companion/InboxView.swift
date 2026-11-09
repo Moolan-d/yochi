@@ -100,6 +100,7 @@ struct InboxList<Banner: View>: View {
             InboxRow(row: row, queued: queued(row.id))
         }
         .accessibilityIdentifier("session-\(row.id)")
+        .homeRow()
     }
 
     private func terminalLink(_ row: HomeRow) -> some View {
@@ -107,6 +108,7 @@ struct InboxList<Banner: View>: View {
             TerminalSearchRow(row: row)
         }
         .accessibilityIdentifier("session-\(row.id)")
+        .homeRow()
     }
 }
 
@@ -134,6 +136,11 @@ extension View {
         listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.homePage)
+    }
+
+    /// A row's card color and the hairline under it.
+    func homeRow() -> some View {
+        listRowBackground(Color.homeCard).listRowSeparatorTint(Color.homeSeparator)
     }
 }
 
