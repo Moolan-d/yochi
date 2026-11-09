@@ -19,7 +19,7 @@ final class CompanionUITests: XCTestCase {
 
         pair(app, host: nil, code: env("COMPANION_CODE"))
         waitUntilPaired(app)
-        XCTAssert(app.cells.firstMatch.waitForExistence(timeout: 15), "no home page")
+        XCTAssert(app.searchFields.firstMatch.waitForExistence(timeout: 15), "no home page")
         snapshot("2 home")
         // The echo terminal: an Agent's session would open its conversation instead.
         let session = testSession(app)
@@ -252,7 +252,7 @@ final class CompanionUITests: XCTestCase {
         waitForReplacePrompt(app, open: open)
         app.buttons["保留当前配对"].tap()
         XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 5), "keeping the pairing dropped it")
-        XCTAssert(app.cells.buttons.firstMatch.exists, "sessions gone after keeping the pairing")
+        XCTAssert(app.searchFields.firstMatch.exists, "the Inbox is gone after keeping the pairing")
         XCUIDevice.shared.system.open(URL(string: "yochi://pair?host=\(host)&code=ZZZZ-ZZZZ")!)
         waitForReplacePrompt(app, open: open)
         snapshot("1 replace prompt")
@@ -769,9 +769,10 @@ final class CompanionUITests: XCTestCase {
         leaveAndUnpair(app)
     }
 
-    /// The DEBUG sample home: 需要你 first, a pinned Agent with its child, a
-    /// remote space that folds, terminals that unfold, and a search with no
-    /// match offering 新建, at the default text size and an accessibility one.
+    /// The DEBUG sample home, at the default text size and an accessibility
+    /// one: the Inbox's sections and badge, a pinned Agent with its child,
+    /// search by Space and for a shell, a search with no match offering 新建;
+    /// then the Spaces tab, a space's page and the terminals in no space.
     @MainActor
     func testHomeSample() throws {
         for size in [nil, "UICTContentSizeCategoryAccessibilityL"] {
@@ -784,41 +785,28 @@ final class CompanionUITests: XCTestCase {
             let blocked = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "服务助手页面自动断联后重连卡住")).firstMatch
             XCTAssert(blocked.waitForExistence(timeout: 10), "no blocked Agent")
             XCTAssertEqual(blocked.label, "服务助手页面自动断联后重连卡住，等你处理，要运行 npm test，允许吗？，小程序 · wx-mini · fix-reconnect")
+            XCTAssertEqual(blocked.identifier, "session-t1")
+            XCTAssert(app.staticTexts["需要你"].exists, "no Needs You section")
+            // One Agent waits: the Inbox tab carries 1.
+            let inboxTab = app.tabBars.buttons["收件箱"]
+            XCTAssert(inboxTab.exists, "no Inbox tab")
+            XCTAssert((inboxTab.value as? String)?.hasPrefix("1") == true, "the Inbox badge counts the Agents that need you: \(String(describing: inboxTab.value))")
+            XCTAssert(app.tabBars.buttons["Space"].exists, "no Spaces tab")
             if size == nil {
                 // Larger text pushes these below the fold, where the list hasn't made them yet.
                 let rows = app.cells.buttons.allElementsBoundByIndex.map(\.label)
                 let unseen = try XCTUnwrap(rows.firstIndex { $0.hasPrefix("整理日志轮转，完成，未看过，vps · 运维") }, "\(rows)")
                 XCTAssertGreaterThan(unseen, try XCTUnwrap(rows.firstIndex { $0.hasPrefix("补单元测试，完成，未看过") }), "\(rows)")
+                XCTAssertFalse(rows.contains { $0.hasPrefix("zsh") }, "a shell is in the Inbox: \(rows)")
             }
-            snapshot("home-top\(suffix)")
+            snapshot("inbox-top\(suffix)")
 
             let pinned = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "已置顶，主页改版，工作中，正在写主页列表")).firstMatch
             scrollUntilHittable(pinned, in: app, up: true)
             let child = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "查路线图剩余项，子 Agent，工作中")).firstMatch
             XCTAssert(child.exists, "no child Agent")
-            // The indent is checked on the screenshot: the row is one element.
             XCTAssertLessThan(pinned.frame.minY, child.frame.minY, "the child is not under its parent")
-
-            let terminals = app.buttons.matching(NSPredicate(format: "label == %@", "另有 1 个终端")).firstMatch
-            scrollUntilHittable(terminals, in: app, up: true)
-            XCTAssertEqual(terminals.value as? String, "已收起")
-            terminals.tap()
-            XCTAssertEqual(terminals.value as? String, "已展开")
-            XCTAssert(app.cells.buttons.containing(.staticText, identifier: "zsh").firstMatch.waitForExistence(timeout: 5), "terminals did not unfold")
-            snapshot("home-terminals\(suffix)")
-            terminals.tap()
-
-            let remote = app.buttons.matching(identifier: "groupHeader").matching(NSPredicate(format: "label == %@", "运维，vps")).firstMatch
-            scrollUntilHittable(remote, in: app, up: true)
-            clearOfSearchBar(remote, in: app)
-            XCTAssertEqual(remote.value as? String, "已展开")
-            remote.tap()
-            XCTAssertEqual(remote.value as? String, "已收起，2 个 Agent，有未看过的完成")
-            XCTAssertFalse(app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "升级 Caddy 配置")).firstMatch.exists)
-            snapshot("home-collapsed\(suffix)")
-            clearOfSearchBar(remote, in: app)
-            remote.tap()
-            XCTAssertEqual(remote.value as? String, "已展开")
+            snapshot("inbox-working\(suffix)")
 
             for _ in 0..<4 where !app.searchFields.firstMatch.isHittable { app.swipeDown() }
             let search = app.searchFields.firstMatch
@@ -827,10 +815,43 @@ final class CompanionUITests: XCTestCase {
             search.typeText("运维")
             XCTAssert(app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "升级 Caddy 配置")).firstMatch
                 .waitForExistence(timeout: 5), "search by space found nothing")
+            XCTAssert(app.staticTexts["Agent"].exists, "no Agents section in the results")
+            snapshot("inbox-search\(suffix)")
             search.typeText("没有的东西")
             XCTAssert(app.staticTexts["没有匹配「运维没有的东西」的 Agent"].waitForExistence(timeout: 5), "no empty search result")
             XCTAssert(app.buttons["新建"].exists, "no 新建 for an empty search")
-            snapshot("home-search-empty\(suffix)")
+            snapshot("inbox-search-empty\(suffix)")
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 9))
+            search.typeText("zsh")
+            let shell = app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "zsh，")).firstMatch
+            XCTAssert(shell.waitForExistence(timeout: 5), "search did not find the shell")
+            XCTAssertEqual(shell.identifier, "session-t5")
+            XCTAssert(app.staticTexts["终端"].exists, "no Terminals section in the results")
+            snapshot("inbox-search-shell\(suffix)")
+
+            // Spaces.
+            if Self.closeSearch(app).exists { Self.closeSearch(app).tap() }
+            app.tabBars.buttons["Space"].tap()
+            let companion = app.buttons["space-sp1"]
+            XCTAssert(companion.waitForExistence(timeout: 5), "no space row")
+            XCTAssert(companion.label.hasPrefix("companion，2 个标签页"), companion.label)
+            let mini = app.buttons["space-sp2"]
+            XCTAssertEqual(mini.label, "小程序，1 个标签页，1 个 Agent 需要你")
+            XCTAssert(app.buttons["others-"].exists, "no Other Terminals row")
+            snapshot("spaces\(suffix)")
+            companion.tap()
+            let parent = app.buttons["session-t2"]
+            XCTAssert(parent.waitForExistence(timeout: 5), "the space page lists no Agent")
+            XCTAssert(app.buttons["session-t5"].exists, "the space page lists no shell")
+            XCTAssertLessThan(parent.frame.minY, app.buttons["session-t3"].frame.minY, "the child is not under its parent")
+            XCTAssertFalse(app.tabBars.buttons["收件箱"].isHittable && app.tabBars.buttons["收件箱"].frame.height == 0, "tab bar")
+            snapshot("space-detail\(suffix)")
+            app.navigationBars.buttons.firstMatch.tap()
+            let others = app.buttons["others-"]
+            XCTAssert(others.waitForExistence(timeout: 5))
+            others.tap()
+            XCTAssert(app.buttons["session-t9"].waitForExistence(timeout: 5), "Other Terminals lists nothing")
+            snapshot("other-terminals\(suffix)")
             app.terminate()
         }
     }
@@ -1356,7 +1377,7 @@ final class CompanionUITests: XCTestCase {
         let app = Self.chineseApp()
         app.launch()
         waitUntilPaired(app)
-        XCTAssert(app.cells.firstMatch.waitForExistence(timeout: 15), "no sessions")
+        XCTAssert(app.searchFields.firstMatch.waitForExistence(timeout: 15), "no Inbox")
         RunLoop.current.run(until: .now.addingTimeInterval(3))
 
         let search = app.searchFields.firstMatch
@@ -1466,14 +1487,14 @@ final class CompanionUITests: XCTestCase {
 
     /// A session is titled with the name it was started under. An Agent's
     /// row reads as one label (pinned first, then the title); a terminal's
-    /// keeps its texts. Terminals are folded and the Mac's own sessions can
-    /// push the row far down, so this searches for it: matches list flat.
+    /// keeps its texts. The Inbox lists Agents only and the Mac's own sessions
+    /// can push a row far down, so this searches for it: matches list flat.
     @MainActor
     private func sessionCell(_ app: XCUIApplication, name: String) -> XCUIElement {
         let cell = app.cells.buttons.matching(NSPredicate(
             format: "label == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label CONTAINS %@",
             name, "\(name)，", "\(name)、", "\(name), ", "置顶，\(name)，")).firstMatch
-        guard app.cells.firstMatch.waitForExistence(timeout: 15) else { return cell }
+        guard app.searchFields.firstMatch.waitForExistence(timeout: 15) else { return cell }
         let search = app.searchFields.firstMatch
         for _ in 0..<4 where !search.isHittable { app.swipeDown() }
         guard search.isHittable, (search.value as? String) != name else { return cell }
