@@ -104,6 +104,15 @@ struct Status: Decodable, Hashable {
     let message: String?
     /// permission, question or auth, when blocked.
     let kind: String?
+
+    /// The message as a person reads it. herdr-core puts "answer: " before
+    /// a question, which says how to reply rather than what is asked.
+    var shownMessage: String? {
+        guard let message, message.hasPrefix(Self.answerPrefix) else { return message }
+        return String(message.dropFirst(Self.answerPrefix.count))
+    }
+
+    private static let answerPrefix = "answer: "
 }
 
 /// A Herdr space holding live sessions, in Herdr's order.

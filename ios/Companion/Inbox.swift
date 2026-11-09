@@ -105,7 +105,7 @@ extension HomeRow {
     var detail: Detail? {
         switch session.status?.state {
         case "blocked":
-            session.status?.message.flatMap(nonEmpty).map(Detail.question)
+            session.status?.shownMessage.flatMap(nonEmpty).map(Detail.question)
         case "error":
             session.status?.message.flatMap(nonEmpty).map(Detail.failure)
         case "working":

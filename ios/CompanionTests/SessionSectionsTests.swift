@@ -160,6 +160,8 @@ final class SessionSectionsTests: XCTestCase {
     func testRowDetailIsTheQuestionOrTheTodoAndNothingElse() throws {
         let blocked = try agent("t1", "blocked", extra: ["status": ["state": "blocked", "message": "要运行 npm test，允许吗？"]])
         XCTAssertEqual(row(blocked).detail, .question("要运行 npm test，允许吗？"))
+        let asking = try agent("t1", "blocked", extra: ["status": ["state": "blocked", "kind": "question", "message": "answer: 先处理哪件事？"]])
+        XCTAssertEqual(row(asking).detail, .question("先处理哪件事？"), "herdr-core's reply hint stays off the row")
         XCTAssertNil(row(try agent("t1", "blocked")).detail, "the pill says it already")
         let working = try agent("t1", "working", extra: ["todo": ["text": "补单元测试", "done": 3, "total": 7]])
         XCTAssertEqual(row(working).detail, .progress("正在：补单元测试（3/7）"))
