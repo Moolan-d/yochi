@@ -279,6 +279,10 @@ final class ConversationFeed {
     /// The permission mode as of the Agent's latest message; nil when the
     /// transcript has none or names one the app doesn't know.
     private(set) var mode: PermissionMode?
+    /// The reply the Agent is writing now, read off its terminal screen
+    /// before the transcript has it; plain text, maybe only its latest part.
+    /// The real reply replaces it.
+    private(set) var draft: String?
 
     /// Agent replies that arrived while following, by item id. Claude Code
     /// writes a reply to its transcript only once it is whole, so the page
@@ -322,6 +326,8 @@ final class ConversationFeed {
         loop = nil
         socket?.cancel()
         socket = nil
+        // Nothing keeps it current now; a fresh follow sends the state again.
+        draft = nil
     }
 
     private func follow(_ socket: GatewaySocket) async {
@@ -339,6 +345,7 @@ final class ConversationFeed {
             case 404: String(localized: "The session no longer exists")
             default: error.localizedDescription
             }
+            draft = nil
             phase = .failed(reason)
         }
     }
@@ -366,6 +373,7 @@ final class ConversationFeed {
             }
             // The Gateway says the mode again after a fresh conversation.
             if mode != nil { mode = nil }
+            if draft != nil { draft = nil }
             let phase: Phase = supported ? .following : .unsupported
             if self.phase != phase { self.phase = phase }
         case .items(let changed):
@@ -373,6 +381,9 @@ final class ConversationFeed {
             var updated = items
             var index = Dictionary(updated.indices.map { (updated[$0].id, $0) }, uniquingKeysWith: { _, last in last })
             var arrived: [String: Arrival] = [:]
+            // The reply arrives in place of its draft, which already showed it.
+            let hadDraft = draft != nil
+            var replaced = false
             let now = Date.now
             for item in changed where item.kind != .other {
                 if let at = index[item.id] {
@@ -385,19 +396,25 @@ final class ConversationFeed {
                     index[item.id] = updated.count
                     updated.append(item)
                     if item.kind == .agent, let text = item.text, !text.isEmpty {
-                        arrived[item.id] = Arrival(previous: nil, at: now)
+                        if hadDraft { replaced = true } else { arrived[item.id] = Arrival(previous: nil, at: now) }
                     }
                 }
             }
             if !arrived.isEmpty { arrivals.merge(arrived) { _, new in new } }
+            // Together with the new reply, so the page swaps one for the other.
+            if replaced { draft = nil }
             if updated != items { items = updated }
         case .pending(let pending):
             if self.pending != pending { self.pending = pending }
         case .mode(let mode):
             let mode = PermissionMode(rawValue: mode)
             if self.mode != mode { self.mode = mode }
+        case .draft(let text):
+            let text = text?.isEmpty == false ? text : nil
+            if draft != text { draft = text }
         case .closed(let reason):
             pending = nil
+            draft = nil
             phase = .closed(reason: reason == "finished" ? String(localized: "The session has ended") : reason)
         case .unknown:
             break
@@ -417,11 +434,13 @@ enum ConversationMessage: Decodable {
     case items([ConversationItem])
     case pending(PendingQuestion?)
     case mode(String)
+    /// The reply being written now; nil clears it.
+    case draft(String?)
     case closed(reason: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, supported, items, pending, mode, reason
+        case type, supported, items, pending, mode, reason, text
     }
 
     init(from decoder: Decoder) throws {
@@ -436,6 +455,8 @@ enum ConversationMessage: Decodable {
             self = .pending(try c.decodeIfPresent(PendingQuestion.self, forKey: .pending))
         case "mode":
             self = .mode(try c.decode(String.self, forKey: .mode))
+        case "draft":
+            self = .draft(try? c.decodeIfPresent(String.self, forKey: .text))
         case "closed":
             self = .closed(reason: (try? c.decode(String.self, forKey: .reason)) ?? String(localized: "The session has ended"))
         default:
@@ -446,6 +467,7 @@ enum ConversationMessage: Decodable {
 
 extension GatewayConfig {
     func conversationURL(session: String) -> URL? {
-        endpoint("/v0/conversation", query: [URLQueryItem(name: "session", value: session)])
+        // `drafts` asks for the reply being written, before it is whole.
+        endpoint("/v0/conversation", query: [URLQueryItem(name: "session", value: session), URLQueryItem(name: "drafts", value: "1")])
     }
 }
