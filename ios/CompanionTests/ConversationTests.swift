@@ -228,6 +228,57 @@ final class ConversationTests: XCTestCase {
         XCTAssertTrue(feed.arrivals.isEmpty)
     }
 
+    /// The reply being written shows until the real one arrives, the
+    /// conversation is sent again, or the session closes.
+    func testDraftIsClearedByItsReplyANewConversationAndClosing() throws {
+        let feed = ConversationFeed()
+        feed.apply(try decode(#"{"type":"conversation","supported":true,"items":[{"kind":"agent","id":"a1","text":"old"}]}"#))
+        XCTAssertNil(feed.draft)
+
+        feed.apply(try decode(#"{"type":"draft","text":"Working on it"}"#))
+        XCTAssertEqual(feed.draft, "Working on it")
+        feed.apply(try decode(#"{"type":"draft","text":"Working on it, and more"}"#))
+        XCTAssertEqual(feed.draft, "Working on it, and more")
+        // Not a new reply: a tool, or an earlier reply growing.
+        feed.apply(try decode(#"{"type":"items","items":[{"kind":"tool","id":"t1","name":"Bash"},{"kind":"agent","id":"a1","text":"old, longer"}]}"#))
+        XCTAssertEqual(feed.draft, "Working on it, and more")
+
+        feed.apply(try decode(#"{"type":"items","items":[{"kind":"agent","id":"a2","text":"Working on it, and more."}]}"#))
+        XCTAssertNil(feed.draft)
+        // The draft already showed it, so there is nothing to reveal again.
+        XCTAssertNil(feed.arrivals["a2"])
+
+        feed.apply(try decode(#"{"type":"draft","text":"Next"}"#))
+        feed.apply(try decode(#"{"type":"draft","text":null}"#))
+        XCTAssertNil(feed.draft)
+        feed.apply(try decode(#"{"type":"draft","text":"Next"}"#))
+        feed.apply(try decode(#"{"type":"draft"}"#))
+        XCTAssertNil(feed.draft)
+
+        feed.apply(try decode(#"{"type":"draft","text":"Next"}"#))
+        feed.apply(try decode(#"{"type":"conversation","supported":true,"items":[]}"#))
+        XCTAssertNil(feed.draft)
+        feed.apply(try decode(#"{"type":"draft","text":"Next"}"#))
+        feed.apply(try decode(#"{"type":"closed","reason":"finished"}"#))
+        XCTAssertNil(feed.draft)
+    }
+
+    func testDraftDecodesAndUnknownTypesStayUnknown() throws {
+        guard case .draft(let text) = try decode(#"{"type":"draft","text":"Hi"}"#) else { return XCTFail("not a draft") }
+        XCTAssertEqual(text, "Hi")
+        guard case .draft(let none) = try decode(#"{"type":"draft","text":null}"#) else { return XCTFail("not a draft") }
+        XCTAssertNil(none)
+        guard case .unknown = try decode(#"{"type":"hologram","text":"Hi"}"#) else { return XCTFail("not unknown") }
+    }
+
+    func testConversationAsksForDrafts() throws {
+        let config = GatewayConfig(host: "100.64.0.1:7420", token: "t")
+        let url = try XCTUnwrap(config.conversationURL(session: "s1"))
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        XCTAssertEqual(items.first { $0.name == "drafts" }?.value, "1")
+        XCTAssertEqual(items.first { $0.name == "session" }?.value, "s1")
+    }
+
     /// Part-way through, whole blocks come first and then the start of the
     /// next, with its styles; a table shows whole.
     func testMarkdownRevealsBlockByBlock() throws {
