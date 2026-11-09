@@ -332,14 +332,17 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 ### 查看终端（Observer）
 
-`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach，手机从不经这个连接向终端输入。默认以 `observe` 模式 attach，不改变终端尺寸。
+`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach。默认以 `observe` 模式 attach，不改变终端尺寸，手机也不能经这个连接向终端输入。
 
 **按手机尺寸接管。** 加 `takeover=1&cols=<列>&rows=<行>` 时改以非 observe 的方式 attach，core 把终端改成这个网格，`attached` 和首屏都按它；列数、行数缺少或不在 1…1000 之内时返回 `400`。查看期间桌面上的终端跟着变小；连接断开后 core 把尺寸还原成仍在 attach 的桌面窗口的大小，没有窗口时还原成基础尺寸。接管的连接上 App 可以发 `{"type": "resize", "cols": 49, "rows": 30}`（键盘弹出收起、转屏），Gateway 转成 core 的 RESIZE 帧；只读连接上的这类消息被忽略。全屏程序（如 Claude Code）自己保存历史、靠鼠标滚轮翻看，终端里没有回滚可滑：接管的连接上 App 把手机终端为拖动编出的滚轮上报原样发来，`{"type": "wheel", "data": "\u001b[<64;10;5M"}`，Gateway 经 attach 通道写给程序。`data` 只能由 SGR 滚轮上报（`ESC [ < b ; x ; y M`，b 为 64–67，可带 shift/meta/ctrl 位）和 alt screen 上的光标上下键（`ESC [ A`/`B`、`ESC O A`/`B`）组成，最长 4096 字节，否则整条丢弃；点按、移动和打字都不会经这里送到终端。桌面再次操作这个终端时尺寸回到桌面的，`size` 帧会报出来，App 据此改回只读显示（ADR 0001 的 2026-11-04 修订）。
+
+**接管时直接输入。** 接管的连接上 `attached` 多带 `"input": true`，表示 App 可以在终端光标处直接打字：App 把手机终端为按键编出的字节原样发来，`{"type": "input", "data": "ls\t"}`，Gateway 经 attach 通道写给程序，和桌面上敲键盘一样（Tab 补全、方向键、Ctrl 组合键都在其中）。`data` 不能为空，最长 64 KiB（一次粘贴），否则整条丢弃；只读连接上的 `input` 一律忽略。App 只发用户按下的键，手机终端自己对查询（DA、DSR、OSC 颜色等）的应答不发，core 已经应答过。旧 Gateway 的 `attached` 没有 `input`，App 据此不提供直接输入，按键仍走 `terminal.keys`；旧 App 不认识这个字段，照旧工作（ADR 0001 的 2026-11-09 修订）。
 
 - **文本帧**（控制）：
   ```jsonc
   {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸收下首屏（只读时再重排）
   {"type": "attached", "cols": 49, "rows": 45, "resume": "9f2c…", "keep_ms": 30000}  // 带 resumable=1 时
+  {"type": "attached", "cols": 49, "rows": 45, "input": true}  // 接管时：可以发 input
   {"type": "resumed", "resume": "41ab…", "keep_ms": 30000}  // 接回了；之后的二进制帧接着 offset 往下
   {"type": "size", "cols": 160, "rows": 48}       // 终端尺寸变了（其他客户端，或接管后自己的 resize）
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
