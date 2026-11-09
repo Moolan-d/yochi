@@ -682,6 +682,16 @@
         }
       }
     },
+    "Arrow Keys" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "方向键"
+          }
+        }
+      }
+    },
     "Ask Agent to Commit" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1122,6 +1132,46 @@
         }
       }
     },
+    "Control D, end of input" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control D，输入结束"
+          }
+        }
+      }
+    },
+    "Control L, clear screen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control L，清屏"
+          }
+        }
+      }
+    },
+    "Control Z, suspend" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control Z，挂起"
+          }
+        }
+      }
+    },
+    "Control, for the next key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control，作用于下一个键"
+          }
+        }
+      }
+    },
     "Conversation · %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1502,6 +1552,16 @@
         }
       }
     },
+    "End" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End 键"
+          }
+        }
+      }
+    },
     "Enter a command" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1528,6 +1588,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出错：%@"
+          }
+        }
+      }
+    },
+    "Escape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出键 Esc"
           }
         }
       }
@@ -1608,6 +1678,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按手机尺寸"
+          }
+        }
+      }
+    },
+    "For Chinese, dictation or several lines" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于中文、听写或多行输入"
           }
         }
       }
@@ -1702,12 +1782,42 @@
         }
       }
     },
+    "Hide Command Field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起命令输入框"
+          }
+        }
+      }
+    },
     "Hide Keyboard" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "收起键盘"
+          }
+        }
+      }
+    },
+    "Home" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home 键"
+          }
+        }
+      }
+    },
+    "Hyphen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连字符"
           }
         }
       }
@@ -1888,6 +1998,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "留空则使用%@。%@"
+          }
+        }
+      }
+    },
+    "Left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左"
           }
         }
       }
@@ -2352,6 +2472,16 @@
         }
       }
     },
+    "Option, for the next key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Option，作用于下一个键"
+          }
+        }
+      }
+    },
     "Other" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2368,6 +2498,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其他终端"
+          }
+        }
+      }
+    },
+    "Page %lld of %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 页，共 %2$lld 页"
+          }
+        }
+      }
+    },
+    "Page Down" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下翻页"
+          }
+        }
+      }
+    },
+    "Page Up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上翻页"
           }
         }
       }
@@ -2802,6 +2962,16 @@
         }
       }
     },
+    "Right" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右"
+          }
+        }
+      }
+    },
     "Run yochi devices on the main Mac to see every paired device." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3073,6 +3243,16 @@
         }
       }
     },
+    "Shift Tab, previous" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shift Tab，上一项"
+          }
+        }
+      }
+    },
     "Show Keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3129,6 +3309,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看这个文件的改动"
+          }
+        }
+      }
+    },
+    "Slash" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "斜杠"
           }
         }
       }
@@ -3653,12 +3843,12 @@
         }
       }
     },
-    "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Type commands below, or use the key bar." : {
+    "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Use the keyboard button or the key bar to type." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "终端按手机尺寸排版，查看期间桌面上的终端会变小；长按可选取文字复制，拖动查看历史。可在下方输入命令，或用按键栏按键。"
+            "value" : "终端按手机尺寸排版，查看期间桌面上的终端会变小；长按可选取文字复制，拖动查看历史。点键盘按钮或用按键栏输入。"
           }
         }
       }
@@ -3739,6 +3929,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这一轮早已结束，要现在发吗？"
+          }
+        }
+      }
+    },
+    "Tilde" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "波浪号"
           }
         }
       }
@@ -3943,6 +4143,16 @@
         }
       }
     },
+    "Vertical bar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "竖线"
+          }
+        }
+      }
+    },
     "View the terminal, run shell commands and press common keys. While you look, the terminal is laid out at phone size and shrinks on the desktop until you leave." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3989,6 +4199,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "工作中 · %@"
+          }
+        }
+      }
+    },
+    "Write a Command" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写命令"
           }
         }
       }

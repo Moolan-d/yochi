@@ -121,31 +121,171 @@ enum TerminalWheel {
     }
 }
 
+/// What of the bytes Ghostty writes for the program the phone may type into
+/// a taken-over terminal. The phone is only a second screen of herdr-core,
+/// which already answers the program's queries; Ghostty answers them too,
+/// and its replies would reach the program as typing. So only what a
+/// keyboard produces goes back: query replies (OSC, DCS, APC, PM and SOS
+/// strings; device attributes, status and cursor reports, mode and keyboard
+/// flag reports, window reports; focus changes) and mouse clicks are
+/// dropped, wheel reports kept. Keystrokes, the kitty keyboard protocol's
+/// included, pass as Ghostty encoded them.
+enum TerminalInput {
+    static func typed(in data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        var kept: [UInt8] = []
+        kept.reserveCapacity(bytes.count)
+        var at = 0
+        while at < bytes.count {
+            guard bytes[at] == esc, at + 1 < bytes.count else {
+                kept.append(bytes[at])
+                at += 1
+                continue
+            }
+            switch bytes[at + 1] {
+            case UInt8(ascii: "]"), UInt8(ascii: "P"), UInt8(ascii: "_"), UInt8(ascii: "^"), UInt8(ascii: "X"):
+                at = stringEnd(bytes, from: at + 2)
+            case UInt8(ascii: "["):
+                guard let csi = csi(bytes, from: at + 2) else {
+                    // Not a whole sequence: Alt+[ and the like.
+                    kept.append(bytes[at])
+                    at += 1
+                    continue
+                }
+                if csi.x10 {
+                    at = min(csi.end + 4, bytes.count)
+                    continue
+                }
+                if !isReply(bytes[(at + 2)..<csi.end], final: bytes[csi.end]) {
+                    kept.append(contentsOf: bytes[at...csi.end])
+                }
+                at = csi.end + 1
+            default:
+                kept.append(bytes[at])
+                at += 1
+            }
+        }
+        return kept.isEmpty ? nil : Data(kept)
+    }
+
+    private static let esc: UInt8 = 0x1b
+
+    /// Past a string's terminator (BEL or ST), or the end when it has none.
+    private static func stringEnd(_ bytes: [UInt8], from start: Int) -> Int {
+        var at = start
+        while at < bytes.count {
+            if bytes[at] == 0x07 { return at + 1 }
+            if bytes[at] == esc, at + 1 < bytes.count, bytes[at + 1] == UInt8(ascii: "\\") { return at + 2 }
+            at += 1
+        }
+        return bytes.count
+    }
+
+    /// The final byte's index of the control sequence whose parameters start
+    /// at `start`; `x10` for an old-style mouse report, three raw bytes after.
+    private static func csi(_ bytes: [UInt8], from start: Int) -> (end: Int, x10: Bool)? {
+        var at = start
+        while at < bytes.count, (0x20...0x3f).contains(bytes[at]) { at += 1 }
+        guard at < bytes.count, (0x40...0x7e).contains(bytes[at]) else { return nil }
+        return (at, at == start && bytes[at] == UInt8(ascii: "M"))
+    }
+
+    private static func isReply(_ body: ArraySlice<UInt8>, final: UInt8) -> Bool {
+        let first = body.first
+        switch final {
+        // Device attributes, device status, window reports.
+        case UInt8(ascii: "c"), UInt8(ascii: "n"), UInt8(ascii: "t"):
+            return true
+        // A cursor position report: row;column. (Shift+F3 encodes the same
+        // way, and is lost.)
+        case UInt8(ascii: "R"):
+            return body.contains(UInt8(ascii: ";"))
+        // A mode report: CSI ? mode ; value $ y.
+        case UInt8(ascii: "y"):
+            return body.last == UInt8(ascii: "$")
+        // The kitty keyboard flags (CSI ? flags u); a key is CSI code ; mods u.
+        case UInt8(ascii: "u"):
+            return first == UInt8(ascii: "?")
+        // Focus in and out.
+        case UInt8(ascii: "I"), UInt8(ascii: "O"):
+            return body.isEmpty
+        // SGR mouse: only the wheel goes back.
+        case UInt8(ascii: "M"), UInt8(ascii: "m"):
+            guard first == UInt8(ascii: "<") else { return false }
+            let button = Int(String(decoding: body.dropFirst().prefix { $0 != UInt8(ascii: ";") }, as: UTF8.self)) ?? 0
+            return final == UInt8(ascii: "m") || !(64...67).contains(button & ~0b11100)
+        default:
+            return false
+        }
+    }
+}
+
+/// Whether what Ghostty writes now is the user typing, asked from Ghostty's
+/// IO thread: while the terminal has the keyboard (a hardware keyboard's
+/// shortcuts included), and for a moment after a key-bar press.
+final class TypingWindow: @unchecked Sendable {
+    private let lock = NSLock()
+    private var focused = false
+    private var until: UInt64 = 0
+    /// Ghostty encodes and writes a key well within this, however busy.
+    static let span: UInt64 = 250_000_000
+
+    func setFocused(_ value: Bool) {
+        lock.withLock { focused = value }
+    }
+
+    func keyPressed() {
+        lock.withLock { until = DispatchTime.now().uptimeNanoseconds + Self.span }
+    }
+
+    var isOpen: Bool {
+        lock.withLock { focused || DispatchTime.now().uptimeNanoseconds < until }
+    }
+}
+
 /// An in-memory Ghostty session that holds the terminal's bytes until the
 /// surface's grid matches the size they were drawn for.
 @MainActor
 final class TerminalFeed {
-    /// Nothing typed or resized here flows back to the Gateway; scrolling
-    /// does, through `onWheel`, once a takeover sets it.
+    /// Nothing resized here flows back to the Gateway. Scrolling does,
+    /// through `onWheel`, once a takeover sets it; typing too, through
+    /// `onInput`, once a takeover that can type sets it.
     let session: InMemoryTerminalSession
-    private let wheel = WheelOutlet()
+    private let outlets = Outlets()
+    let typing = TypingWindow()
     /// Wheel reports for the program, from dragging a full-screen program.
     var onWheel: ((Data) -> Void)? {
-        get { wheel.send }
-        set { wheel.send = newValue }
+        get { outlets.wheel }
+        set { outlets.wheel = newValue }
+    }
+    /// What the user typed, as Ghostty encoded it for the program.
+    var onInput: ((Data) -> Void)? {
+        get { outlets.input }
+        set { outlets.input = newValue }
     }
 
     init() {
-        let wheel = wheel
+        let outlets = outlets, typing = typing
         session = InMemoryTerminalSession(write: { data in
-            guard let reports = TerminalWheel.reports(in: data) else { return }
+            let typed = typing.isOpen ? TerminalInput.typed(in: data) : nil
+            let reports = TerminalWheel.reports(in: data)
+            guard typed != nil || reports != nil else { return }
             // In order, on the main actor, whichever thread Ghostty wrote on.
-            DispatchQueue.main.async { MainActor.assumeIsolated { wheel.send?(reports) } }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if let typed, let input = outlets.input {
+                        input(typed)
+                    } else if let reports {
+                        outlets.wheel?(reports)
+                    }
+                }
+            }
         }, resize: { _ in })
     }
 
-    @MainActor private final class WheelOutlet {
-        var send: ((Data) -> Void)?
+    @MainActor private final class Outlets {
+        var wheel: ((Data) -> Void)?
+        var input: ((Data) -> Void)?
     }
     private var held: [Data] = []
     private(set) var heldBytes = 0
@@ -263,6 +403,9 @@ struct ObservedTerminal: UIViewRepresentable {
     /// Core resized the terminal to the phone: everything, full-screen
     /// programs too, is drawn at the phone's grid.
     let takeover: Bool
+    /// The takeover can type: the page's keyboard button gives the terminal
+    /// the keyboard, and what is typed goes to the program.
+    var typing = false
     /// The grid on screen, for the title: the phone's, or the desktop's for a
     /// full-screen program.
     @Binding var grid: TerminalGrid?
@@ -270,6 +413,8 @@ struct ObservedTerminal: UIViewRepresentable {
     @Binding var selection: TerminalTextSelection?
     /// Scrolled up into the history, off the newest output.
     @Binding var awayFromBottom: Bool
+    /// Whether the terminal has the keyboard.
+    var keyboardShown: Binding<Bool> = .constant(false)
     /// The program entered or left the alternate screen after the first paint.
     var onScreenModeChange: () -> Void = {}
 
@@ -297,6 +442,12 @@ struct ObservedTerminal: UIViewRepresentable {
         view.onTextSelection = { selection = $0 }
         view.onAwayFromBottom = { awayFromBottom = $0 }
         view.onScreenModeChange = onScreenModeChange
+        let keyboardShown = keyboardShown
+        view.onKeyboardChange = { keyboardShown.wrappedValue = $0 }
+        view.acceptsTyping = typing
+        view.onStickyChange { [weak model] in
+            DispatchQueue.main.async { model?.refreshSticky() }
+        }
     }
 }
 
@@ -313,13 +464,14 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
     var onTextSelection: ((TerminalTextSelection) -> Void)?
     var onAwayFromBottom: ((Bool) -> Void)?
     var onScreenModeChange: (() -> Void)?
+    var onKeyboardChange: ((Bool) -> Void)?
 
     private let feed: TerminalFeed
     private let desktop: TerminalGrid
     private let fontSize: Float
     private let takeover: Bool
     private let zoom = UIScrollView()
-    private let terminal = SelectionOnlyTerminalView(frame: .zero)
+    private let terminal = PhoneTerminalView(frame: .zero)
     private let controller: TerminalController
     /// One cell in points, once Ghostty has measured it.
     private var cell: CGSize?
@@ -367,6 +519,12 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
             gesture.isEnabled = false
         }
         terminal.alpha = 0
+        let typing = feed.typing
+        terminal.onKeyboardChange = { [weak self] shown in
+            typing.setFocused(shown)
+            let report = self?.onKeyboardChange
+            DispatchQueue.main.async { report?(shown) }
+        }
         zoom.addSubview(terminal)
 
         #if DEBUG
@@ -377,7 +535,7 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         accessibilityLabel = String(localized: "Terminal screen")
         accessibilityIdentifier = "terminalGrid"
         accessibilityHint = takeover
-            ? String(localized: "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Type commands below, or use the key bar.")
+            ? String(localized: "The terminal is laid out at phone size, and shrinks on the desktop while you look. Long-press to select and copy; drag to see history. Use the keyboard button or the key bar to type.")
             : String(localized: "The terminal is laid out at phone width; full-screen programs show as on the desktop and can be pinched to zoom. Long-press to select and copy; drag to see history. Type commands below, or use the key bar.")
 
         feed.onFullScreenChange = { [weak self] fullScreen in
@@ -614,6 +772,48 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
         terminal.performBindingAction("scroll_to_bottom")
     }
 
+    // MARK: Typing
+
+    /// Whether the terminal may take the keyboard; turning it off hides it.
+    var acceptsTyping: Bool {
+        get { terminal.acceptsTyping }
+        set { terminal.acceptsTyping = newValue }
+    }
+
+    var isKeyboardShown: Bool { terminal.isFirstResponder }
+
+    /// Brings the keyboard up for the terminal, or puts it away.
+    func setKeyboard(_ shown: Bool) {
+        if shown {
+            terminal.acquireProgrammaticFocus()
+        } else if terminal.isFirstResponder {
+            _ = terminal.resignFirstResponder()
+        }
+    }
+
+    /// A key-bar key, encoded by Ghostty for the program's current modes and
+    /// with any armed sticky modifier. False when the terminal can't type.
+    @discardableResult
+    func press(_ key: TerminalKeyPress) -> Bool {
+        guard terminal.acceptsTyping else { return false }
+        feed.typing.keyPressed()
+        return terminal.sendKey(key)
+    }
+
+    /// Arms Ctrl or Alt for the next key, or disarms it.
+    func toggleSticky(_ modifier: TerminalPublicStickyModifier) {
+        terminal.toggleStickyModifier(modifier)
+    }
+
+    func isArmed(_ modifier: TerminalPublicStickyModifier) -> Bool {
+        terminal.stickyActivation(for: modifier) != .inactive
+    }
+
+    /// Called whenever a sticky modifier is armed, spent or disarmed.
+    func onStickyChange(_ handler: @escaping () -> Void) {
+        terminal.setStickyModifierChangeHandler(handler)
+    }
+
     // MARK: Text selection
 
     /// Ghostty snapshots the visible rows and the word under the finger; the
@@ -623,12 +823,48 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
     }
 }
 
-/// Lets a long press select text without making the terminal a text input:
-/// a tap never becomes first responder, so no keyboard appears.
-private final class SelectionOnlyTerminalView: UITerminalView {
-    override var canBecomeFirstResponder: Bool { false }
+/// Ghostty's view, kept from taking the keyboard on its own: a tap clicks
+/// but never brings the keyboard up, and a long press selects. A takeover
+/// that can type (`acceptsTyping`) lets the page's keyboard button make it
+/// first responder, with a plain ASCII keyboard (Chinese and anything else
+/// that needs an input method goes through the composer) and without
+/// Ghostty's own key row, which the page's key bar replaces.
+private final class PhoneTerminalView: UITerminalView {
+    var acceptsTyping = false {
+        didSet {
+            if !acceptsTyping, isFirstResponder { _ = resignFirstResponder() }
+        }
+    }
+    var onKeyboardChange: ((Bool) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        inputAccessoryItems = []
+        inputAssistantItem.leadingBarButtonGroups = []
+        inputAssistantItem.trailingBarButtonGroups = []
+    }
+
+    override var canBecomeFirstResponder: Bool { acceptsTyping }
 
     override func toggleSoftwareKeyboard() {}
+
+    override var keyboardType: UIKeyboardType {
+        get { .asciiCapable }
+        set {}
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { onKeyboardChange?(true) }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let had = isFirstResponder
+        let resigned = super.resignFirstResponder()
+        if had, resigned { onKeyboardChange?(false) }
+        return resigned
+    }
 
     /// Ghostty's mouse starts outside the terminal, and it reports no wheel
     /// from there. A finger's scroll never moves it (only a tap, long press

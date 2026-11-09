@@ -1,3 +1,4 @@
+import GhosttyTerminal
 import SwiftUI
 
 /// The session's terminal (`/v0/observe`). Opening it takes the terminal
@@ -36,8 +37,11 @@ struct TerminalPane: View {
                 // way; a fresh attach takes core's exact screen for it.
                 ObservedTerminal(model: model, feed: feed, attempt: model.attempt, fontSize: Float(fontSize),
                                  desktopGrid: desktop, takeover: model.takeover != nil,
+                                 typing: model.canType,
                                  grid: $grid, selection: $selection,
                                  awayFromBottom: $awayFromBottom,
+                                 keyboardShown: Binding(get: { model.keyboardShown },
+                                                        set: { model.keyboardShown = $0 }),
                                  onScreenModeChange: model.restartAfterResize)
                     .id(model.attempt)
             }
@@ -208,6 +212,37 @@ final class TerminalModel {
     /// The desktop took the size back; the page watches until the user
     /// takes it over again, or opens the page afresh.
     private(set) var yielded = false
+    /// Whether the terminal has the keyboard.
+    var keyboardShown = false
+    /// The terminal takes typing: taken over, on a Gateway that takes it.
+    var canType: Bool { takeover != nil && observer.canType }
+
+    /// Brings the keyboard up for the terminal, or puts it away.
+    func setKeyboard(_ shown: Bool) {
+        surface?.view.setKeyboard(shown)
+    }
+
+    /// Ctrl or Alt armed for the next key, as the key bar shows them.
+    private(set) var armed: Set<TerminalPublicStickyModifier> = []
+
+    /// Arms Ctrl or Alt for the next key, or disarms it.
+    func toggleSticky(_ modifier: TerminalPublicStickyModifier) {
+        surface?.view.toggleSticky(modifier)
+        refreshSticky()
+    }
+
+    /// The surface armed, spent or disarmed a modifier.
+    func refreshSticky() {
+        guard let view = surface?.view else { return armed = [] }
+        armed = Set([.ctrl, .alt].filter(view.isArmed))
+    }
+
+    /// A key for the terminal to encode and type; false when it can't, and
+    /// the key goes through `terminal.keys` instead.
+    func press(_ key: TerminalKeyPress) -> Bool {
+        guard canType, let view = surface?.view else { return false }
+        return view.press(key)
+    }
 
     /// The surface for `attempt`, kept so a page coming back can show it.
     @ObservationIgnored var surface: (attempt: Int, view: ObservedTerminalView)?
@@ -330,7 +365,10 @@ final class TerminalModel {
             start(target.config, session: target.session, fontSize: target.fontSize)
         }
         // Taken over, a full-screen program's own history scrolls with the wheel.
-        if takeover != nil { feed.onWheel = { [observer] in observer.wheel($0) } }
+        if takeover != nil {
+            feed.onWheel = { [observer] in observer.wheel($0) }
+            feed.onInput = { [observer] in observer.input($0) }
+        }
         observer.start(config, session: session, takeover: takeover)
     }
 

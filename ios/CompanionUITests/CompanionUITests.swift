@@ -365,8 +365,10 @@ final class CompanionUITests: XCTestCase {
 
         run(app, "echo yochi-$((6*7))")
         snapshot("2 command delivered")
-        app.buttons["key-up"].tap()
-        app.buttons["key-enter"].tap()
+        // Sent from the pencil's field, the keyboard is back on the
+        // terminal: ↑ from the arrow keys, then Return.
+        pressArrow(app, "up")
+        app.keyboards.firstMatch.buttons["Return"].tap()
         XCTAssertFalse(text(app, containing: "按键未送达").waitForExistence(timeout: 3))
 
         run(app, "sleep 30")
@@ -378,6 +380,60 @@ final class CompanionUITests: XCTestCase {
         // reads the size the shell saw, and that leaving gave it back.
         run(app, "stty size")
         XCTAssertFalse(app.buttons["terminalTakeOver"].exists, "the desktop seemed to take the terminal back")
+        app.navigationBars.buttons.firstMatch.tap()
+        unpair(app)
+    }
+
+    /// A takeover types straight into the terminal: the keyboard button
+    /// gives the terminal itself the keyboard, what is typed goes to the
+    /// shell as typed, and the key bar's keys too. The script reads what
+    /// the shell ran.
+    @MainActor
+    func testTypesIntoTheTerminal() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("COMPANION_HOST"), code: env("COMPANION_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: env("COMPANION_SHELL_SESSION_NAME"))
+        XCTAssert(session.waitForExistence(timeout: 15), "no shell session")
+        session.tap()
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        let toggle = app.buttons["toggleKeyboard"]
+        toggle.tap()
+        let shown = NSPredicate(format: "label == %@", "收起键盘")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: shown, evaluatedWith: toggle)], timeout: 5), .completed,
+                       "the terminal never took the keyboard")
+        snapshot("1 typing into the terminal")
+
+        // The terminal isn't a text field to XCUITest, so `typeText` finds no
+        // focus: tap the keys of the keyboard it brought up instead.
+        let keyboard = app.keyboards.firstMatch
+        func type(_ word: String) {
+            for (index, letter) in word.split(separator: " ").enumerated() {
+                if index > 0 { keyboard.keys["space"].tap() }
+                for key in letter { keyboard.keys[String(key)].tap() }
+            }
+        }
+        type("echo typed")
+        keyboard.buttons["Return"].tap()
+        // ← from the arrow keys moves the cursor: the shell runs `echo baxr`.
+        type("echo br")
+        pressArrow(app, "left")
+        type("ax")
+        keyboard.buttons["Return"].tap()
+        snapshot("2 typed and pressed")
+
+        // The pencil writes in the command field, and sending gives the
+        // keyboard back to the terminal.
+        run(app, "echo composed")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: shown, evaluatedWith: toggle)], timeout: 5), .completed,
+                       "the terminal did not get the keyboard back")
+        XCTAssertFalse(app.descendants(matching: .any)["terminalCommandField"].exists, "the command field stayed")
+
+        toggle.tap()
+        let hidden = NSPredicate(format: "label == %@", "显示键盘")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: hidden, evaluatedWith: toggle)], timeout: 5), .completed,
+                       "the keyboard did not go away")
         app.navigationBars.buttons.firstMatch.tap()
         unpair(app)
     }
@@ -403,7 +459,8 @@ final class CompanionUITests: XCTestCase {
         snapshot("2 claude in the terminal")
         XCTAssertFalse(app.descendants(matching: .any)["agentMessageField"].exists,
                        "the page turned into the conversation")
-        XCTAssert(app.descendants(matching: .any)["terminalCommandField"].exists, "the terminal composer is gone")
+        XCTAssert(app.descendants(matching: .any)["terminalCommandField"].exists || app.buttons["toggleComposer"].exists,
+                  "the terminal composer is gone")
         let terminal = app.descendants(matching: .any)["terminalGrid"]
         terminal.press(forDuration: 1.0)
         let view = app.textViews.firstMatch
@@ -420,12 +477,30 @@ final class CompanionUITests: XCTestCase {
     /// only then, and core waits ~3 s of quiet before it pastes.
     @MainActor
     private func run(_ app: XCUIApplication, _ command: String) {
+        // A takeover that types shows its command field from the pencil.
+        let pencil = app.buttons["toggleComposer"]
+        let typing = pencil.exists
+        if typing && !app.descendants(matching: .any)["terminalCommandField"].exists { pencil.tap() }
         let field = composer(app)
         field.tap()
         field.typeText(command)
         app.buttons["发送命令"].tap()
-        XCTAssertTrue(waitUntilCleared(field, timeout: 25), "\(command) was not delivered")
+        // A terminal that types puts its command field away once sent.
+        XCTAssertTrue(typing ? field.waitForNonExistence(timeout: 25) : waitUntilCleared(field, timeout: 25),
+                      "\(command) was not delivered")
         XCTAssert(text(app, containing: "已送达").exists, "\(command): no delivery shown")
+    }
+
+    /// An arrow key from the key bar's arrow popover, which is then put away.
+    @MainActor
+    private func pressArrow(_ app: XCUIApplication, _ name: String) {
+        app.buttons["key-arrows"].tap()
+        let arrow = app.buttons["key-\(name)"]
+        XCTAssert(arrow.waitForExistence(timeout: 5), "no arrow keys")
+        arrow.tap()
+        let outside = app.otherElements["PopoverDismissRegion"].firstMatch
+        if outside.exists { outside.tap() }
+        XCTAssert(arrow.waitForNonExistence(timeout: 5), "the arrow keys stayed up")
     }
 
     @MainActor

@@ -1,4 +1,5 @@
 import Observation
+import GhosttyTerminal
 import XCTest
 @testable import Companion
 
@@ -373,6 +374,42 @@ final class SessionFeedsTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(watching.observer.wheels, [], "a watching stream never writes to the terminal")
         watching.stop()
+    }
+
+    /// A takeover on a Gateway that takes typing sends what the user typed,
+    /// and nothing Ghostty writes on its own; an older Gateway gets nothing,
+    /// and the key bar goes through `terminal.keys` instead.
+    func testATakeoverTypesOnlyWhatTheUserTyped() async throws {
+        TerminalCell.forget()
+        TerminalCell.remember(CGSize(width: 5.5, height: 11), fontSize: 9)
+        defer { TerminalCell.forget() }
+        let model = TerminalModel()
+        let config = GatewayConfig(host: "127.0.0.1:9", token: "t")
+        model.pageSize(CGSize(width: 402, height: 600))
+        model.resume(config, session: "t1", fontSize: 9)
+        try model.observer.receive(control: #"{"type":"attached","cols":70,"rows":53,"input":true}"#)
+        XCTAssertTrue(model.canType)
+        let feed = try XCTUnwrap(model.feed)
+        // A query reply while nobody types.
+        feed.session.sendInput(Data("\u{1b}[?62;22c".utf8))
+        feed.typing.keyPressed()
+        feed.session.sendInput(Data(("\u{1b}[I" + "ls\t").utf8))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(model.observer.inputs, [Data("ls\t".utf8)])
+        model.stop()
+
+        let older = TerminalModel()
+        older.pageSize(CGSize(width: 402, height: 600))
+        older.resume(config, session: "t1", fontSize: 9)
+        try older.observer.receive(control: #"{"type":"attached","cols":70,"rows":53}"#)
+        XCTAssertFalse(older.canType)
+        XCTAssertFalse(older.press(TerminalKeyPress(.tab)))
+        let olderFeed = try XCTUnwrap(older.feed)
+        olderFeed.typing.keyPressed()
+        olderFeed.session.sendInput(Data("ls".utf8))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(older.observer.inputs, [])
+        older.stop()
     }
 
     /// A page coming back measures its surface before core answers the

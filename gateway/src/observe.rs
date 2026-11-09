@@ -1,8 +1,9 @@
 //! A view of one terminal: its own framed `hc connect`, then `terminal.attach`.
 //! Observing never types into or resizes the terminal. Taking it over sets
 //! its size to the phone's while attached; core gives the size back to the
-//! desktop once the phone detaches. A takeover passes on only the mouse
-//! wheel, so a full-screen program can scroll its own history; it never types.
+//! desktop once the phone detaches. A takeover may also type: while the phone
+//! sets the terminal's size it is the terminal's keyboard, and its keystrokes
+//! and mouse-wheel scrolls go to the program.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -136,6 +137,14 @@ impl Observer {
         write_frame(&mut self.stdin, self.channel, DATA, reports).await
     }
 
+    /// A takeover viewer's keystrokes, as the phone's terminal encoded them.
+    pub async fn input(&mut self, bytes: &[u8]) -> Result<()> {
+        if !valid_input(bytes) {
+            bail!("no input, or too much at once");
+        }
+        write_frame(&mut self.stdin, self.channel, DATA, bytes).await
+    }
+
     pub async fn detach(mut self) {
         let _ = write_frame(&mut self.stdin, self.channel, CLOSE, &[]).await;
     }
@@ -146,6 +155,14 @@ fn resize_payload(cols: u16, rows: u16) -> [u8; 4] {
     let [c0, c1] = cols.to_le_bytes();
     let [r0, r1] = rows.to_le_bytes();
     [c0, c1, r0, r1]
+}
+
+/// Most the app types at once: a paste, or keys queued while the link was slow.
+const INPUT_MAX: usize = 64 * 1024;
+
+/// Whether `bytes` can go to the terminal as typed input.
+pub fn valid_input(bytes: &[u8]) -> bool {
+    !bytes.is_empty() && bytes.len() <= INPUT_MAX
 }
 
 /// Longest scroll the app sends at once; a fling sends many in a row.
@@ -264,6 +281,15 @@ mod tests {
         assert!(!wheel_only(b"\x1b[C"));
         assert!(!wheel_only(b"\x1b[M`!!"));
         assert!(!wheel_only(&b"\x1b[A".repeat(2000)));
+    }
+
+    #[test]
+    fn input_is_anything_typed_within_bounds() {
+        assert!(valid_input(b"ls\t"));
+        assert!(valid_input(b"\x03"));
+        assert!(valid_input(&[b'a'; INPUT_MAX]));
+        assert!(!valid_input(b""));
+        assert!(!valid_input(&[b'a'; INPUT_MAX + 1]));
     }
 
     #[test]

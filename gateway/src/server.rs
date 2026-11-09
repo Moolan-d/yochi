@@ -141,6 +141,9 @@ enum ServerMessage<'a> {
         resume: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         keep_ms: Option<u64>,
+        /// The app may send `input`: this connection took the terminal over.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        input: bool,
     },
     /// The stream goes on from the byte the app asked for; binary messages
     /// that follow continue it. `resume` replaces the token used.
@@ -436,7 +439,7 @@ struct ObserveQuery {
     lang: Option<String>,
 }
 
-/// What the app may send on a stream. Only a takeover resizes or scrolls.
+/// What the app may send on a stream. Only a takeover resizes, scrolls or types.
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ObserveMessage {
@@ -445,6 +448,8 @@ enum ObserveMessage {
     /// A drag on a full-screen program, as the wheel reports the phone's
     /// terminal made for it; anything but wheel reports is dropped.
     Wheel { data: String },
+    /// Keys typed at the phone's terminal, as it encoded them.
+    Input { data: String },
     /// The app is leaving the stream: end it now rather than wait for the
     /// app to come back, so a takeover gives the desktop its size at once.
     Detach,
@@ -590,6 +595,7 @@ async fn relay(
         rows: size.1,
         resume: token.as_deref(),
         keep_ms: token.as_ref().map(|_| keep_ms),
+        input: takeover,
     };
     let mut ended = match send(&mut socket, &attached).await {
         Ok(()) => stream.live(&mut socket, &state, &caller, &id, &mut claims).await,
@@ -687,6 +693,9 @@ impl Stream {
                                 }
                                 Ok(ObserveMessage::Wheel { data }) if self.takeover && observe::wheel_only(data.as_bytes()) => {
                                     self.observer.wheel(data.as_bytes()).await
+                                }
+                                Ok(ObserveMessage::Input { data }) if self.takeover && observe::valid_input(data.as_bytes()) => {
+                                    self.observer.input(data.as_bytes()).await
                                 }
                                 _ => Ok(()),
                             };
@@ -1262,6 +1271,8 @@ mod tests {
         assert!(!valid_grid(0, 45) && !valid_grid(49, 0) && !valid_grid(1001, 45));
         let message: ObserveMessage = serde_json::from_str(r#"{"type":"wheel","data":"\u001b[<64;3;4M"}"#).unwrap();
         assert!(matches!(message, ObserveMessage::Wheel { data } if data == "\x1b[<64;3;4M"));
+        let message: ObserveMessage = serde_json::from_str(r#"{"type":"input","data":"ls\t"}"#).unwrap();
+        assert!(matches!(message, ObserveMessage::Input { data } if data == "ls\t"));
         let message: ObserveMessage = serde_json::from_str(r#"{"type":"detach"}"#).unwrap();
         assert!(matches!(message, ObserveMessage::Detach));
     }
@@ -1279,10 +1290,15 @@ mod tests {
         assert_eq!(back.offset, Some(1 << 20));
 
         let attached = |resume, keep_ms| {
-            serde_json::to_value(ServerMessage::Attached { cols: 80, rows: 24, resume, keep_ms }).unwrap()
+            serde_json::to_value(ServerMessage::Attached { cols: 80, rows: 24, resume, keep_ms, input: false }).unwrap()
         };
         assert_eq!(attached(None, None), serde_json::json!({"type": "attached", "cols": 80, "rows": 24}));
         assert_eq!(attached(Some("ab12"), Some(30000))["resume"], "ab12");
+        // Only a takeover says it takes input, so older apps see nothing new.
+        let takeover =
+            serde_json::to_value(ServerMessage::Attached { cols: 49, rows: 45, resume: None, keep_ms: None, input: true })
+                .unwrap();
+        assert_eq!(takeover, serde_json::json!({"type": "attached", "cols": 49, "rows": 45, "input": true}));
         let resumed = serde_json::to_value(ServerMessage::Resumed { resume: "cd34", keep_ms: 30000 }).unwrap();
         assert_eq!(resumed, serde_json::json!({"type": "resumed", "resume": "cd34", "keep_ms": 30000}));
     }

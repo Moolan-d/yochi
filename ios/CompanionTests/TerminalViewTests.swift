@@ -93,6 +93,40 @@ final class TerminalViewTests: XCTestCase {
         }
     }
 
+    /// Typing on a takeover goes back as Ghostty encoded it; Ghostty's own
+    /// replies to the program's queries (herdr-core already answered them)
+    /// and taps' clicks don't.
+    func testOnlyTypingGoesBackToTheProgram() {
+        for key in ["ls\t", "\r", "\u{7f}", "\u{03}", "\u{1b}", "\u{1b}x", "\u{1b}[A", "\u{1b}OA", "\u{1b}[Z",
+                    "\u{1b}[3~", "\u{1b}[1;5C", "\u{1b}[99;5u", "\u{1b}[13u", "\u{1b}[<64;10;5M", "é", "\u{1b}["] {
+            XCTAssertEqual(TerminalInput.typed(in: Data(key.utf8)), Data(key.utf8), key.debugDescription)
+        }
+        let replies = ["\u{1b}[?62;22c", "\u{1b}[>1;10;0c", "\u{1b}[0n", "\u{1b}[12;40R", "\u{1b}[?2026;2$y",
+                       "\u{1b}[?0u", "\u{1b}]11;rgb:2121/2121/2121\u{1b}\\", "\u{1b}]10;rgb:0/0/0\u{07}",
+                       "\u{1b}P>|ghostty 1.2\u{1b}\\", "\u{1b}_Gi=1;OK\u{1b}\\", "\u{1b}[8;24;80t", "\u{1b}[I", "\u{1b}[O",
+                       "\u{1b}[<0;10;5M", "\u{1b}[<0;10;5m", "\u{1b}[<35;10;5M", "\u{1b}[M !!", "\u{1b}]52;c;"]
+        for reply in replies {
+            XCTAssertNil(TerminalInput.typed(in: Data(reply.utf8)), reply.debugDescription)
+        }
+        // A reply written beside a keystroke leaves the keystroke.
+        XCTAssertEqual(TerminalInput.typed(in: Data(("\u{1b}[?62c" + "a" + "\u{1b}[<0;1;1M" + "\r").utf8)), Data("a\r".utf8))
+    }
+
+    /// The window is open while the terminal has the keyboard, and for a
+    /// moment after a key-bar press.
+    func testTypingWindowFollowsTheKeyboardAndKeyPresses() async throws {
+        let window = TypingWindow()
+        XCTAssertFalse(window.isOpen)
+        window.setFocused(true)
+        XCTAssertTrue(window.isOpen)
+        window.setFocused(false)
+        XCTAssertFalse(window.isOpen)
+        window.keyPressed()
+        XCTAssertTrue(window.isOpen)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(window.isOpen)
+    }
+
     func testSelectionPrefersThePressedWord() {
         let text = "cd ~/app\nswift build\n"
         let word = (text as NSString).range(of: "swift build")
