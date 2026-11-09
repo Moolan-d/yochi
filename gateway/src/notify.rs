@@ -234,7 +234,11 @@ fn message(kind: Kind, session: &Session, lang: Lang, reply: Option<String>) -> 
         Kind::Failed => lang.pick("停在了一个错误上", "Stopped on an error"),
         Kind::Done => lang.pick("这一轮做完了", "Finished its turn"),
     };
-    let said = || session.status.as_ref().and_then(|status| status.message.clone());
+    // herdr-core puts "answer: " before a question: how to reply, not what is asked.
+    let said = || {
+        let message = session.status.as_ref()?.message.as_deref()?;
+        Some(message.strip_prefix("answer: ").unwrap_or(message).to_owned())
+    };
     let body = match kind {
         Kind::Done => reply.or_else(said),
         _ => said(),
@@ -533,6 +537,8 @@ mod tests {
         assert_eq!(done["body"], "这一轮做完了");
         assert_eq!(done["url"], "yochi://session?id=t%202%26x");
         assert_eq!(done["level"], "active");
+        blocked.status.as_mut().unwrap().message = Some("answer: Red or Blue?".into());
+        assert_eq!(message(Kind::NeedsYou, &blocked, Lang::English, None)["body"], "Red or Blue?");
         let replied = message(Kind::Done, &session("t2", "done", 2), Lang::English, Some("Tests pass.".into()));
         assert_eq!(replied["body"], "Tests pass.");
     }
