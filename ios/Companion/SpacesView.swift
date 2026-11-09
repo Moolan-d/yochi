@@ -6,6 +6,8 @@ struct SpacesList<Banner: View>: View {
     let board: [MachineSection]
     /// Offered when there is nothing to show; nil while it can't be used.
     let newSession: (() -> Void)?
+    /// False while the screen says why it has nothing yet.
+    var showsEmpty = true
     @ViewBuilder var banner: Banner
 
     /// An older Gateway sends no spaces: one row for each machine's terminals.
@@ -46,7 +48,7 @@ struct SpacesList<Banner: View>: View {
         }
         .homeListStyle()
         .overlay {
-            if board.isEmpty {
+            if board.isEmpty && showsEmpty {
                 ContentUnavailableView {
                     Label("No Terminals Running", systemImage: "square.grid.2x2")
                 } description: {

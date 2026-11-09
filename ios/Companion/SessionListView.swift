@@ -14,12 +14,13 @@ struct InboxScreen: View {
         InboxList(
             inbox: makeInbox(sessions: client.sessions, spaces: client.spaces, seen: seen.turns),
             queued: { client.queuedMessage(session: $0) != nil },
-            newSession: client.phase == .connected ? newSession : nil
+            newSession: client.phase == .connected ? newSession : nil,
+            showsEmpty: client.listIsSettled
         ) {
             StaleBanner(client: client)
         }
         .overlay {
-            if client.sessions.isEmpty {
+            if !client.listIsSettled {
                 ConnectionState(client: client, retry: retry, reenter: reenter)
             }
         }
@@ -43,12 +44,13 @@ struct SpacesScreen: View {
         let _ = Perf.count("SpacesScreen")
         SpacesList(
             board: makeSpacesBoard(sessions: client.sessions, spaces: client.spaces, seen: seen.turns),
-            newSession: client.phase == .connected ? newSession : nil
+            newSession: client.phase == .connected ? newSession : nil,
+            showsEmpty: client.listIsSettled
         ) {
             StaleBanner(client: client)
         }
         .overlay {
-            if client.sessions.isEmpty {
+            if !client.listIsSettled {
                 ConnectionState(client: client, retry: retry, reenter: reenter)
             }
         }
@@ -110,6 +112,13 @@ private struct ConnectionState: View {
 }
 
 extension GatewayClient {
+    /// The lists speak for themselves: they have sessions, or the Gateway
+    /// and herdr-core are both up and there are none. Otherwise the screen
+    /// says why it has nothing yet.
+    var listIsSettled: Bool {
+        !sessions.isEmpty || (phase == .connected && coreConnected)
+    }
+
     var statusText: String {
         switch phase {
         case .disconnected: String(localized: "Not connected")

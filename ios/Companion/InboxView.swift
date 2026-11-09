@@ -8,6 +8,9 @@ struct InboxList<Banner: View>: View {
     let queued: (String) -> Bool
     /// Offered when the Inbox or a search is empty; nil while it can't be used.
     let newSession: (() -> Void)?
+    /// False while the screen says why it has nothing yet (connecting and
+    /// the like), so the two never draw over each other.
+    var showsEmpty = true
     @ViewBuilder var banner: Banner
 
     /// The search field's text, as typed.
@@ -80,7 +83,7 @@ struct InboxList<Banner: View>: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
-            } else if inbox.isEmpty && !searching {
+            } else if inbox.isEmpty && !searching && showsEmpty {
                 ContentUnavailableView {
                     Label("No Agents Running", systemImage: "tray")
                 } description: {
