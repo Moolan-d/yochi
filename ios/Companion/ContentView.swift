@@ -6,13 +6,19 @@ struct ContentView: View {
     @State private var seen = SeenTurns()
     @State private var showingSettings = false
     @State private var showingNewSession = false
-    @State private var path: [Session] = []
+    @State private var tab: HomeTab = .inbox
+    /// Each tab keeps its own stack.
+    @State private var inboxPath: [Route] = []
+    @State private var spacesPath: [Route] = []
     /// The map of the tab's panes, shown while switching between them.
     @State private var paneHint: PaneTab?
     @State private var paneHintFade: Task<Void, Never>?
     /// A terminal just started from the phone, or named by a notification;
     /// opened once the list has it.
     @State private var opening: String?
+    /// Whether `opening` opens in the tab on screen (a terminal just started
+    /// here) or in the Inbox (a notification's link).
+    @State private var openInCurrentTab = false
     /// Opened from a pairing QR code; fills in the pairing form.
     @State private var invite: PairingInvite?
     /// Opened while already paired; replaces the Gateway once confirmed.
@@ -24,39 +30,11 @@ struct ContentView: View {
 
     var body: some View {
         let _ = Perf.count("ContentView")
-        NavigationStack(path: $path) {
-            Group {
-                if let config {
-                    SessionListView(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
-                                    newSession: { showingNewSession = true })
-                        .navigationTitle(String(localized: "home.title", defaultValue: "Agents"))
-                        .navigationDestination(for: Session.self) { session in
-                            ObserveView(session: session, config: config, client: client,
-                                        open: { switchPane(from: session, to: $0) },
-                                        showPanes: showPanes)
-                            // A pane switch swaps the path's last session in place, and the
-                            // stack keeps the destination at that spot, @State included; the
-                            // page would go on showing the old session's streams under the
-                            // new title. A new session is a new page.
-                            .id(session.id)
-                        }
-                        .toolbar {
-                            ToolbarItemGroup(placement: .topBarTrailing) {
-                                Button("New", systemImage: "plus") { showingNewSession = true }
-                                    .disabled(client.phase != .connected)
-                                Button("Settings", systemImage: "gearshape") { showingSettings = true }
-                                    .accessibilityIdentifier("home.settings")
-                            }
-                        }
-                        .sheet(isPresented: $showingNewSession) {
-                            NewSessionView(client: client) { session in
-                                opening = session
-                                // The list may already carry it; otherwise its
-                                // next change opens it.
-                                openPending()
-                            }
-                        }
-                } else {
+        Group {
+            if let config {
+                tabs(config)
+            } else {
+                NavigationStack {
                     PairingView(invite: invite) { config in
                         config.save()
                         invite = nil
@@ -70,9 +48,18 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingSettings) {
-                SettingsView(client: client, config: config, onForget: forget)
+        }
+        .sheet(isPresented: $showingNewSession) {
+            NewSessionView(client: client) { session in
+                opening = session
+                openInCurrentTab = true
+                // The list may already carry it; otherwise its
+                // next change opens it.
+                openPending()
             }
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(client: client, config: config, onForget: forget)
         }
         .overlay(alignment: .topTrailing) {
             if let paneHint {
@@ -89,6 +76,7 @@ struct ContentView: View {
                 showingSettings = false
                 showingNewSession = false
                 opening = link.id
+                openInCurrentTab = false
                 // Opened from the background the list has it; from cold, its first list does.
                 openPending()
                 return
@@ -106,7 +94,8 @@ struct ContentView: View {
         ), titleVisibility: .visible, presenting: replacement) { opened in
             Button("Pair a New Gateway", role: .destructive) {
                 showingSettings = false
-                path = []
+                inboxPath = []
+                spacesPath = []
                 forget()
                 invite = opened
             }
@@ -144,7 +133,8 @@ struct ContentView: View {
             guard !openedFromLaunch, let id = ProcessInfo.processInfo.environment["COMPANION_OBSERVE"],
                   let session = sessions.first(where: { $0.id == id }) else { return }
             openedFromLaunch = true
-            path = [session]
+            tab = .inbox
+            inboxPath = [.session(session)]
         }
         #endif
         .onChange(of: client.sessions) { _, sessions in
@@ -152,10 +142,9 @@ struct ContentView: View {
             recordSeen()
             if client.phase == .connected && client.coreConnected { seen.keep(only: sessions) }
         }
-        .onChange(of: path) {
-            recordSeen()
-            if path.isEmpty { paneHintFade?.cancel(); paneHint = nil }
-        }
+        .onChange(of: inboxPath) { pathChanged() }
+        .onChange(of: spacesPath) { pathChanged() }
+        .onChange(of: tab) { pathChanged() }
         .onChange(of: scenePhase) { _, phase in
             guard let config else { return }
             switch phase {
@@ -166,13 +155,76 @@ struct ContentView: View {
         }
     }
 
+    /// Inbox and Spaces, each with a navigation stack of its own.
+    private func tabs(_ config: GatewayConfig) -> some View {
+        TabView(selection: $tab) {
+            Tab("Inbox", systemImage: "tray.fill", value: HomeTab.inbox) {
+                stack($inboxPath, title: "Inbox", config: config) {
+                    InboxScreen(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
+                                newSession: { showingNewSession = true })
+                }
+            }
+            .badge(makeInbox(sessions: client.sessions, spaces: client.spaces, seen: seen.turns).badge)
+            Tab("Spaces", systemImage: "square.grid.2x2.fill", value: HomeTab.spaces) {
+                stack($spacesPath, title: "Spaces", config: config) {
+                    SpacesScreen(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
+                                 newSession: { showingNewSession = true })
+                }
+            }
+        }
+    }
+
+    private func stack<Root: View>(
+        _ path: Binding<[Route]>, title: LocalizedStringKey, config: GatewayConfig, @ViewBuilder root: () -> Root
+    ) -> some View {
+        NavigationStack(path: path) {
+            root()
+                .navigationTitle(title)
+                .navigationDestination(for: Route.self) { route in
+                    HomeRouteView(route: route, sessions: client.sessions, spaces: client.spaces, seen: seen.turns,
+                                  queued: { client.queuedMessage(session: $0) != nil }) { session in
+                        ObserveView(session: session, config: config, client: client,
+                                    open: { switchPane(from: session, to: $0) },
+                                    showPanes: showPanes)
+                        // A pane switch swaps the path's last session in place, and the
+                        // stack keeps the destination at that spot, @State included; the
+                        // page would go on showing the old session's streams under the
+                        // new title. A new session is a new page.
+                        .id(session.id)
+                        // A conversation or terminal has the whole screen.
+                        .toolbar(.hidden, for: .tabBar)
+                    }
+                }
+                .toolbar {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("New", systemImage: "plus") { showingNewSession = true }
+                            .disabled(client.phase != .connected)
+                        Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                            .accessibilityIdentifier("home.settings")
+                    }
+                }
+        }
+    }
+
+    private var currentPath: Binding<[Route]> { tab == .inbox ? $inboxPath : $spacesPath }
+
+    private func pathChanged() {
+        recordSeen()
+        if currentPath.wrappedValue.isEmpty { paneHintFade?.cancel(); paneHint = nil }
+    }
+
     /// A terminal in the same tab takes this one's place at once, so Back
     /// still leads home however often the user switches.
     private func switchPane(from session: Session, to mate: Session) {
         var instant = Transaction()
         instant.disablesAnimations = true
+        let path = currentPath
         withTransaction(instant) {
-            if path.last == session { path[path.count - 1] = mate } else { path.append(mate) }
+            if path.wrappedValue.openSession == session {
+                path.wrappedValue[path.wrappedValue.count - 1] = .session(mate)
+            } else {
+                path.wrappedValue.append(.session(mate))
+            }
         }
         showPanes(mate.id, holding: false)
     }
@@ -194,12 +246,17 @@ struct ContentView: View {
     private func openPending(_ sessions: [Session]? = nil) {
         guard let opening, let session = (sessions ?? client.sessions).first(where: { $0.id == opening }) else { return }
         self.opening = nil
-        path = [session]
+        if openInCurrentTab {
+            currentPath.wrappedValue = [.session(session)]
+        } else {
+            tab = .inbox
+            inboxPath = [.session(session)]
+        }
     }
 
     /// An open conversation shows its newest turn, so that turn is seen.
     private func recordSeen() {
-        for opened in path {
+        for opened in inboxPath.sessions + spacesPath.sessions {
             if let session = client.sessions.first(where: { $0.id == opened.id }) { seen.record(session) }
         }
     }

@@ -1,25 +1,52 @@
 #if DEBUG
 import SwiftUI
 
-/// A made-up home page with a remote space, a pinned Agent, a child Agent,
-/// a to-do, an unseen finish and folded terminals, for UI tests and
+/// A made-up home with a remote space, a pinned Agent, a child Agent,
+/// a to-do, an unseen finish and plain terminals, for UI tests and
 /// screenshots without running Agents: SIMCTL_CHILD_COMPANION_SAMPLE_HOME=1.
+/// SIMCTL_CHILD_COMPANION_SAMPLE_TAB=spaces starts on the Spaces tab.
 struct SampleHomeView: View {
     static var requested: Bool { ProcessInfo.processInfo.environment["COMPANION_SAMPLE_HOME"] != nil }
 
-    @State private var home = Self.home(now: .now)
+    @State private var data = Self.data(now: .now)
+    @State private var tab: HomeTab = ProcessInfo.processInfo.environment["COMPANION_SAMPLE_TAB"] == "spaces" ? .spaces : .inbox
+    @State private var inboxPath: [Route] = []
+    @State private var spacesPath: [Route] = []
 
     var body: some View {
-        NavigationStack {
-            HomeList(home: home, queued: { $0 == "t4" }, newSession: {}) {}
-                .navigationTitle(String(localized: "home.title", defaultValue: "Agents"))
-                .navigationDestination(for: Session.self) { session in
-                    Text(session.title).navigationTitle(session.title)
+        let seen: [String: UInt64] = [:]
+        TabView(selection: $tab) {
+            Tab("Inbox", systemImage: "tray.fill", value: HomeTab.inbox) {
+                stack($inboxPath, title: "Inbox") {
+                    InboxList(inbox: makeInbox(sessions: data.sessions, spaces: data.spaces, seen: seen),
+                              queued: { $0 == "t4" }, newSession: {}) {}
+                }
+            }
+            .badge(makeInbox(sessions: data.sessions, spaces: data.spaces, seen: seen).badge)
+            Tab("Spaces", systemImage: "square.grid.2x2.fill", value: HomeTab.spaces) {
+                stack($spacesPath, title: "Spaces") {
+                    SpacesList(board: makeSpacesBoard(sessions: data.sessions, spaces: data.spaces, seen: seen),
+                               newSession: {}) {}
+                }
+            }
+        }
+    }
+
+    private func stack<Root: View>(_ path: Binding<[Route]>, title: LocalizedStringKey, @ViewBuilder root: () -> Root) -> some View {
+        NavigationStack(path: path) {
+            root()
+                .navigationTitle(title)
+                .navigationDestination(for: Route.self) { route in
+                    HomeRouteView(route: route, sessions: data.sessions, spaces: data.spaces, seen: [:],
+                                  queued: { $0 == "t4" }) { session in
+                        Text(session.title).navigationTitle(session.title)
+                            .toolbar(.hidden, for: .tabBar)
+                    }
                 }
         }
     }
 
-    static func home(now: Date) -> Home {
+    static func data(now: Date) -> (sessions: [Session], spaces: [Space]) {
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         let sessions = #"""
         [
@@ -55,7 +82,7 @@ struct SampleHomeView: View {
         let decoder = JSONDecoder()
         let decodedSessions = (try? decoder.decode([Session].self, from: Data(SampleText.localized(sessions).utf8))) ?? []
         let decodedSpaces = (try? decoder.decode([Space].self, from: Data(SampleText.localized(spaces).utf8))) ?? []
-        return makeHome(sessions: decodedSessions, spaces: decodedSpaces)
+        return (decodedSessions, decodedSpaces)
     }
 }
 
