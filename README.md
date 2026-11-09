@@ -54,6 +54,7 @@ The phone reaches the Gateway over your **tailnet** or, when it isn't on one, th
 ## Features
 
 - **Needs you, first.** Agents blocked on a question or a permission prompt rise to the top of the home page, across every Space and machine.
+- **Notifications without an Apple developer account.** When an agent needs you, stops on an error or finishes a turn, the Gateway notifies the phone through the free [Bark](https://bark.day.app) app, end-to-end encrypted if you like. Tapping one opens that agent in Yochi. Nothing is sent while Yochi is open on the phone, or once the reply has been read on the Mac.
 - **Native conversations.** For Claude Code, the Gateway reads the agent's own transcript and the app shows it as messages, file edits with line counts, sub-tasks, todos and messages between sessions.
 - **Answer prompts with a tap.** The app reads Claude Code's dialogs off the screen (permission prompts, pickers, notices) and turns them into a card with real buttons.
 - **Send without taking over.** Messages go in through herdr-core and wait for the terminal to be idle, so typing on the phone never fights the person at the desk.
@@ -154,6 +155,14 @@ yochi pair
 
 Scan the QR code with the iPhone camera. It opens a `yochi://pair` link in the app. You can also type the Mac's tailnet address and the 8-character code into the app. The code works once and expires after five minutes.
 
+**5. Optional: notifications.** Install [Bark](https://apps.apple.com/app/id1403753865) on the iPhone, copy its push address, and:
+
+```sh
+yochi push bark https://api.day.app/<your-key>/ --encrypt
+```
+
+`--encrypt` prints an AES key to set in Bark's Push Encryption (AES256, CBC), so neither Bark's server nor Apple can read what agents are doing. A test notification follows.
+
 ## CLI reference
 
 ```text
@@ -174,6 +183,10 @@ yochi [OPTIONS] [COMMAND]
 | `yochi relay status` | The Relay in use, whether the Gateway is connected and how many phones can use it |
 | `yochi relay rotate` | Move this Gateway to a new address on the Relay. The old one, and pairing links that carry it, stop working |
 | `yochi relay off` | Stop using the Relay |
+| `yochi push bark <KEY or URL> [--encrypt \| --key <KEY>] [--server <URL>]` | Notify the phone through Bark when an agent needs you or finishes, and send a test notification. `--encrypt` makes a new key for Bark's Push Encryption |
+| `yochi push test` | Send a test notification |
+| `yochi push status` | Where notifications go, and whether they're encrypted |
+| `yochi push off` | Stop sending notifications |
 | `yochi service install` | Install or update the LaunchAgent and start it, with the current settings |
 | `yochi service status` | Whether the LaunchAgent is installed and running, where it listens and where it logs |
 | `yochi service uninstall` | Stop the LaunchAgent and remove it |
@@ -184,6 +197,7 @@ yochi [OPTIONS] [COMMAND]
 | `--hc <PATH>` | `YOCHI_HC` | `hc` |
 | `--state-dir <DIR>` | `YOCHI_STATE_DIR` | `~/Library/Application Support/Yochi` |
 | `--key <KEY>` (`relay use`) | `YOCHI_RELAY_KEY` | none |
+| `--key <KEY>` (`push bark`) | `YOCHI_BARK_KEY` | none |
 
 <details>
 <summary><b>Notes on running it as a service</b></summary>

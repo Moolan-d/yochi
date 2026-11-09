@@ -12,6 +12,7 @@ mod lang;
 mod layout;
 mod mux;
 mod noise;
+mod notify;
 mod observe;
 mod relay;
 mod relay_setup;
@@ -98,6 +99,12 @@ enum Command {
         #[command(subcommand)]
         action: RelayAction,
     },
+    /// Notify the phone through Bark when an Agent needs you or finishes,
+    /// while Yochi isn't open on it.
+    Push {
+        #[command(subcommand)]
+        action: PushAction,
+    },
     /// Run the Gateway at login, as a LaunchAgent.
     Service {
         #[command(subcommand)]
@@ -121,6 +128,33 @@ enum TailnetAction {
         #[command(flatten)]
         listen: ListenArg,
     },
+}
+
+#[derive(Subcommand)]
+enum PushAction {
+    /// Send notifications to the Bark app (https://bark.day.app), then send a
+    /// test one. Takes effect in the running Gateway at once.
+    Bark {
+        /// The device key Bark shows, or the whole address it copies
+        /// (https://api.day.app/<key>/…).
+        target: String,
+        /// Your own Bark server, if you run one.
+        #[arg(long)]
+        server: Option<String>,
+        /// Encrypt notifications so Bark's server and Apple can't read them:
+        /// prints a new key to set in Bark's Push Encryption.
+        #[arg(long, conflicts_with = "key")]
+        encrypt: bool,
+        /// Encrypt with this key (16, 24 or 32 characters), already set in Bark.
+        #[arg(long, env = "YOCHI_BARK_KEY", hide_env_values = true)]
+        key: Option<String>,
+    },
+    /// Send a test notification.
+    Test,
+    /// Show where notifications go.
+    Status,
+    /// Stop sending notifications.
+    Off,
 }
 
 #[derive(Subcommand)]
@@ -201,6 +235,7 @@ async fn main() -> Result<()> {
         },
         Command::Tailnet { action } => tailnet_command(&store, action).await,
         Command::Relay { action } => relay_command(&store, action),
+        Command::Push { action } => push_command(&store, action).await,
         Command::Service { action, label } => match action {
             ServiceAction::Install(serve) => install(&label, serve.listen.listen, args.state_dir, &serve.hc).await,
             ServiceAction::Uninstall => {
@@ -358,6 +393,57 @@ async fn answering(addr: SocketAddr) -> bool {
     tokio::time::timeout(Duration::from_secs(1), tokio::net::TcpStream::connect(addr))
         .await
         .is_ok_and(|connected| connected.is_ok())
+}
+
+async fn push_command(store: &Store, action: PushAction) -> Result<()> {
+    let dir = store.dir();
+    // The CLI has no phone to ask; the Mac's own language stands in.
+    let lang = lang::Lang::from_tag(std::env::var("LANG").ok().as_deref());
+    match action {
+        PushAction::Bark { target, server, encrypt, key } => {
+            let key = if encrypt { Some(notify::new_key()?) } else { key };
+            let config = notify::Config::new(&target, server.as_deref(), key)?;
+            config.save(dir)?;
+            println!("Notifications go to Bark at {}.", config.server);
+            if encrypt && let Some(key) = &config.key {
+                println!();
+                println!("In Bark, open Push Encryption and set:");
+                println!("  Algorithm  AES256");
+                println!("  Mode       CBC");
+                println!("  Key        {key}");
+                println!("  IV         any 16 letters or digits (each notification brings its own)");
+                println!();
+                println!("Until then the test below reads \"Decryption Failed\"; `yochi push test` sends another.");
+            }
+            push_test(&config, lang).await;
+        }
+        PushAction::Test => match notify::Config::load(dir)? {
+            Some(config) => push_test(&config, lang).await,
+            None => println!("Notifications are off; `yochi push bark <key>` turns them on."),
+        },
+        PushAction::Status => match notify::Config::load(dir)? {
+            Some(config) => {
+                println!("Bark       {}", config.server);
+                println!("Encrypted  {}", if config.key.is_some() { "yes" } else { "no" });
+            }
+            None => println!("Notifications are off; `yochi push bark <key>` turns them on."),
+        },
+        PushAction::Off => {
+            if notify::Config::remove(dir)? {
+                println!("Notifications are off.");
+            } else {
+                println!("Notifications were already off.");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn push_test(config: &notify::Config, lang: lang::Lang) {
+    match notify::send(config, notify::test_message(lang), None).await {
+        Ok(()) => println!("Sent a test notification."),
+        Err(error) => println!("The test notification wasn't sent: {error:#}"),
+    }
 }
 
 fn relay_command(store: &Store, action: RelayAction) -> Result<()> {

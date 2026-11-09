@@ -34,6 +34,7 @@ use crate::herdr::CoreView;
 use crate::lang::Lang;
 use crate::layout::Space;
 use crate::mux;
+use crate::notify;
 use crate::relay::{self, RelayDevice};
 use crate::resume::{self, Replay};
 use crate::tailnet;
@@ -72,6 +73,8 @@ struct AppState {
     tailnet: watch::Receiver<tailnet::State>,
     /// Terminal streams a phone can come back to, by resume token.
     streams: resume::Registry<Claim>,
+    /// Phones with Yochi open, which notifications wait for.
+    phones: Arc<notify::Phones>,
 }
 
 /// Who opened a connection, and which way.
@@ -261,7 +264,9 @@ pub async fn serve(listen: Listen, store: Store, hc: String, view: watch::Receiv
     let (about_sender, about) = watch::channel(About::default());
     tokio::spawn(about::run(hc.clone(), view.clone(), about_sender));
     let (tailnet_state, tailnet) = watch::channel(tailnet::State::Waiting);
-    let state = AppState { hc, view, store, devices, changes: Arc::default(), about, tailnet, streams: Default::default() };
+    let phones = Arc::new(notify::Phones::default());
+    tokio::spawn(notify::run(store.dir().to_path_buf(), view.clone(), phones.clone()));
+    let state = AppState { hc, view, store, devices, changes: Arc::default(), about, tailnet, streams: Default::default(), phones };
     let app = with_mux(api(state.clone()), state.clone());
     let keys = state.store.gateway_key()?;
     let relay = relay::Relay { router: app.clone(), store: state.store.clone(), devices: state.devices.clone(), keys };
@@ -985,6 +990,8 @@ async fn unpaired(devices: &mut watch::Receiver<Vec<Device>>, device: &str) {
 }
 
 async fn push(mut socket: WebSocket, state: AppState, caller: Caller, lang: Lang) {
+    // The app holds this socket only while it is in the foreground.
+    let _here = state.phones.arrive(lang);
     let device = caller.device.clone();
     let mut tailnet = state.tailnet.clone();
     let mut view = state.view.clone();
@@ -1361,7 +1368,7 @@ while True:
         let devices = Arc::new(watch::Sender::new(store.devices().unwrap()));
         let state = AppState {
             hc: hc.to_str().unwrap().into(), view, store: Arc::new(store), devices,
-            changes: Arc::default(), about, tailnet, streams: Default::default(),
+            changes: Arc::default(), about, tailnet, streams: Default::default(), phones: Arc::default(),
         };
         let app = Router::new().route("/v0/observe", get(observe)).with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
