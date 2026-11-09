@@ -18,34 +18,37 @@ struct ChangesView: View {
 
     private var turn: UInt64? { client.sessions.first { $0.id == session }?.turn }
 
-    var body: some View {
-        List {
-            if case .loaded(let list) = load, !list.files.isEmpty {
-                Section {
-                    ForEach(list.files) { file in
-                        NavigationLink {
-                            ChangeDiffView(session: session, file: file, client: client)
-                        } label: {
-                            FileChangeRow(file: file)
-                        }
-                        .accessibilityIdentifier("change-\(file.path)")
-                    }
-                } header: {
-                    summary(list)
-                } footer: {
-                    Text(list.truncated ? "Showing the first \(list.files.count) files. Read-only on the phone: nothing can be staged or committed." : "Read-only on the phone: nothing can be staged or committed.")
-                }
-                if let askToCommit {
+        var body: some View {
+List {
+                Group {
+                if case .loaded(let list) = load, !list.files.isEmpty {
                     Section {
-                        Button("Ask Agent to Commit", systemImage: "checkmark.seal") { askToCommit() }
-                            .accessibilityIdentifier("askToCommit")
+                        ForEach(list.files) { file in
+                            NavigationLink {
+                                ChangeDiffView(session: session, file: file, client: client)
+                            } label: {
+                                FileChangeRow(file: file)
+                            }
+                            .accessibilityIdentifier("change-\(file.path)")
+                        }
+                    } header: {
+                        summary(list)
                     } footer: {
-                        Text("Puts “\(Self.commitRequest)” in the message field. You send it from the conversation.")
+                        Text(list.truncated ? "Showing the first \(list.files.count) files. Read-only on the phone: nothing can be staged or committed." : "Read-only on the phone: nothing can be staged or committed.")
+                    }
+                    if let askToCommit {
+                        Section {
+                            Button("Ask Agent to Commit", systemImage: "checkmark.seal") { askToCommit() }
+                                .accessibilityIdentifier("askToCommit")
+                        } footer: {
+                            Text("Puts “\(Self.commitRequest)” in the message field. You send it from the conversation.")
+                        }
                     }
                 }
             }
+            .homeRow()
         }
-        .listStyle(.insetGrouped)
+        .homeListStyle()
         .overlay { placeholder }
         .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)

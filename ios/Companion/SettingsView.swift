@@ -39,7 +39,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            HomeForm {
                 Section {
                     if let config {
                         NavigationLink {
@@ -162,7 +162,7 @@ struct GatewayDetailView: View {
     @State private var confirmingForget = false
 
     var body: some View {
-        Form {
+        HomeForm {
             Section("Connection") {
                 LabeledContent("Address", value: config.host.isEmpty ? String(localized: "Relay only") : config.host)
                     .accessibilityIdentifier("gateway.host")

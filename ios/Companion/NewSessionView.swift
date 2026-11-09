@@ -63,7 +63,7 @@ struct NewSessionView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            HomeForm {
                 if !machines.isEmpty {
                     Section("Machine") {
                         Picker("Machine", selection: $machine) {

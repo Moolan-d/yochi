@@ -144,6 +144,21 @@ extension View {
     }
 }
 
+/// A form in the home's colors, so Settings, pairing and the rest match the
+/// pages they open from.
+struct HomeForm<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Form {
+            // A Group hands the row colors to each section it holds.
+            Group { content }.homeRow()
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color.homePage)
+    }
+}
+
 /// An Agent: its space's tile with the program's badge, its title, what it
 /// asks or does, where it is, and its state at the trailing edge.
 struct InboxRow: View {

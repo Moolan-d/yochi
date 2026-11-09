@@ -288,7 +288,7 @@ struct PairingView: View {
     }
 
     var body: some View {
-        Form {
+        HomeForm {
             Section {
                 LabeledContent("Address") {
                     TextField("Address", text: $host, prompt: Text(throughRelay ? "Relay only" : "100.x.y.z"))
