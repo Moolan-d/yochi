@@ -3,6 +3,11 @@
 //! or a connected machine. Only the Gateway's side of herdr-core is touched, so
 //! it is not a Takeover and does not resize anything. Its `herdr.space` label
 //! has the Herdr desktop app take it into a space, in a tab of its own.
+//!
+//! A program is typed into the machine's own shell rather than started
+//! directly, as the Herdr desktop app does: core runs programs with its own
+//! environment, and when launchd started it that PATH lacks the folders the
+//! user's shell adds, such as `~/.local/bin` where Claude Code lives.
 
 use crate::core::{RequestError, error_kind, request as request_core};
 use crate::lang::Lang;
@@ -11,6 +16,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 const RUN_TIMEOUT: Duration = Duration::from_secs(30);
+const TYPE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_ARGV: usize = 8;
 pub const MAX_ARG_BYTES: usize = 512;
 pub const MAX_CWD_BYTES: usize = 4096;
@@ -57,11 +63,50 @@ pub async fn run(hc: &str, request: RunRequest, lang: Lang) -> Response {
         },
     };
     match tokio::time::timeout(RUN_TIMEOUT, request_core(hc, "terminal.run", params(&request, &space))).await {
-        Ok(Ok(reply)) => map_reply(id, machine.as_deref(), reply, lang),
+        Ok(Ok(reply)) => {
+            let response = map_reply(id, machine.as_deref(), reply, lang);
+            if let Response::RunCreated { session, .. } = &response
+                && let Some(line) = command_line(&request.argv)
+            {
+                type_line(hc, session, &line).await;
+            }
+            response
+        }
         Ok(Err(RequestError::BeforeSend(error))) => Response::failed(id, "unavailable", format!("{error:#}")),
         // The call may have started a terminal; say so rather than offer a retry.
         Ok(Err(RequestError::AfterSend(error))) => Response::failed(id, "unknown", format!("{error:#}")),
         Err(_) => Response::failed(id, "unknown", lang.pick("创建超时，结果未知", "Timed out creating it; the result is unknown")),
+    }
+}
+
+/// Types the program into the new shell. The shell reads it once it is up,
+/// so this need not wait for its prompt. If it fails the shell is still
+/// there, open on the phone, for the user to type into.
+async fn type_line(hc: &str, session: &str, line: &str) {
+    let params = json!({"terminal": session, "text": line});
+    match tokio::time::timeout(TYPE_TIMEOUT, request_core(hc, "terminal.send", params)).await {
+        Ok(Ok(reply)) if reply.get("error").is_none() => {}
+        Ok(Ok(reply)) => eprintln!("run: typing `{line}` into {session}: {}", reply["error"]),
+        Ok(Err(RequestError::BeforeSend(err) | RequestError::AfterSend(err))) => eprintln!("run: typing `{line}` into {session}: {err:#}"),
+        Err(_) => eprintln!("run: typing `{line}` into {session}: timed out"),
+    }
+}
+
+/// The program and its arguments as a shell line, each quoted if it needs
+/// it; None for the shell itself.
+fn command_line(argv: &[String]) -> Option<String> {
+    if argv.is_empty() {
+        return None;
+    }
+    Some(argv.iter().map(|arg| quote(arg)).collect::<Vec<_>>().join(" "))
+}
+
+fn quote(arg: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_-./:=@%+,".contains(c);
+    if !arg.is_empty() && arg.chars().all(plain) {
+        arg.to_owned()
+    } else {
+        format!("'{}'", arg.replace('\'', r"'\''"))
     }
 }
 
@@ -109,7 +154,8 @@ fn validate(request: &RunRequest, lang: Lang) -> Result<(), String> {
 
 fn params(request: &RunRequest, space: &str) -> Value {
     let mut params = json!({
-        "argv": request.argv,
+        // The machine's own shell; the program is typed into it.
+        "argv": [],
         // The Gateway is no terminal: never make it the new terminal's parent,
         // and never type news about it anywhere.
         "no_parent": true,
@@ -159,7 +205,7 @@ mod tests {
         let mut request = request();
         request.cwd = "  ".into();
         let params = params(&request, "sp1");
-        assert_eq!(params["argv"], json!(["claude"]));
+        assert_eq!(params["argv"], json!([]));
         assert!(params.get("cwd").is_none());
         assert!(params.get("on").is_none());
         assert_eq!(params["no_parent"], json!(true));
@@ -177,6 +223,14 @@ mod tests {
         assert_eq!(params["cwd"], json!("/root/app"));
         assert_eq!(params["on"], json!("vps-us"));
         assert_eq!(params["argv"], json!([]));
+    }
+
+    #[test]
+    fn a_program_is_typed_into_the_shell() {
+        assert_eq!(command_line(&[]), None);
+        assert_eq!(command_line(&["claude".into()]).as_deref(), Some("claude"));
+        let argv = ["claude".into(), "--model".into(), "opus 4".into(), "it's".into(), "~/x".into()];
+        assert_eq!(command_line(&argv).as_deref(), Some(r"claude --model 'opus 4' 'it'\''s' '~/x'"));
     }
 
     #[test]

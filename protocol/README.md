@@ -262,6 +262,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interru
 
 Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，带 `no_parent` 与 `no_notify`：Gateway 不是终端，新终端不会挂在它下面，也不会向任何父终端写入提示。它不 attach，因此不是 Takeover。
 
+- `argv` 不直接交给 core 启动：Gateway 先启动该机器的 shell（macOS 上是登录 shell），再用 `terminal.send` 把 `argv` 拼成的命令行（必要时加单引号）打进去，和 Herdr 桌面端一样。core 用自己的环境启动程序，由 launchd 拉起时 PATH 里没有 `~/.local/bin` 这类用户 shell 才加的目录，直接启动会报 `spawn_failed`。程序退出后终端留在 shell。打字失败时仍返回 `run_created`，App 打开的是那个 shell。旧版 Gateway 直接启动 `argv`。
 - `session` 已是会话列表里的 id（远端带机器前缀）；Gateway 通过 `sessions` 推送把新终端列出来，App 据此打开它。
 - `kind` 同 Agent Message，常见为 `machine_unknown`、`spawn_failed`、`name_taken`、`invalid_params`。
 - 请求写出后连接中断或超时，都返回 `unknown`：终端可能已经创建，App 提示到列表确认，不自动重试。
