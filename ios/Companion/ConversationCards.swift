@@ -5,7 +5,7 @@ private struct CardBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(10)
-            .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+            .background(Color.homeCard, in: .rect(cornerRadius: 12, style: .continuous))
     }
 }
 

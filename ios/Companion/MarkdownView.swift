@@ -332,7 +332,7 @@ private struct MarkdownBlockView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 10))
+            .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10))
         case .table(let table):
             MarkdownTableView(table: table)
         case .rule:
@@ -425,7 +425,7 @@ private struct MarkdownTableView: View {
                    alignment: alignment == .center ? .top : alignment == .trailing ? .topTrailing : .topLeading)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(header ? Color(.secondarySystemBackground) : .clear)
+            .background(header ? Color(.tertiarySystemFill) : .clear)
             .overlay(alignment: .bottom) {
                 if row < table.rows.count - 1 { Rectangle().fill(Color(.separator)).frame(height: 0.5) }
             }

@@ -114,7 +114,7 @@ struct SlashSuggestions: View {
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxHeight: 240)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color(.systemBackground), in: .rect(cornerRadius: 14, style: .continuous))
+        .background(Color.homeCard, in: .rect(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(.separator))
         }

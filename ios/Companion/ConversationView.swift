@@ -46,6 +46,9 @@ struct ConversationPane: View {
                 list
             }
         }
+        // The home's warm gray, so the page matches the list it opens from.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.homePage)
         .onAppear {
             opened = .now
             if !feed.items.isEmpty { Perf.shown("conversation", since: opened, cached: true) }
@@ -426,7 +429,7 @@ private struct ToolRow: View {
             }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(Color.homeCard, in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Tool \(item.name ?? ""): \(item.summary ?? ""), \(stateText)\(answer.map { String(localized: ", selected: \($0)") } ?? "")")
         .accessibilityHint(item.output == nil ? "" : "Double-tap to show or hide the output")
@@ -545,7 +548,7 @@ struct TaskRow: View {
             }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(Color.homeCard, in: .rect(cornerRadius: 12, style: .continuous))
     }
 }
 

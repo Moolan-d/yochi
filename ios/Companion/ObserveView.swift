@@ -407,7 +407,7 @@ struct ObserveView: View {
                     .padding(.bottom, 5)
                 }
             }
-            .background(Color(.systemBackground), in: .rect(cornerRadius: 22, style: .continuous))
+            .background(Color.homeCard, in: .rect(cornerRadius: 22, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(Color(.separator))
