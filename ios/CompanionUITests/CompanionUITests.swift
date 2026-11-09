@@ -1081,7 +1081,8 @@ final class CompanionUITests: XCTestCase {
         let fill = app.buttons["填入 /exit"]
         XCTAssert(fill.waitForExistence(timeout: 5), "/exit did not ask first")
         snapshot("3 exit asks")
-        app.buttons["取消"].tap()
+        // The sheet's own: a dialog card on the Agent's screen can have one too.
+        app.sheets.firstMatch.buttons["取消"].tap()
         XCTAssertEqual(field.value as? String, "/exi")
         leaveAndUnpair(app)
     }
