@@ -107,7 +107,7 @@ final class ConversationTests: XCTestCase {
         XCTAssertNil(feed.mode)
     }
 
-    /// An Agent by what runs; its page by what the terminal started with.
+    /// An Agent by what runs; its page by whether Claude Code runs in it.
     func testAgentAndPageForm() throws {
         func session(program: String?, command: String?, state: String? = nil) throws -> Session {
             var json: [String: Any] = ["id": "t1", "title": "x", "cwd": "/"]
@@ -121,7 +121,7 @@ final class ConversationTests: XCTestCase {
         XCTAssertTrue(started.showsConversation, "a terminal started as Claude Code is its conversation")
         let typed = try session(program: "claude", command: "zsh", state: "working")
         XCTAssertTrue(typed.isAgent)
-        XCTAssertFalse(typed.showsConversation, "Claude Code typed into a shell shows the terminal")
+        XCTAssertTrue(typed.showsConversation, "Claude Code typed into a shell is its conversation too")
         let unreported = try session(program: "codex", command: nil)
         XCTAssertTrue(unreported.isAgent, "a known Agent CLI before (or without) a status")
         XCTAssertFalse(unreported.showsConversation)
@@ -135,7 +135,8 @@ final class ConversationTests: XCTestCase {
         XCTAssertFalse(server.isAgent, "a dev server is a plain terminal")
 
         XCTAssertEqual(AgentBrand.color(for: started), AgentBrand.claude, "a conversation Agent wears its brand color")
-        for plain in [typed, unreported, pi, shell, server] {
+        XCTAssertEqual(AgentBrand.color(for: typed), AgentBrand.claude)
+        for plain in [unreported, pi, shell, server] {
             XCTAssertNil(AgentBrand.color(for: plain), "\(plain.program ?? "-") keeps the plain mark")
         }
     }

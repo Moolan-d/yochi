@@ -127,10 +127,19 @@ struct ObserveView: View {
         return screen.result
     }
 
-    /// A terminal started as Claude Code has the conversation page, even
-    /// before its first message: its dialogs show there from the screen.
-    /// Anything else, an Agent typed into a shell included, has its terminal.
-    private var isConversation: Bool { session.showsConversation }
+    /// Claude Code has the conversation page, even before its first message:
+    /// its dialogs show there from the screen. Anything else has its
+    /// terminal. The More menu switches between them. Once Claude Code was
+    /// seen here the page stays the conversation after it quits.
+    private var isConversation: Bool {
+        if let choice = client.pageChoices[session.id] { return choice == .conversation }
+        return session.showsConversation || currentSession.showsConversation
+    }
+
+    /// Whether the page can be the conversation at all.
+    private var hasConversation: Bool {
+        client.pageChoices[session.id] != nil || session.showsConversation || currentSession.showsConversation
+    }
 
     var body: some View {
         let _ = Perf.count("ObserveView")
@@ -222,13 +231,23 @@ struct ObserveView: View {
             client.feedStore.cache.acquire(cacheKey, feeds)
             // Kept streams carry on; the Gateway sends a kept conversation
             // whole again on a new connection, which replaces it in place.
-            if isConversation, conversation.needsStart { conversation.start(config, session: session.id) }
-            if isConversation, screen.needsStart { screen.start(config, session: session.id) }
+            startConversation()
+        }
+        // Switched in the More menu, or Claude Code started in the shell.
+        .onChange(of: isConversation) { _, _ in
+            composerFocused = false
+            startConversation()
         }
         .onDisappear {
             // The streams stay open while the cache keeps them.
             client.feedStore.cache.release(cacheKey, feeds)
         }
+    }
+
+    private func startConversation() {
+        guard isConversation else { return }
+        if conversation.needsStart { conversation.start(config, session: session.id) }
+        if screen.needsStart { screen.start(config, session: session.id) }
     }
 
     /// Disabling the composer while it sends clears the focus state but
@@ -592,7 +611,7 @@ struct ObserveView: View {
 
     /// Everything that is not the page itself sits behind one button, one
     /// kind per section: the terminals in the Agent's Herdr tab to switch
-    /// to, the changes, and the terminal's text size.
+    /// to, conversation or terminal, the changes, and the terminal's text size.
     private var moreMenu: some View {
         let panes = tabPanes
         return Menu {
@@ -613,6 +632,16 @@ struct ObserveView: View {
                     } label: {
                         Label("Switch Pane", systemImage: "rectangle.split.2x1")
                     }
+                }
+            }
+            if hasConversation {
+                Section {
+                    Picker("Show", selection: Binding(get: { isConversation ? SessionPage.conversation : .terminal },
+                                                      set: { client.pageChoices[session.id] = $0 })) {
+                        Label("Conversation", systemImage: "bubble.left.and.text.bubble.right").tag(SessionPage.conversation)
+                        Label("Terminal", systemImage: "terminal").tag(SessionPage.terminal)
+                    }
+                    .pickerStyle(.inline)
                 }
             }
             Section {

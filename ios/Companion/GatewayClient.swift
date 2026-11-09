@@ -80,6 +80,9 @@ final class GatewayClient {
     private var host: String?
     /// Session pages' streams, kept a while after a page leaves.
     @ObservationIgnored let feedStore = SessionFeedStore()
+    /// The page the user picked for a session, by id, while the app runs; a
+    /// session without one shows its default.
+    var pageChoices: [String: SessionPage] = [:]
     /// How the app reaches the Gateway right now, once connected.
     private(set) var path: GatewayPath?
 
@@ -530,4 +533,10 @@ final class GatewayClient {
         if error is DecodingError { return String(localized: "The Gateway sent data the app doesn't recognize") }
         return error.localizedDescription
     }
+}
+
+/// What a session's page shows: its conversation or its terminal.
+enum SessionPage: Hashable {
+    case conversation
+    case terminal
 }

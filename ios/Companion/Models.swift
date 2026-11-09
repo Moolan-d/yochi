@@ -72,10 +72,11 @@ struct Session: Decodable, Identifiable, Hashable {
         agentPrograms.contains(program.lowercased())
     }
 
-    /// Its page is the conversation (GUI): the terminal itself is Claude
-    /// Code, the one Agent the app has a conversation page for. Claude Code
-    /// typed into a shell, and every other Agent, show the terminal (TUI).
-    var showsConversation: Bool { command?.lowercased() == "claude" }
+    /// Its page is the conversation (GUI) unless the user picks the terminal:
+    /// Claude Code runs in it, the one Agent the app has a conversation page
+    /// for, whether the terminal started as it or it was typed into a shell.
+    /// Every other Agent shows the terminal (TUI).
+    var showsConversation: Bool { program?.lowercased() == "claude" || command?.lowercased() == "claude" }
 
     /// 「工作中 · 12s」 while the Agent works and the Gateway says since when.
     func working(at now: Date) -> String? {

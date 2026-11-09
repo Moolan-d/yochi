@@ -174,6 +174,9 @@ struct NewSessionView: View {
             switch await client.runSession(machine: machine, cwd: directory, argv: program.argv,
                                            space: space.isEmpty ? nil : space) {
             case .created(let session):
+                // Claude Code is typed into the new shell; its conversation
+                // shows from the start rather than once it is up.
+                if program == .agent { client.pageChoices[session] = .conversation }
                 onCreated(session)
                 dismiss()
             case .failed(_, let message):

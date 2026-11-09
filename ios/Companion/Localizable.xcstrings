@@ -1172,6 +1172,16 @@
         }
       }
     },
+    "Conversation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话"
+          }
+        }
+      }
+    },
     "Conversation · %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3249,6 +3259,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Shift Tab，上一项"
+          }
+        }
+      }
+    },
+    "Show" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示"
           }
         }
       }
