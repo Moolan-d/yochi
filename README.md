@@ -6,260 +6,121 @@
 
 **Your coding agents, in your pocket.**
 
-A native iPhone app for the Claude Code, Codex and pi sessions that Herdr runs on your Mac and the machines it reaches over ssh.
+An iPhone app for the Claude Code, Codex and pi sessions you run in [Herdr](https://herdr.dev).
 
 ![iOS 18+](https://img.shields.io/badge/iOS-18%2B-000000?logo=apple&logoColor=white)
-![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
-![Rust 2024](https://img.shields.io/badge/Rust-2024-000000?logo=rust&logoColor=white)
-![Terminal: libghostty](https://img.shields.io/badge/terminal-libghostty-3551F3)
-![Encryption: Noise IKpsk2](https://img.shields.io/badge/relay-Noise%20IKpsk2-2E7D32)
 ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 English | [简体中文](./README.zh-CN.md)
 
 </div>
 
----
-
-Yochi is not a remote desktop. A small Gateway on your Mac, `yochi`, reads the sessions herdr-core already manages, including those on remote machines, and serves them to the phone in a shape a phone is good at. Agents waiting on you come first. Conversations are rendered as messages and tool cards rather than a squinted-at terminal. Claude Code's permission prompts become native buttons. When you do need the terminal, it is a real one: Ghostty's.
-
-The phone reaches the Gateway over your **tailnet** or, when it isn't on one, through a **Relay you deploy yourself** that only ever sees end-to-end encrypted bytes.
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center"><img src=".github/assets/home.png" width="260" alt="Home: agents that need you, then each Space" /></td>
-    <td align="center"><img src=".github/assets/conversation.png" width="260" alt="Conversation: messages, edits, sub-tasks and todos" /></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Home</b>: who needs you, then every Space</sub></td>
-    <td align="center"><sub><b>Conversation</b>: edits, sub-tasks, todos</sub></td>
-  </tr>
-</table>
-</div>
-
-## Contents
-
-- [Features](#features)
-- [How it fits together](#how-it-fits-together)
-- [How it connects](#how-it-connects)
-- [Quick start](#quick-start)
-- [CLI reference](#cli-reference)
-- [Security model](#security-model)
-- [Development](#development)
-- [Repository layout](#repository-layout)
-- [Acknowledgements](#acknowledgements)
-- [License](#license)
-
-## Features
-
-- **Needs you, first.** Agents blocked on a question or a permission prompt rise to the top of the home page, across every Space and machine.
-- **Notifications without an Apple developer account.** When an agent needs you, stops on an error or finishes a turn, the Gateway notifies the phone through the free [Bark](https://bark.day.app) app, end-to-end encrypted if you like. Tapping one opens that agent in Yochi. Nothing is sent while Yochi is open on the phone, or once the reply has been read on the Mac.
-- **Native conversations.** For Claude Code, the Gateway reads the agent's own transcript and the app shows it as messages, file edits with line counts, sub-tasks, todos and messages between sessions.
-- **Answer prompts with a tap.** The app reads Claude Code's dialogs off the screen (permission prompts, pickers, notices) and turns them into a card with real buttons.
-- **Send without taking over.** Messages go in through herdr-core and wait for the terminal to be idle, so typing on the phone never fights the person at the desk.
-- **A real terminal when you need one.** Terminals render with libghostty. Watching is read-only and keeps the desktop's size. Typing takes over, and the terminal re-lays itself out at phone width until the desktop takes it back. Full-screen programs scroll their own history under your finger. Long-press selects and copies.
-- **Organized the way Herdr is.** Spaces become collapsible groups. Child agents sit under their parent. Pinned agents lead. Plain shells fold away. Remote Spaces carry their machine's badge.
-- **Read-only changes.** See what a session has changed in its git repository, diffs included, without the phone ever naming a path or running a command.
-- **Start new sessions.** Start an agent from a recent directory, filed into the right Space.
-- **Two ways in, neither required.** Tailnet and Relay are independent. Run either or both. A phone paired over the Relay moves to the tailnet on its own once the Mac joins one.
-- **English and Chinese.** The app follows the iPhone's language, and so does the text the Gateway writes itself, such as notices and errors. A Chinese iPhone gets Chinese; any other language gets English.
-
-## How it fits together
-
 <p align="center">
-  <img src=".github/assets/yochi-architecture.svg" alt="Yochi architecture: the phone app, tailnet and relay paths, the Gateway on the main Mac, herdr-core and remote machines" />
+  <img src=".github/assets/en/inbox.png" width="32%" alt="Inbox: an agent asking to run npm test sits at the top, under Needs You, then the agents that are done, working and idle" />
+  <img src=".github/assets/en/conversation.png" width="32%" alt="A conversation: the request, a to-do list, file edits with line counts, sub-tasks and messages between sessions" />
+  <img src=".github/assets/en/spaces.png" width="32%" alt="Spaces: each Herdr Space on this Mac and on a remote machine, with what is running in it" />
 </p>
 
-| Piece | Where it runs | What it does |
-| --- | --- | --- |
-| **Yochi app** (`ios/`) | iPhone | SwiftUI and libghostty. Session list, conversation page, terminal page and pairing. |
-| **Gateway** (`gateway/`) | Your main Mac | The `yochi` binary, in Rust. Authenticates paired phones, exposes a narrow, versioned API (`/v0/…`) and calls herdr-core for them. Runs as a LaunchAgent. |
-| **herdr-core** | Your main Mac | Herdr's session runtime, reached through `hc`. It owns the terminals, and the remote machines it reaches over ssh. Yochi creates no second session system. |
-| **Relay** (`relay/`) | Your Cloudflare account, or any host with Docker | Optional. A WebSocket rendezvous that the Gateway dials out to, so no inbound port is opened. Forwards ciphertext only. |
+You leave your desk with three agents working. One finishes, one hits an error, and one has been waiting twenty minutes for you to say yes to `npm test`. With Yochi your phone tells you the moment an agent needs you. You read what it asks, tap Allow, and it carries on. When you have more to say, you write it the way you would in a chat, and it reaches the agent as soon as the agent is free.
 
-Remote machines need nothing installed. Everything goes through the main Mac's herdr-core. When that Mac sleeps, the phone can't reach any session, remote ones included.
+Yochi talks to your own Mac and nothing else: there is no account to create and no service of ours in between. It works over Tailscale, or through a small relay you deploy to your own Cloudflare account in one command.
 
-### How sessions are shown
+## What it does
 
-<p align="center">
-  <img src=".github/assets/yochi-sessions.svg" alt="How Herdr's Host, Space, Tab, Pane and Terminal levels map onto the Yochi home page" />
-</p>
+- **Who needs you comes first.** The Inbox puts every agent waiting on you at the top, with what it asks: to run a command, to pick an option, to answer a question. It does this across every Space and every machine Herdr reaches.
+- **Notifications, without a developer account.** When an agent needs you, fails or finishes, your phone hears about it through the free [Bark](https://bark.day.app) app, encrypted end to end if you like. Tap one to land on that agent. Nothing arrives while Yochi is open, or once you've read the reply on the Mac.
+- **Conversations you can read.** A Claude Code session reads like a chat: your messages, its replies, the files it edited with lines added and removed, its sub-tasks and its to-do list.
+- **Answer with a tap.** Permission prompts and pickers become cards with real buttons.
+- **Reply without grabbing the keyboard.** A message waits until the agent is free, so you never type over someone at the desk. Slash commands complete as you type.
+- **A real terminal when you want one.** Every terminal is drawn by [Ghostty](https://ghostty.org). Watch it at the desktop's size, or start typing and it fits your phone, with a key bar for Esc, Ctrl, Tab and the arrows. Full-screen programs scroll under your finger, and a long press copies.
+- **See what changed.** Each session's changes in git, diffs included.
+- **Start new work.** Start an agent in a recent folder and it lands in the right Space.
+- **Organized like Herdr.** Spaces, child agents under their parent, pinned agents first, plain shells tucked away, and remote machines marked.
+- **English and Chinese.** Yochi follows your iPhone's language.
 
-Herdr nests Host → Space → Tab → Pane → Terminal. A phone needs fewer levels:
+## Get started
 
-- A **Space** becomes a group. A **Host** becomes a badge on remote Spaces.
-- A **Tab** isn't a level. A named Tab shows as a line on its rows.
-- A **Pane** only sets the order. One **Terminal** is one row.
+There is no App Store build yet, so you build the app yourself. You need a Mac running Herdr, with Rust, Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and either Tailscale on both the Mac and the iPhone or a free Cloudflare account.
 
-What opens on a tap depends on what runs in the terminal. A known agent opens the conversation page. Anything else opens the terminal page.
+1. **Install the Gateway on your Mac.** It starts at login and stays out of your way.
 
-## How it connects
+   ```sh
+   git clone https://github.com/Moolan-d/yochi && cd yochi
+   cargo install --path gateway
+   yochi service install
+   ```
 
-| | Tailnet | Relay |
-| --- | --- | --- |
-| Address | `ws://<Mac's tailnet IPv4>:7420` | `https://<your relay>` |
-| Encryption | WireGuard (Tailscale) | Noise IKpsk2, end to end between app and Gateway |
-| Phone needs | Tailscale | Nothing extra |
-| Mac needs | Tailscale | An outbound connection |
-| Turn on or off | `yochi tailnet on\|off` | `yochi relay setup` / `use` / `off` |
+2. **Put the app on your iPhone.**
 
-The Gateway never listens on the LAN or localhost, and the tailnet is preferred whenever both are up. Being able to reach the Gateway isn't authorization: every connection still needs a paired device's token.
+   ```sh
+   cd ios
+   scripts/fetch-libghostty.sh
+   xcodegen generate
+   open Companion.xcodeproj
+   ```
 
-## Quick start
+   <details>
+   <summary>Signing with your own Apple ID</summary>
 
-There is no App Store build yet. You build the app from source.
+   Put your team in `ios/Local.xcconfig`, which git ignores. A free Personal Team also needs a bundle ID suffix:
 
-**Requirements**
+   ```
+   DEVELOPMENT_TEAM = ABCDE12345
+   BUNDLE_ID_SUFFIX = .yourname
+   ```
 
-- A Mac running Herdr, with `hc` on your `PATH`
-- Rust (stable) for the Gateway, and Xcode with Swift 6 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) for the app
-- Tailscale on the Mac and the phone, **or** Node.js and a Cloudflare account for a Relay
+   </details>
 
-**1. Install the Gateway and keep it running**
+3. **Pair.** Run `yochi pair` on the Mac and scan the code with the iPhone's camera. The code works once, for five minutes.
 
-```sh
-cargo install --path gateway   # installs `yochi` into ~/.cargo/bin
-yochi service install          # LaunchAgent: starts at login, restarts if it crashes
-yochi service status
-```
+<details>
+<summary><b>Use it away from your tailnet</b></summary>
 
-**2. Optional: deploy a Relay** so the phone works off the tailnet
-
-```sh
-yochi relay setup                              # Worker on *.workers.dev
-yochi relay setup --domain relay.example.com   # or on a hostname in your Cloudflare zone
-```
-
-**3. Build the app**
+Deploy a relay to your own Cloudflare account. It runs on the free plan and only ever sees encrypted bytes.
 
 ```sh
-cd ios
-scripts/fetch-libghostty.sh
-xcodegen generate
-open Companion.xcodeproj
+yochi relay setup                              # on *.workers.dev
+yochi relay setup --domain relay.example.com   # or on your own domain
 ```
 
-To run on a device, put your signing team in `ios/Local.xcconfig` (not in git). A free Personal Team also needs a bundle ID suffix:
+Pair again after this, and the phone uses whichever way is up, preferring Tailscale.
 
-```
-DEVELOPMENT_TEAM = ABCDE12345
-BUNDLE_ID_SUFFIX = .yourname
-```
+</details>
 
-**4. Pair**
+<details>
+<summary><b>Turn on notifications</b></summary>
 
-```sh
-yochi pair
-```
-
-Scan the QR code with the iPhone camera. It opens a `yochi://pair` link in the app. You can also type the Mac's tailnet address and the 8-character code into the app. The code works once and expires after five minutes.
-
-**5. Optional: notifications.** Install [Bark](https://apps.apple.com/app/id1403753865) on the iPhone, copy its push address, and:
+Install [Bark](https://apps.apple.com/app/id1403753865) on the iPhone, copy its push address, then:
 
 ```sh
 yochi push bark https://api.day.app/<your-key>/ --encrypt
 ```
 
-`--encrypt` prints an AES key to set in Bark's Push Encryption (AES256, CBC), so neither Bark's server nor Apple can read what agents are doing. A test notification follows.
-
-## CLI reference
-
-```text
-yochi [OPTIONS] [COMMAND]
-```
-
-| Command | What it does |
-| --- | --- |
-| `yochi` / `yochi serve` | Run the Gateway in the foreground (the default) |
-| `yochi pair` | Show a single-use pairing code and QR code, valid for five minutes |
-| `yochi devices` | List paired devices |
-| `yochi revoke <ID>` | Unpair a device. Its open connections close within seconds |
-| `yochi tailnet on` | Listen on the tailnet whenever this Mac is on it (the default) |
-| `yochi tailnet off` | Stop listening on the tailnet and close its connections. Phones then come in only through the Relay |
-| `yochi tailnet status` | Whether the tailnet is on, this Mac's address and whether the Gateway is listening there |
-| `yochi relay setup [--domain <host>] [--name <worker>]` | Deploy a Relay to your Cloudflare account (Workers, free plan) and use it. Needs Node.js. wrangler asks you to log in the first time |
-| `yochi relay use <URL> [--key <KEY>]` | Use a Relay you already run. The running Gateway connects within seconds |
-| `yochi relay status` | The Relay in use, whether the Gateway is connected and how many phones can use it |
-| `yochi relay rotate` | Move this Gateway to a new address on the Relay. The old one, and pairing links that carry it, stop working |
-| `yochi relay off` | Stop using the Relay |
-| `yochi push bark <KEY or URL> [--encrypt \| --key <KEY>] [--server <URL>]` | Notify the phone through Bark when an agent needs you or finishes, and send a test notification. `--encrypt` makes a new key for Bark's Push Encryption |
-| `yochi push test` | Send a test notification |
-| `yochi push status` | Where notifications go, and whether they're encrypted |
-| `yochi push off` | Stop sending notifications |
-| `yochi service install` | Install or update the LaunchAgent and start it, with the current settings |
-| `yochi service status` | Whether the LaunchAgent is installed and running, where it listens and where it logs |
-| `yochi service uninstall` | Stop the LaunchAgent and remove it |
-
-| Option | Environment | Default |
-| --- | --- | --- |
-| `--listen <ADDR>` | `YOCHI_LISTEN` | This Mac's tailnet IPv4, port `7420` |
-| `--hc <PATH>` | `YOCHI_HC` | `hc` |
-| `--state-dir <DIR>` | `YOCHI_STATE_DIR` | `~/Library/Application Support/Yochi` |
-| `--key <KEY>` (`relay use`) | `YOCHI_RELAY_KEY` | none |
-| `--key <KEY>` (`push bark`) | `YOCHI_BARK_KEY` | none |
-
-<details>
-<summary><b>Notes on running it as a service</b></summary>
-
-- `service install` records the absolute paths of `hc` and `tailscale`, since launchd doesn't inherit your shell's `PATH`, along with any `--listen` and `--state-dir` you pass.
-- It refuses to install while another Gateway holds the port, so stop that one first.
-- Logs go to `~/Library/Logs/Yochi/gateway.log`.
-- If Tailscale is off or missing, the Gateway keeps serving through the Relay. It looks for a tailnet address every 5 seconds and starts listening there once one appears.
-- With the tailnet off, `yochi pair` puts only Relay details in its link, so the phone doesn't need Tailscale. When the tailnet comes back, already-paired phones learn its address and switch over on their own.
-- Upgrading from `companion-gateway`: `yochi service install` removes the old `dev.companion.gateway` agent, and pairings move from `~/Library/Application Support/Companion Gateway`. The iOS bundle ID is now `dev.yochi.app`, so the app installs as a new app and you'll need to pair again.
+`--encrypt` prints a key to paste into Bark's Push Encryption (AES256, CBC), so neither Bark's server nor Apple can read what your agents are doing. A test notification follows.
 
 </details>
 
-## Security model
+Everything else the `yochi` command can do is in the [Gateway guide](gateway/README.md).
 
-- **Paired devices only.** Every endpoint except `/v0/pair` needs a device token. Pairing codes are single-use, last five minutes and are void after five wrong tries. `yochi revoke` cuts a device off within seconds.
-- **A narrow API, not a proxy.** The Gateway allows a short list of herdr-core methods (`events.subscribe`, `terminal.*`, `file.read`, `machine.exec`) and uses the last two only internally: to read agent transcripts and to run a fixed set of read-only git commands. The phone never names a file path or a command.
-- **The terminal is still a terminal.** A paired phone can type into the sessions it sees, and a shell can do anything your account can. Treat pairing like handing over an unlocked laptop, and revoke devices you no longer hold.
-- **The Relay can't read your traffic.** App and Gateway run Noise IKpsk2 end to end. The pairing link carries the Gateway's static key and a one-time secret. The Relay forwards opaque frames and needs only a registration key, which you generate. It runs in your own account.
+## Privacy and security
 
-The wire protocol is in [`protocol/README.md`](protocol/README.md).
+- **Only phones you pair can connect.** Pairing codes work once and expire. `yochi devices` lists your phones, and `yochi revoke` cuts one off within seconds.
+- **The relay can't read anything.** The phone and your Mac encrypt end to end, and the relay runs in your own account.
+- **The phone asks for sessions, not files.** It never names a path or a command on your Mac. It sees changes through a fixed set of read-only git commands.
+- **A terminal is still a terminal.** A paired phone can type into the sessions it sees, so treat it like an unlocked laptop.
 
-## Development
+The details are in the [Gateway guide](gateway/README.md#security-model) and the [protocol](protocol/README.md).
 
-```sh
-# Gateway
-cd gateway
-cargo run              # serve
-cargo run -- pair      # in another terminal
-cargo test
+## Contributing
 
-# Relay
-cd relay
-npm install
-npm test                  # Node version
-npm run test:cloudflare   # Worker version, via wrangler dev --local
-
-# iOS: unit tests run in Xcode (⌘U). UI tests drive the simulator against a
-# throwaway Gateway on port 7421 and a local Relay, so a Gateway on 7420 is left alone.
-cd ios
-scripts/ui-test.sh
-TESTS="testFullScreenScrollsHistory testPairObserveAndUnpair" scripts/ui-test.sh
-scripts/perf-test.sh   # frame pacing, time to first content, main-thread hangs
-```
-
-Code names: the repository and Xcode project are still called **Companion**. The product, CLI and bundle ID are **Yochi**.
-
-## Repository layout
-
-```
-gateway/    Rust Gateway and the `yochi` CLI
-ios/        SwiftUI app (XcodeGen project, libghostty fetched by script)
-relay/      Self-hostable Relay: Cloudflare Worker or Node + Docker
-protocol/   The versioned app ↔ Gateway API
-```
+[CONTRIBUTING.md](CONTRIBUTING.md) covers building, testing and how the repository is laid out.
 
 ## Acknowledgements
 
-- [Ghostty](https://ghostty.org): libghostty renders every terminal in the app.
+- [Herdr](https://herdr.dev): Yochi is a client of herdr-core and runs on its sessions.
+- [Ghostty](https://ghostty.org): libghostty draws every terminal in the app.
 - [Heeler](https://github.com/ZingerLittleBee/Heeler) (Apache-2.0): the ANSI screen model and the Claude Code dialog reader are ported from it.
-- [Alma Relay](https://github.com/yetone/alma-relay) (MIT): `relay/` is a fork, cut down to the WebSocket tunnel. See [`relay/LICENSE`](relay/LICENSE).
-- Herdr: Yochi is a client of herdr-core and depends on its session runtime.
+- [Alma Relay](https://github.com/yetone/alma-relay) (MIT): `relay/` is a fork, cut down to the WebSocket tunnel.
 
 ## License
 
