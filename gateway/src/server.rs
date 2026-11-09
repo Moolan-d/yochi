@@ -29,6 +29,7 @@ use crate::commands;
 use crate::conversation::{Item, Pending};
 use crate::core::Client;
 use crate::devices::{Device, Store};
+use crate::draft;
 use crate::following::{Follower, Update};
 use crate::herdr::CoreView;
 use crate::lang::Lang;
@@ -167,6 +168,9 @@ enum ServerMessage<'a> {
     Pending { pending: Option<&'a Pending> },
     /// Claude Code's permission mode as of its latest message.
     Mode { mode: &'a str },
+    /// The reply the Agent is writing, read off its screen; null once there
+    /// is none or the transcript has it.
+    Draft { text: Option<&'a str> },
 }
 
 #[derive(Deserialize)]
@@ -437,6 +441,9 @@ struct ObserveQuery {
     offset: Option<u64>,
     /// The language the phone shows; see `LangQuery`.
     lang: Option<String>,
+    /// 1 (conversation): send the reply the Agent is writing, read off its
+    /// screen, as `draft` messages.
+    drafts: Option<u8>,
 }
 
 /// What the app may send on a stream. Only a takeover resizes, scrolls or types.
@@ -902,7 +909,8 @@ async fn conversation(
         return StatusCode::NOT_FOUND.into_response();
     }
     let lang = Lang::from_tag(query.lang.as_deref());
-    ws.on_upgrade(move |socket| follow(socket, state, device, query.session, lang))
+    let drafts = query.drafts == Some(1);
+    ws.on_upgrade(move |socket| follow(socket, state, device, query.session, lang, drafts))
 }
 
 /// What a tick depends on; a change in it means look again now.
@@ -913,7 +921,11 @@ fn watched(view: &CoreView, id: &str) -> Option<(Option<u64>, u64, Option<crate:
 /// Polls the transcript while a phone follows the conversation: every second
 /// while the Agent works or waits and for a few seconds after any change
 /// (Claude Code may finish before its last line is written), else every few.
-async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: String, lang: Lang) {
+/// With `drafts`, it also watches the screen while the Agent works and sends
+/// the reply being written, at most every `DRAFT_EVERY`.
+async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: String, lang: Lang, drafts: bool) {
+    const DRAFT_EVERY: Duration = Duration::from_millis(300);
+    const DRAFT_KEPT: Duration = Duration::from_secs(5);
     let mut client = match Client::connect(&state.hc).await {
         Ok(client) => client,
         Err(err) => {
@@ -927,18 +939,25 @@ async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: Stri
     let mut access = state.access(&caller);
     let mut seen = None;
     let mut busy_until = Instant::now();
-    loop {
+    let mut reader: Option<draft::Reader> = None;
+    // The draft the app shows; None also once it has cleared its own.
+    let mut shown: Option<String> = None;
+    // When the Agent stopped with a draft still shown.
+    let mut stopped_at: Option<Instant> = None;
+    let mut draft_tick = tokio::time::interval(DRAFT_EVERY);
+    draft_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    'follow: loop {
         let Some(session) = view.borrow_and_update().sessions.iter().find(|s| s.id == id).cloned() else {
             let reason = Value::String("finished".into());
             let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
-            return;
+            break 'follow;
         };
         let updates = match follower.tick(&mut client, &session).await {
             Ok(updates) => updates,
             Err(err) => {
                 let reason = Value::String(format!("{err:#}"));
                 let _ = send(&mut socket, &ServerMessage::Closed { reason: &reason }).await;
-                return;
+                break 'follow;
             }
         };
         for update in &updates {
@@ -949,7 +968,43 @@ async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: Stri
                 Update::Mode(mode) => ServerMessage::Mode { mode },
             };
             if send(&mut socket, &message).await.is_err() {
-                return;
+                break 'follow;
+            }
+            // The app drops its draft when the conversation starts over or a
+            // reply arrives; show it again if it is still being written.
+            if matches!(update, Update::Conversation { .. })
+                || matches!(update, Update::Items(items) if items.iter().any(|item| matches!(item, Item::Agent { .. })))
+            {
+                shown = None;
+                if let Some(reader) = reader.as_mut() {
+                    reader.touch();
+                }
+            }
+        }
+        let writing = drafts && session.status.as_ref().is_some_and(|status| status.state == "working");
+        if writing && reader.is_none() {
+            match draft::Reader::attach(&state.hc, &id, (session.cols, session.rows)).await {
+                Ok(attached) => reader = Some(attached),
+                Err(err) => eprintln!("draft: {err:#}"),
+            }
+        } else if !writing && let Some(done) = reader.take() {
+            done.detach().await;
+        }
+        if let Some(reader) = reader.as_mut() {
+            reader.resize((session.cols, session.rows));
+        }
+        // Once the Agent stops, the draft stays until the transcript has the
+        // reply (it is written a moment later), so the reply doesn't blink.
+        if reader.is_some() {
+            stopped_at = None;
+        } else if let Some(text) = shown.as_deref() {
+            let since = *stopped_at.get_or_insert_with(Instant::now);
+            if draft::recorded(text, follower.latest_reply()) || since.elapsed() > DRAFT_KEPT {
+                shown = None;
+                stopped_at = None;
+                if send(&mut socket, &ServerMessage::Draft { text: None }).await.is_err() {
+                    break 'follow;
+                }
             }
         }
         let current = watched(&view.borrow(), &id);
@@ -965,16 +1020,31 @@ async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: Stri
             tokio::select! {
                 () = &mut sleep => break,
                 changed = view.changed() => {
-                    if changed.is_err() { return }
+                    if changed.is_err() { break 'follow }
                     if watched(&view.borrow(), &id) != seen { break }
                 },
                 incoming = socket.recv() => match incoming {
-                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break 'follow,
                     Some(Ok(_)) => {}
                 },
-                () = access.lost() => return,
+                more = async { reader.as_mut().expect("reader").read().await }, if reader.is_some() => {
+                    // The stream ended (the program exited): look again now.
+                    if !more { reader = None; break }
+                },
+                _ = draft_tick.tick(), if reader.is_some() => {
+                    let Some(text) = reader.as_mut().and_then(draft::Reader::draft) else { continue };
+                    let text = text.filter(|text| !draft::recorded(text, follower.latest_reply()));
+                    if text != shown {
+                        if send(&mut socket, &ServerMessage::Draft { text: text.as_deref() }).await.is_err() { break 'follow }
+                        shown = text;
+                    }
+                },
+                () = access.lost() => break 'follow,
             }
         }
+    }
+    if let Some(reader) = reader {
+        reader.detach().await;
     }
 }
 

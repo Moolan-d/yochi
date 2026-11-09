@@ -91,6 +91,18 @@ impl Follower {
         Ok(updates)
     }
 
+    /// The Agent's latest reply in the current turn, as the transcript has it.
+    pub fn latest_reply(&self) -> Option<&str> {
+        for item in self.conversation.recent().iter().rev() {
+            match item {
+                Item::Agent { text, .. } => return Some(text),
+                Item::User { .. } => return None,
+                _ => {}
+            }
+        }
+        None
+    }
+
     fn pending_update(&mut self, session: &Session, updates: &mut Vec<Update>) {
         let pending = self.conversation.pending(session.status.as_ref());
         let fresh = matches!(updates.last(), Some(Update::Conversation { .. }));

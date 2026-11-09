@@ -5,6 +5,7 @@ mod commands;
 mod conversation;
 mod core;
 mod devices;
+mod draft;
 mod exec;
 mod following;
 mod herdr;

@@ -124,8 +124,7 @@ fn nonzero(n: u16) -> NonZero<u16> {
     NonZero::new(n).unwrap_or(NonZero::<u16>::MIN)
 }
 
-/// For tests and logs: the rendered text without styling.
-#[allow(dead_code)]
+/// The rendered text without styling.
 pub fn plain(rendered: &str) -> String {
     let mut out = String::new();
     let mut chars = rendered.chars().peekable();

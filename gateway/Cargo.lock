@@ -1506,6 +1506,7 @@ dependencies = [
  "snow",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "unicode-width",
  "vt100",
 ]
 

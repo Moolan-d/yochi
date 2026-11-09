@@ -271,7 +271,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 ### 对话（Conversation History）
 
-`ws://<host>:7420/v0/conversation?session=<id>`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。
+`ws://<host>:7420/v0/conversation?session=<id>[&drafts=1]`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。
 
 ```jsonc
 // 开始时、以及换了对话（/clear、Agent 重启）时：整份替换
@@ -284,6 +284,9 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
 // 权限模式，取 transcript 最近一条消息记下的；变化时、以及每次 conversation 之后发
 {"type": "mode", "mode": "acceptEdits"}
+// 只在带 drafts=1 时：Agent 正在写、transcript 里还没有的回复；正式的 agent 条目到达或不再写时为 null
+{"type": "draft", "text": "回复写到这里的部分"}
+{"type": "draft", "text": null}
 // 会话结束或读取失败
 {"type": "closed", "reason": "finished"}
 ```
@@ -327,7 +330,11 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - `notice.code` 标明是哪种提示：`interrupted`、`compacted`，以后可能有新值；API 错误等没有 `code`。App 认识的 `code` 用自己的文字显示，其余显示 `text`（已按 `lang` 选好语言）。旧版 Gateway 不发送 `code`。
 - `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
 - `mode` 原样转发 Claude Code 的值（`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`，以后可能有新值）。transcript 只在发消息时记模式：第一条消息之前没有 `mode`，在终端里切换后要到下一条消息才更新。App 优先显示屏幕底部的模式提示，切换按「按键」逐次发 `shift+tab`（ADR 0005）。
-- Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。
+- Claude Code 的回复按内容块写入 transcript，一个回复写完才出现。正在写的部分只在屏幕上：App 带 `drafts=1` 时，Gateway 在会话状态为 `working` 期间以只读方式（observe）附着终端，从屏幕读出最后一个 `⏺` 回复块，最多每 300 ms 发一次 `draft`，只在变化时发。
+  - `text` 是纯文本（没有 Markdown 标记），换行由 Gateway 合并成段落；超过 1500 字时只留结尾。回复开头滚出屏幕后，只有屏幕上剩下的部分。
+  - 正式的 `agent` 条目到达、且内容已含草稿时发 `null`；不再工作后最多保留 5 秒等 transcript 跟上，之后也发 `null`。屏幕最后一块不是回复（在想、在跑工具）时同样为 `null`。
+  - 解析在 Gateway 上做，整屏不经过 Relay，也不花 LLM token。目前只认 Claude Code 的屏幕。
+  - 旧 App 不带 `drafts=1`，Gateway 不附着、不发 `draft`；旧版 Gateway 忽略该参数，App 只是看不到草稿。不认识的消息类型 App 跳过。
 - Gateway 在有 App 订阅时才读取：Agent 工作或等待时、以及状态变化后几秒内每秒一次，其余每 4 秒。core 的 `file.read` 每次读取整个文件，超过 64 MB 的 transcript 读取失败。
 
 ### 查看终端（Observer）
