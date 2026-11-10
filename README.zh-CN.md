@@ -56,7 +56,7 @@ Yochi 只连你自己的 Mac：不用注册账号，中间也没有我们的服�
    cd ios
    scripts/fetch-libghostty.sh
    xcodegen generate
-   open Companion.xcodeproj
+   open Yochi.xcodeproj
    ```
 
    <details>

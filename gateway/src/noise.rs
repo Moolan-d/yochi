@@ -201,7 +201,7 @@ pub mod tests {
     }
 
     /// Fixed-key handshake and messages the iOS Noise is checked against
-    /// (`ios/CompanionTests/Fixtures/noise/ikpsk2.json`). The test fails if the
+    /// (`ios/YochiTests/Fixtures/noise/ikpsk2.json`). The test fails if the
     /// file is out of date; `WRITE_NOISE_VECTORS=1 cargo test` rewrites it.
     #[test]
     fn interop_vectors_for_the_app_are_current() {
@@ -265,7 +265,7 @@ pub mod tests {
             "to_phone": { "messages": to_phone, "plain": [{ "binary": false, "text": "{\"type\":\"hello\"}" }, { "binary": true, "hex": "000102ff" }] },
         });
         let text = serde_json::to_string_pretty(&vectors).unwrap() + "\n";
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ios/CompanionTests/Fixtures/noise/ikpsk2.json");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ios/YochiTests/Fixtures/noise/ikpsk2.json");
         if std::env::var_os("WRITE_NOISE_VECTORS").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, &text).unwrap();

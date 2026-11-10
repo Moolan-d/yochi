@@ -1,4 +1,4 @@
-//! Companion API v0, all WebSocket (iOS blocks plain HTTP to tailnet IPs, not
+//! Yochi API v0, all WebSocket (iOS blocks plain HTTP to tailnet IPs, not
 //! `ws://`). `/v0/pair` trades a pairing code for a device token; the others
 //! need `Authorization: Bearer <device token>`:
 //! - `/v0/ws` pushes `hello`, then the whole session list whenever it changes.

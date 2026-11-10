@@ -7,7 +7,7 @@ It includes software developed by others:
 
 - Heeler (https://github.com/ZingerLittleBee/Heeler), Apache License 2.0.
   The ANSI screen model and the Claude Code dialog reader in
-  ios/Companion/Dialogs/ are ported from it.
+  ios/Yochi/Dialogs/ are ported from it.
 
 - Alma Relay (https://github.com/yetone/alma-relay), MIT License,
   Copyright (c) 2025-2026 yetone. relay/ is a fork of it and remains under

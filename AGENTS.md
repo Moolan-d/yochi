@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository. The user-facing overview 
 
 ## What this is
 
-Yochi watches and drives a Mac's Herdr terminals and coding agents from an iPhone. The repository and Xcode project are still called **Companion**; the product, CLI and bundle ID are **Yochi**.
+Yochi watches and drives a Mac's Herdr terminals and coding agents from an iPhone. The repository, the Xcode project and the product are all **Yochi**.
 
 | Path | What | Stack |
 | --- | --- | --- |
@@ -30,8 +30,8 @@ cd relay && npm install && npm test
 cd ios
 scripts/fetch-libghostty.sh       # once, into ios/Vendor
 xcodegen generate
-xcodebuild test -project Companion.xcodeproj -scheme Companion \
-  -destination 'platform=iOS Simulator,name=<simulator>' -only-testing:CompanionTests
+xcodebuild test -project Yochi.xcodeproj -scheme Yochi \
+  -destination 'platform=iOS Simulator,name=<simulator>' -only-testing:YochiTests
 
 # iOS UI tests: build the Gateway, start a throwaway one on port 7421 and a Relay on 7431
 scripts/ui-test.sh
@@ -44,10 +44,10 @@ TESTS="testPairObserveAndUnpair testShellCommandsRun" scripts/ui-test.sh
 
 ## Rules
 
-- **Leave the user's own sessions alone.** UI tests create, type into and kill only terminals named `companion-uitest*`. Never attach to, type into or close any other Herdr terminal. Never restart a Gateway on port 7420; that one is the user's.
+- **Leave the user's own sessions alone.** UI tests create, type into and kill only terminals named `yochi-uitest*`. Never attach to, type into or close any other Herdr terminal. Never restart a Gateway on port 7420; that one is the user's.
 - **Protocol changes stay backward compatible.** Older apps and older Gateways must keep working. Document every change in `protocol/README.md`, in the same commit as the code.
 - **Localization.**
-  - English is the development language. Chinese (`zh-Hans`) is a full translation in `ios/Companion/Localizable.xcstrings`.
+  - English is the development language. Chinese (`zh-Hans`) is a full translation in `ios/Yochi/Localizable.xcstrings`.
   - New UI text goes in as English. Wrap it in `String(localized:)` wherever the type is `String` rather than `LocalizedStringKey`.
   - Add the zh-Hans translation in the same change, with plural variations where a count can be 1.
   - Text the Gateway generates follows the language the phone sends when it connects. Prefer codes that the app localizes over free text.

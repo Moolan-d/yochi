@@ -56,7 +56,7 @@ There is no App Store build yet, so you build the app yourself. You need a Mac r
    cd ios
    scripts/fetch-libghostty.sh
    xcodegen generate
-   open Companion.xcodeproj
+   open Yochi.xcodeproj
    ```
 
    <details>

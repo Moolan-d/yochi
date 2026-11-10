@@ -11,7 +11,7 @@ relay/      The self-hostable Relay: a Cloudflare Worker, or Node and Docker
 protocol/   The versioned app ↔ Gateway API
 ```
 
-The repository and the Xcode project are still called **Companion**. The product, the CLI and the bundle ID are **Yochi**.
+The repository, the Xcode project and the product are all **Yochi**; the CLI is `yochi` and the bundle ID `dev.yochi.app`.
 
 How the pieces fit together, how the phone connects and the full CLI reference are in the [Gateway guide](gateway/README.md).
 
@@ -34,8 +34,8 @@ npm run test:cloudflare   # Worker version, via wrangler dev --local
 cd ios
 scripts/fetch-libghostty.sh
 xcodegen generate
-xcodebuild test -project Companion.xcodeproj -scheme Companion \
-  -destination 'platform=iOS Simulator,name=<simulator>' -only-testing:CompanionTests
+xcodebuild test -project Yochi.xcodeproj -scheme Yochi \
+  -destination 'platform=iOS Simulator,name=<simulator>' -only-testing:YochiTests
 
 # iOS UI tests drive the simulator against a throwaway Gateway on port 7421 and
 # a local Relay, so a Gateway on 7420 is left alone.
