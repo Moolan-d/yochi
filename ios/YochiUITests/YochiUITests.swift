@@ -729,7 +729,7 @@ final class YochiUITests: XCTestCase {
             _ = modeMenu(app)
         }
         XCTAssert(mode.isEnabled, "the mode stays disabled")
-        let before = mode.value as? String ?? ""
+        let before = mode.label
         snapshot("1 mode")
 
         let target = before.contains("计划") ? "普通" : "计划"
@@ -744,8 +744,9 @@ final class YochiUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["modeFailure"].exists, "the switch reported a failure")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         let reached = modeMenu(app)
-        XCTAssert((reached.value as? String ?? "").contains(target), "the menu reads \(reached.value ?? "")")
+        XCTAssert(reached.label.contains(target), "the menu reads \(reached.label)")
         snapshot("3 switched")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         leaveAndUnpair(app)
     }
 
@@ -1693,7 +1694,9 @@ final class YochiUITests: XCTestCase {
     /// Opens the composer's "+" menu and returns its permission mode submenu.
     @MainActor
     private func modeMenu(_ app: XCUIApplication) -> XCUIElement {
-        let mode = app.buttons["permissionMode"]
+        // A menu's items carry no identifiers: the submenu is found by its
+        // title, and its subtitle, the current mode, follows in the label.
+        let mode = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "权限模式")).firstMatch
         if !mode.exists { app.buttons["composerMenu"].tap() }
         XCTAssert(mode.waitForExistence(timeout: 5), "no mode in the + menu")
         return mode

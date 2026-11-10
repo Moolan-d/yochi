@@ -768,15 +768,21 @@ struct ObserveView: View {
     /// its subtitle. Disabled while the Agent works or a dialog is open.
     private func modePicker(_ mode: PermissionMode) -> some View {
         let targets = PermissionMode.targets(including: seenModes)
-        return Picker(selection: Binding(get: { mode }, set: switchMode(to:))) {
-            // Bypass shows when Claude Code is in it, but isn't offered.
-            ForEach(targets.contains(mode) ? targets : targets + [mode], id: \.self) { target in
-                Label(target.title, systemImage: target.symbol).tag(target)
+        // A submenu whose subtitle is the mode Claude Code is in.
+        return Menu {
+            Picker("Permission Mode", selection: Binding(get: { mode }, set: switchMode(to:))) {
+                // Bypass shows when Claude Code is in it, but isn't offered.
+                ForEach(targets.contains(mode) ? targets : targets + [mode], id: \.self) { target in
+                    Label(target.title, systemImage: target.symbol).tag(target)
+                }
             }
+            .pickerStyle(.inline)
         } label: {
-            Label("Permission Mode", systemImage: mode.symbol)
+            // A menu item's second text is its subtitle.
+            Text("Permission Mode")
+            Text(mode.title)
+            Image(systemName: mode.symbol)
         }
-        .pickerStyle(.menu)
         .disabled(!canSwitchMode)
         .accessibilityIdentifier("permissionMode")
     }
