@@ -219,7 +219,7 @@ struct ConversationPane: View {
         guard pinned, let id = arriving else { return }
         // Shown whole and its start still in view: a short reply. Later rows
         // pushing it up are followed as usual.
-        if let at = feed.arrivals[id]?.at, Date.now.timeIntervalSince(at) > 3 {
+        if let at = feed.arrivals[id]?.at, Date.now.timeIntervalSince(at) > Reveal.longest + 0.5 {
             arriving = nil
             return
         }
@@ -324,8 +324,8 @@ struct AgentReply: View {
     var body: some View {
         Group {
             if let reveal, !finished {
-                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                    MarkdownText(text: text, shown: reveal.shown(at: context.date))
+                TimelineView(.animation(minimumInterval: 1.0 / 60)) { context in
+                    MarkdownText(text: text, shown: reveal.position(at: context.date), fade: Reveal.fade)
                 }
                 .task(id: reveal.end) {
                     try? await Task.sleep(for: .seconds(max(0, reveal.end.timeIntervalSinceNow)))
@@ -348,9 +348,16 @@ struct AgentReply: View {
     }
 }
 
-/// How fast a reply appears: about 250 characters a second, a long one
-/// quicker so it never takes more than a couple of seconds.
+/// How a reply appears: typed out at about 120 characters a second, its
+/// newest characters fading in, a long one quicker so it never takes more
+/// than a few seconds. The position runs on past the end until the last
+/// character is clear.
 struct Reveal: Equatable {
+    /// Characters between one just showing and one fully drawn.
+    static let fade = 30.0
+    static let rate = 120.0
+    static let longest = 3.0
+
     let from: Int
     let total: Int
     let start: Date
@@ -361,16 +368,18 @@ struct Reveal: Equatable {
         let before = arrival.previous.map { MarkdownBlock.revealLength(of: MarkdownBlock.cachedParse($0)) } ?? 0
         from = min(before, total)
         let length = total - from
-        duration = length <= 0 ? 0 : min(2.5, max(0.4, Double(length) / 250))
+        duration = length <= 0 ? 0 : min(Self.longest, max(0.5, (Double(length) + Self.fade) / Self.rate))
         start = arrival.at
     }
 
     var end: Date { start.addingTimeInterval(duration) }
 
-    func shown(at date: Date) -> Int {
-        guard duration > 0 else { return total }
+    /// How far the reveal is: past `total` while the last characters fade in.
+    func position(at date: Date) -> Double {
+        let last = Double(total) + Self.fade
+        guard duration > 0 else { return last }
         let progress = min(1, max(0, date.timeIntervalSince(start) / duration))
-        return from + Int((Double(total - from) * progress).rounded(.up))
+        return Double(from) + (last - Double(from)) * progress
     }
 }
 

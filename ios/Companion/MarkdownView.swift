@@ -85,6 +85,44 @@ extension MarkdownBlock {
         return out
     }
 
+    /// The message as far as `position`, its newest characters fading in:
+    /// a character is clear once the position is `fade` past it, and the one
+    /// the position is on has only just begun to show. Code, tables and rules
+    /// are drawn without the fade.
+    static func revealed(_ blocks: [MarkdownBlock], at position: Double, fade: Double) -> [MarkdownBlock] {
+        var out = revealed(blocks, upTo: Int(position.rounded(.up)))
+        guard fade > 0 else { return out }
+        var start = 0
+        for index in out.indices {
+            let block = out[index]
+            let length = block.revealLength
+            defer { start += length }
+            // Clear already, or not text the fade can be drawn on.
+            guard Double(start + length) > position - fade else { continue }
+            switch block.kind {
+            case .paragraph, .heading, .listItem: break
+            case .code, .table, .rule: continue
+            }
+            let base: Color = block.quoteDepth > 0 ? .secondary : .primary
+            let content = block.content
+            let characters = content.characters
+            let first = max(0, Int((position - fade).rounded(.down)) - start)
+            guard first < length else { continue }
+            var at = characters.index(characters.startIndex, offsetBy: first)
+            var faded = AttributedString(content[content.startIndex..<at])
+            for offset in first..<length {
+                let next = characters.index(after: at)
+                var piece = AttributedString(content[at..<next])
+                let opacity = min(1, max(0, (position - Double(start + offset)) / fade))
+                if opacity < 1 { piece.swiftUI.foregroundColor = base.opacity(opacity) }
+                faded.append(piece)
+                at = next
+            }
+            out[index].content = faded
+        }
+        return out
+    }
+
     static func revealLength(of blocks: [MarkdownBlock]) -> Int {
         blocks.reduce(0) { $0 + $1.revealLength }
     }
@@ -241,8 +279,9 @@ extension MarkdownBlock {
 struct MarkdownText: View {
     let text: String
     /// Draw only this much of the message, as `MarkdownBlock.revealed` counts
-    /// it; nil draws all of it.
-    var shown: Int?
+    /// it, the last `fade` characters fading in; nil draws all of it.
+    var shown: Double?
+    var fade: Double = 0
 
     @ScaledMetric(relativeTo: .body) private var blockGap: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var itemGap: CGFloat = 6
@@ -251,7 +290,7 @@ struct MarkdownText: View {
     var body: some View {
         let _ = Perf.count("MarkdownText")
         let parsed = MarkdownBlock.cachedParse(text)
-        let blocks = shown.map { MarkdownBlock.revealed(parsed, upTo: $0) } ?? parsed
+        let blocks = shown.map { MarkdownBlock.revealed(parsed, at: $0, fade: fade) } ?? parsed
         VStack(alignment: .leading, spacing: 0) {
             ForEach(blocks.indices, id: \.self) { index in
                 MarkdownBlockView(block: blocks[index])

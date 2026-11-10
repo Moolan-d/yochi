@@ -242,7 +242,34 @@ final class ConversationTests: XCTestCase {
 
         let reveal = Reveal(text: "Some **bold** words", arrival: Arrival(previous: "Some", at: .distantPast))
         XCTAssertEqual(reveal.from, 4)
-        XCTAssertEqual(reveal.shown(at: .distantPast), 4)
-        XCTAssertEqual(reveal.shown(at: .now), 15)
+        XCTAssertEqual(reveal.position(at: .distantPast), 4)
+        // It runs on past the end until the last character is clear.
+        XCTAssertEqual(reveal.position(at: .now), 15 + Reveal.fade)
+    }
+
+    /// The newest characters fade in: the one just showing is faint, those
+    /// `fade` back are clear, and once past the end nothing is faded.
+    func testRevealFadesInItsNewestCharacters() throws {
+        let blocks = MarkdownBlock.parse("Title\n\nSome **bold** words")
+        func opacities(_ blocks: [MarkdownBlock]) -> [Double] {
+            blocks.flatMap { block in
+                block.content.runs.flatMap { run in
+                    let count = block.content[run.range].characters.count
+                    return Array(repeating: run.swiftUI.foregroundColor == nil ? 1.0 : 0.5, count: count)
+                }
+            }
+        }
+        let part = MarkdownBlock.revealed(blocks, at: 8.5, fade: 4)
+        XCTAssertEqual(part.map(\.text), ["Title", "Some"])
+        // The title is clear; the four characters after it are fading in.
+        XCTAssertEqual(opacities(part), [1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5])
+        // Styles stay with the characters they fade.
+        let bold = MarkdownBlock.revealed(blocks, at: 12, fade: 4)[1]
+        XCTAssertEqual(bold.text, "Some bo")
+        XCTAssertEqual(bold.content.runs.last?.inlinePresentationIntent, .stronglyEmphasized)
+        XCTAssertNotNil(bold.content.runs.last?.swiftUI.foregroundColor)
+
+        XCTAssertEqual(MarkdownBlock.revealed(blocks, at: 21 + 4, fade: 4), blocks)
+        XCTAssertEqual(MarkdownBlock.revealed(blocks, at: 12, fade: 0), MarkdownBlock.revealed(blocks, upTo: 12))
     }
 }
