@@ -3,9 +3,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Moolan-d/yochi/main/scripts/install.sh | sh
 #
-# Takes the release built for this Mac's architecture when one is published,
-# and otherwise builds from source with cargo (needs Rust and the Xcode
-# command line tools). Nothing else on the machine is touched; the Gateway's
+# Takes the release built for this Mac's architecture and checks its SHA-256.
+# A tagged version without a build for this Mac is built from that tag with
+# cargo (needs Rust and the Xcode command line tools). Nothing else on the machine is touched; the Gateway's
 # own state lives under ~/Library/Application Support/Yochi.
 #
 #   YOCHI_VERSION=v0.1.0   install a given release instead of the latest
@@ -41,37 +41,38 @@ else
 fi
 archive="yochi-$target.tar.gz"
 
-download() {
-    curl --fail --silent --show-error --location --retry 3 \
-        --output "$work/$1" "$base/$1" 2>/dev/null
+# Prints the HTTP status; fails only when GitHub could not be reached.
+fetch() {
+    curl --silent --show-error --location --retry 3 \
+        --output "$work/$1" --write-out '%{http_code}' "$base/$1"
 }
 
-if download "$archive"; then
+status=$(fetch "$archive") || die "could not reach GitHub to download $archive."
+if [ "$status" = 200 ]; then
     say "Downloading $base/$archive"
-    if download "$archive.sha256"; then
-        # The checksum file names the archive, so check it where it was saved.
-        ( cd "$work" && shasum -a 256 --check "$archive.sha256" >/dev/null 2>&1 ) \
-            || die "checksum mismatch for $archive"
-    else
-        say "No checksum published for $VERSION; skipping the check."
-    fi
+    [ "$(fetch "$archive.sha256")" = 200 ] || die "the release has no checksum for $archive."
+    # The checksum file names the archive, so check it where it was saved.
+    ( cd "$work" && shasum -a 256 --check "$archive.sha256" >/dev/null 2>&1 ) \
+        || die "checksum mismatch for $archive"
     mkdir "$work/dist"
     tar -xzf "$work/$archive" -C "$work/dist"
     [ -f "$work/dist/yochi" ] || die "$archive has no yochi binary"
     binary="$work/dist/yochi"
-else
-    command -v cargo >/dev/null 2>&1 || die \
-        "no release for $VERSION and no cargo to build one.
-Install Rust (https://rustup.rs) and run this again, or build by hand:
+elif [ "$status" != 404 ]; then
+    die "downloading $archive failed with HTTP $status."
+elif [ "$VERSION" = latest ]; then
+    # Building main here would install code no release has shipped.
+    die "no release is published yet. Pick a tagged version with YOCHI_VERSION=v…,
+or build from source:
   git clone https://github.com/$REPO && cd ${REPO#*/} && cargo install --path gateway"
-    say "No release for $VERSION; building from source with cargo."
-    command -v git >/dev/null 2>&1 || die "git and cargo are both needed to build from source."
+else
+    # A tag without binaries for this Mac: build that tag.
+    command -v cargo >/dev/null 2>&1 && command -v git >/dev/null 2>&1 || die \
+        "$VERSION has no build for $target, and building it needs git and cargo.
+Install Rust (https://rustup.rs) and run this again."
+    say "$VERSION has no build for $target; building it from source with cargo."
     clone=$work/src
-    if [ "$VERSION" = latest ]; then
-        git clone --quiet --depth 1 "https://github.com/$REPO.git" "$clone"
-    else
-        git clone --quiet --depth 1 --branch "$VERSION" "https://github.com/$REPO.git" "$clone"
-    fi
+    git clone --quiet --depth 1 --branch "$VERSION" "https://github.com/$REPO.git" "$clone"
     cargo install --quiet --locked --path "$clone/gateway" --root "$work/cargo"
     binary=$work/cargo/bin/yochi
 fi
