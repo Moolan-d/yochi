@@ -12,6 +12,7 @@ xcuserdata/
 DerivedData/
 /ios/Yochi/Info.plist
 /ios/Local.xcconfig
+/ios/YochiTests/Fixtures/snapshots/.record
 
 # Local notes: design records, task plans, diagram sources, vocabulary
 /docs/

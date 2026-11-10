@@ -1,0 +1,99 @@
+{
+  "associated" : [
+    {
+      "body" : [
+        "● Which colors?",
+        "→ Red, Blue",
+        "● Which size?",
+        "→ Medium",
+        "Ready to submit your answers?"
+      ],
+      "fingerprint" : {
+        "requestLines" : null,
+        "ruleLines" : null,
+        "value" : "561d3d91aaf41578270bd15b55e4aa5f891c0eae2c3d994660309b198ada7a71"
+      },
+      "focus" : {
+        "checked" : [
+
+        ],
+        "composerDraftGuard" : false,
+        "feedbackOrdinal" : null,
+        "focusedOrdinal" : 1,
+        "inputText" : null,
+        "keysMissOptions" : false,
+        "notesText" : null
+      },
+      "kind" : "claudeQuestionReview",
+      "note" : null,
+      "options" : [
+        {
+          "detail" : null,
+          "input" : null,
+          "isChecked" : null,
+          "isFocused" : true,
+          "label" : "Submit answers",
+          "number" : 1,
+          "ordinal" : 1,
+          "role" : "submit",
+          "shortcut" : null
+        },
+        {
+          "detail" : null,
+          "input" : null,
+          "isChecked" : null,
+          "isFocused" : false,
+          "label" : "Cancel",
+          "number" : 2,
+          "ordinal" : 2,
+          "role" : "cancel",
+          "shortcut" : null
+        }
+      ],
+      "picker" : null,
+      "positionLabel" : null,
+      "progress" : "Review your answers",
+      "rows" : {
+        "lowerBound" : 24,
+        "upperBound" : 38
+      },
+      "sourceSuffix" : null,
+      "subject" : {
+        "command" : null,
+        "commandDescription" : null,
+        "destinations" : [
+
+        ],
+        "environment" : null,
+        "filePath" : null,
+        "host" : null,
+        "notes" : [
+
+        ],
+        "planFilePath" : null,
+        "prompt" : null,
+        "question" : null,
+        "questionHeaders" : [
+          "Colors",
+          "Size"
+        ],
+        "reason" : null,
+        "reviewAnswers" : [
+          {
+            "answer" : "Red, Blue",
+            "question" : "Which colors?"
+          },
+          {
+            "answer" : "Medium",
+            "question" : "Which size?"
+          }
+        ],
+        "toolName" : null,
+        "url" : null,
+        "workspacePath" : null
+      },
+      "title" : "Review your answers"
+    }
+  ],
+  "case" : "dialog"
+}

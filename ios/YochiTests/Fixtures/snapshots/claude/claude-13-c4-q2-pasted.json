@@ -1,0 +1,115 @@
+{
+  "associated" : [
+    {
+      "body" : [
+
+      ],
+      "fingerprint" : {
+        "requestLines" : null,
+        "ruleLines" : null,
+        "value" : "90f6f15c871a70a512fca41cf2e41c46a2bfef7966ee8e0b4bfdef7c0a56b311"
+      },
+      "focus" : {
+        "checked" : [
+
+        ],
+        "composerDraftGuard" : false,
+        "feedbackOrdinal" : null,
+        "focusedOrdinal" : 3,
+        "inputText" : "Medium",
+        "keysMissOptions" : false,
+        "notesText" : null
+      },
+      "kind" : "claudeQuestion",
+      "note" : null,
+      "options" : [
+        {
+          "detail" : "Small",
+          "input" : null,
+          "isChecked" : null,
+          "isFocused" : false,
+          "label" : "Small",
+          "number" : 1,
+          "ordinal" : 1,
+          "role" : "answer",
+          "shortcut" : null
+        },
+        {
+          "detail" : "Large",
+          "input" : null,
+          "isChecked" : null,
+          "isFocused" : false,
+          "label" : "Large",
+          "number" : 2,
+          "ordinal" : 2,
+          "role" : "answer",
+          "shortcut" : null
+        },
+        {
+          "detail" : null,
+          "input" : {
+            "associated" : [
+              "Medium"
+            ],
+            "case" : "text"
+          },
+          "isChecked" : null,
+          "isFocused" : true,
+          "label" : "Type something.",
+          "number" : 3,
+          "ordinal" : 3,
+          "role" : "otherText",
+          "shortcut" : null
+        },
+        {
+          "detail" : null,
+          "input" : null,
+          "isChecked" : null,
+          "isFocused" : false,
+          "label" : "Chat about this",
+          "number" : 4,
+          "ordinal" : 4,
+          "role" : "chat",
+          "shortcut" : null
+        }
+      ],
+      "picker" : null,
+      "positionLabel" : null,
+      "progress" : "Size",
+      "rows" : {
+        "lowerBound" : 23,
+        "upperBound" : 37
+      },
+      "sourceSuffix" : null,
+      "subject" : {
+        "command" : null,
+        "commandDescription" : null,
+        "destinations" : [
+
+        ],
+        "environment" : null,
+        "filePath" : null,
+        "host" : null,
+        "notes" : [
+
+        ],
+        "planFilePath" : null,
+        "prompt" : null,
+        "question" : "Which size?",
+        "questionHeaders" : [
+          "Colors",
+          "Size"
+        ],
+        "reason" : null,
+        "reviewAnswers" : [
+
+        ],
+        "toolName" : null,
+        "url" : null,
+        "workspacePath" : null
+      },
+      "title" : "Which size?"
+    }
+  ],
+  "case" : "dialog"
+}
