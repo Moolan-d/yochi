@@ -173,6 +173,8 @@ pub struct Conversation {
     index: HashMap<String, usize>,
     /// Claude Code's permission mode as of its latest message.
     mode: Option<String>,
+    /// The model that wrote the Agent's latest reply.
+    model: Option<String>,
     todos: Vec<Todo>,
     /// TaskCreate and TaskUpdate calls awaiting their results, by tool call.
     todo_calls: HashMap<String, (String, Value)>,
@@ -237,6 +239,12 @@ impl Conversation {
         self.mode.as_deref()
     }
 
+    /// The model id that wrote the Agent's latest reply, e.g.
+    /// `claude-opus-4-5-20251101`; a `/model` switch shows after the next reply.
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
     /// The tool call the Agent is blocked on: the last one still running.
     pub fn pending(&self, status: Option<&crate::session::Status>) -> Option<Pending> {
         let status = status.filter(|status| status.state == "blocked")?;
@@ -269,6 +277,15 @@ impl Conversation {
             && let Some(mode) = record["permissionMode"].as_str().filter(|mode| !mode.is_empty())
         {
             self.mode = Some(mode.to_owned());
+        }
+        // Claude Code files its own notices (an API error, say) as replies
+        // by a `<synthetic>` model.
+        if record["type"] == "assistant"
+            && record["isSidechain"] != true
+            && let Some(model) =
+                record["message"]["model"].as_str().filter(|model| !model.is_empty() && !model.starts_with('<'))
+        {
+            self.model = Some(model.to_owned());
         }
         let uuid = record["uuid"].as_str().unwrap_or_default();
         // Filed as a meta user message, but the Agent acts on it.
@@ -833,6 +850,25 @@ mod tests {
         let json = serde_json::to_string(conversation.items()).unwrap();
         assert!(!json.contains("secret plan"), "thinking stays in the Gateway");
         assert!(!json.contains("huge"));
+    }
+
+    #[test]
+    fn model_is_the_latest_replys() {
+        let mut conversation = Conversation::default();
+        assert_eq!(conversation.model(), None);
+        conversation.apply([
+            r#"{"type":"assistant","uuid":"a1","message":{"model":"claude-opus-4-5","role":"assistant","content":[{"type":"text","text":"hi"}]}}"#,
+        ]);
+        assert_eq!(conversation.model(), Some("claude-opus-4-5"));
+        conversation.apply([
+            r#"{"type":"assistant","uuid":"a2","isSidechain":true,"message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"sub"}]}}"#,
+            r#"{"type":"assistant","uuid":"a3","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error"}]}}"#,
+        ]);
+        assert_eq!(conversation.model(), Some("claude-opus-4-5"), "a subagent's or Claude Code's own model is not the Agent's");
+        conversation.apply([
+            r#"{"type":"assistant","uuid":"a4","message":{"model":"claude-sonnet-4-5","content":[{"type":"text","text":"switched"}]}}"#,
+        ]);
+        assert_eq!(conversation.model(), Some("claude-sonnet-4-5"));
     }
 
     #[test]

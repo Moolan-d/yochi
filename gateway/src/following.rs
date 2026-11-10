@@ -18,6 +18,8 @@ pub enum Update {
     Pending(Option<Pending>),
     /// The permission mode as of the Agent's latest message.
     Mode(String),
+    /// The model that wrote the Agent's latest reply.
+    Model(String),
 }
 
 #[derive(Default)]
@@ -29,6 +31,7 @@ pub struct Follower {
     supported: Option<bool>,
     pending: Option<Pending>,
     mode: Option<String>,
+    model: Option<String>,
 }
 
 impl Follower {
@@ -47,6 +50,7 @@ impl Follower {
             self.following = None;
             self.conversation = Conversation::new(self.lang);
             self.mode = None;
+            self.model = None;
             if self.supported != Some(false) {
                 self.supported = Some(false);
                 updates.push(Update::Conversation { supported: false, items: Vec::new() });
@@ -87,6 +91,12 @@ impl Follower {
             updates.push(Update::Mode(mode.clone().expect("some")));
         }
         self.mode = mode;
+        // Likewise the model.
+        let model = self.conversation.model().map(str::to_owned);
+        if model.is_some() && (fresh || model != self.model) {
+            updates.push(Update::Model(model.clone().expect("some")));
+        }
+        self.model = model;
         self.pending_update(session, &mut updates);
         Ok(updates)
     }

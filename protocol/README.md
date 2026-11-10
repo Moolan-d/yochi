@@ -287,6 +287,8 @@ The Gateway calls core's `terminal.run` over its own plain-mode `hc connect`, wi
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
 // The permission mode, from the newest transcript message that recorded one; sent when it changes and after every conversation
 {"type": "mode", "mode": "acceptEdits"}
+// The model of the Agent's newest reply; sent when it changes and after every conversation
+{"type": "model", "model": "claude-opus-4-5-20251101"}
 // The session ended or couldn't be read
 {"type": "closed", "reason": "finished"}
 ```
@@ -330,6 +332,7 @@ Items, told apart by `kind`:
 - `notice.code` says which notice it is: `interrupted`, `compacted`, and possibly new values later; API errors and the like have no `code`. The app shows a `code` it knows in its own words and everything else as `text` (already in the language chosen by `lang`). An old Gateway sends no `code`.
 - `pending.tool` is the tool item being asked about; it may be `null` for a moment when the status changed before the transcript, and is filled in on the next read.
 - `mode` passes Claude Code's value through (`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`, possibly new values later). The transcript records the mode only when a message is sent: there is no `mode` before the first message, and a switch made in the terminal shows only with the next message. The app prefers the mode hint at the bottom of the screen, and switches by sending `shift+tab` as Keys, one at a time (ADR 0005).
+- `model` is the model id of the Agent's newest reply as Claude Code recorded it (`claude-opus-4-5-20251101`, or whatever a proxy answers with), sent when it changes and after every `conversation`. Subagents' replies and Claude Code's own notices (model `<synthetic>`) don't count. There is no `model` before the first reply, and a `/model` switch shows with the next reply. Older Gateways don't send it; older apps ignore it.
 - Claude Code writes its replies by content block, not word by word; the session's status says the Agent is working.
 - The `drafts=1` parameter and the `draft` message that used to exist are gone: the Gateway ignores the parameter, so an old app that sends it works as before and simply gets no drafts.
 - The Gateway reads only while an app is subscribed: once a second while the Agent works or waits, and for a few seconds after the status changes, otherwise every 4 seconds. core's `file.read` reads the whole file each time, and a transcript over 64 MB fails to read.

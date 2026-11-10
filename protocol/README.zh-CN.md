@@ -289,6 +289,8 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
 // 权限模式，取 transcript 最近一条消息记下的；变化时、以及每次 conversation 之后发
 {"type": "mode", "mode": "acceptEdits"}
+// Agent 最新一条回复的模型；变化时、以及每次 conversation 之后发
+{"type": "model", "model": "claude-opus-4-5-20251101"}
 // 会话结束或读取失败
 {"type": "closed", "reason": "finished"}
 ```
@@ -332,6 +334,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - `notice.code` 标明是哪种提示：`interrupted`、`compacted`，以后可能有新值；API 错误等没有 `code`。App 认识的 `code` 用自己的文字显示，其余显示 `text`（已按 `lang` 选好语言）。旧版 Gateway 不发送 `code`。
 - `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
 - `mode` 原样转发 Claude Code 的值（`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`，以后可能有新值）。transcript 只在发消息时记模式：第一条消息之前没有 `mode`，在终端里切换后要到下一条消息才更新。App 优先显示屏幕底部的模式提示，切换按「按键」逐次发 `shift+tab`（ADR 0005）。
+- `model` 是 Agent 最新一条回复的模型 id，按 Claude Code 记下的原样（`claude-opus-4-5-20251101`，或中转服务返回的任何值），变化时以及每次 `conversation` 之后发送。子 Agent 的回复和 Claude Code 自己的提示（模型为 `<synthetic>`）不算。第一条回复之前没有 `model`，`/model` 切换要到下一条回复才显示。旧版 Gateway 不发送；旧 App 忽略。
 - Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。
 - 曾有的 `drafts=1` 参数和 `draft` 消息已移除：Gateway 忽略这个参数，带它的旧 App 照常工作，只是不再收到草稿。
 - Gateway 在有 App 订阅时才读取：Agent 工作或等待时、以及状态变化后几秒内每秒一次，其余每 4 秒。core 的 `file.read` 每次读取整个文件，超过 64 MB 的 transcript 读取失败。
