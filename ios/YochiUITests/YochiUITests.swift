@@ -328,12 +328,8 @@ final class YochiUITests: XCTestCase {
         waitUntilPaired(app, observing: true)
 
         // /bin/cat is a terminal, not an Agent: what is sent is a command.
-        let field = composer(app)
-        field.tap()
-        field.typeText("Yochi UI test")
-        app.buttons["发送命令"].tap()
-        XCTAssert(text(app, containing: "已送达").waitForExistence(timeout: 20))
-        XCTAssertTrue(waitUntilCleared(field), "composer kept the sent message")
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
+        run(app, "Yochi UI test")
         snapshot("1 accepted")
 
         // The result and the cleared draft survive leaving the terminal.
@@ -478,9 +474,7 @@ final class YochiUITests: XCTestCase {
     @MainActor
     private func run(_ app: XCUIApplication, _ command: String) {
         // A takeover that types shows its command field from the pencil.
-        let pencil = app.buttons["toggleComposer"]
-        let typing = pencil.exists
-        if typing && !app.descendants(matching: .any)["terminalCommandField"].exists { pencil.tap() }
+        let typing = app.buttons["toggleComposer"].exists
         let field = composer(app)
         field.tap()
         field.typeText(command)
@@ -1545,6 +1539,13 @@ final class YochiUITests: XCTestCase {
         // The Agent's message field, or a terminal's command field.
         let field = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier IN %@", ["agentMessageField", "terminalCommandField"])).firstMatch
+        // A terminal that types keeps its command field behind the pencil.
+        let pencil = app.buttons["toggleComposer"]
+        let deadline = Date.now.addingTimeInterval(15)
+        while !field.exists, !pencil.exists, Date.now < deadline {
+            RunLoop.current.run(until: .now.addingTimeInterval(0.2))
+        }
+        if !field.exists, pencil.exists { pencil.tap() }
         XCTAssert(field.waitForExistence(timeout: 15))
         return field
     }
