@@ -551,7 +551,7 @@ final class YochiUITests: XCTestCase {
         let app = launchUnpaired(observing: agent)
         pair(app, host: env("YOCHI_HOST"), code: env("YOCHI_CODE"))
         waitUntilPaired(app, observing: true)
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
         XCTAssertFalse(app.buttons["终端"].exists, "a Claude Code session still offers the terminal")
         snapshot("1 conversation")
 
@@ -632,7 +632,7 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
         XCTAssertFalse(app.buttons["终端"].exists, "a Claude Code session still offers the terminal")
         // Claude Code takes a moment to draw its prompt.
         RunLoop.current.run(until: .now.addingTimeInterval(5))
@@ -686,7 +686,7 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
         // Claude Code takes a moment to draw its prompt.
         RunLoop.current.run(until: .now.addingTimeInterval(5))
         send(app, "/release-notes")
@@ -720,24 +720,34 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        let chip = app.buttons["permissionMode"]
-        XCTAssert(chip.waitForExistence(timeout: 30), "no mode chip")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 30), "no conversation")
+        // The mode sits in the composer's "+" menu, as a submenu that reads
+        // the screen's mode line and is enabled once one is seen.
+        let mode = modeMenu(app)
         let deadline = Date.now.addingTimeInterval(15)
-        while !chip.isEnabled, Date.now < deadline { RunLoop.current.run(until: .now.addingTimeInterval(0.3)) }
-        XCTAssert(chip.isEnabled, "the mode chip stays disabled")
-        let before = chip.value as? String ?? ""
+        while !mode.isEnabled, Date.now < deadline {
+            // An open menu doesn't update: close it and look again.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+            RunLoop.current.run(until: .now.addingTimeInterval(0.5))
+            _ = modeMenu(app)
+        }
+        XCTAssert(mode.isEnabled, "the mode stays disabled")
+        let before = mode.value as? String ?? ""
         snapshot("1 mode")
 
-        let target = before == "计划" ? "普通" : "计划"
-        chip.tap()
+        let target = before.contains("计划") ? "普通" : "计划"
+        mode.tap()
         let option = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", target)).firstMatch
         XCTAssert(option.waitForExistence(timeout: 5), "no \(target) in the menu")
         snapshot("2 menu")
         option.tap()
-        let switched = NSPredicate(format: "value == %@", target)
-        expectation(for: switched, evaluatedWith: chip)
-        waitForExpectations(timeout: 40)
+        let switching = app.descendants(matching: .any)["switchingMode"]
+        _ = switching.waitForExistence(timeout: 3)
+        XCTAssert(switching.waitForNonExistence(timeout: 40), "the switch never ended")
         XCTAssertFalse(app.descendants(matching: .any)["modeFailure"].exists, "the switch reported a failure")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        let reached = modeMenu(app)
+        XCTAssert((reached.value as? String ?? "").contains(target), "the menu reads \(reached.value ?? "")")
         snapshot("3 switched")
         leaveAndUnpair(app)
     }
@@ -759,7 +769,7 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
         // Claude Code takes a moment to draw its prompt.
         RunLoop.current.run(until: .now.addingTimeInterval(5))
         send(app, "In the foreground, not in the background, run the shell command `python3 -c 'import time; time.sleep(40)'`, then reply with just: done")
@@ -810,7 +820,7 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
         RunLoop.current.run(until: .now.addingTimeInterval(5))
 
         // Text first: tapping a filled field puts the cursor where it lands,
@@ -1013,7 +1023,7 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
 
         app.buttons["moreMenu"].tap()
         app.buttons["改动"].tap()
@@ -1057,7 +1067,7 @@ final class YochiUITests: XCTestCase {
         for _ in 0..<6 where !session.isHittable { app.swipeUp() }
         XCTAssert(session.isHittable, "no Claude Code session")
         session.tap()
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
 
         let field = composer(app)
         field.tap()
@@ -1143,7 +1153,7 @@ final class YochiUITests: XCTestCase {
         let app = launchUnpaired(observing: agent)
         pair(app, host: env("YOCHI_HOST"), code: env("YOCHI_CODE"))
         waitUntilPaired(app, observing: true)
-        XCTAssert(text(app, containing: "对话 ·").waitForExistence(timeout: 15), "no conversation")
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "no conversation")
 
         // A tall reply fills the list; the keyboard then keeps the viewport
         // short while it arrives, and the newest line must stay above it.
@@ -1652,6 +1662,15 @@ final class YochiUITests: XCTestCase {
         let hittable = buttons.allElementsBoundByIndex.filter(\.isHittable)
         XCTAssertFalse(hittable.isEmpty, "no \(title) button in the dialog")
         hittable.last?.tap()
+    }
+
+    /// Opens the composer's "+" menu and returns its permission mode submenu.
+    @MainActor
+    private func modeMenu(_ app: XCUIApplication) -> XCUIElement {
+        let mode = app.buttons["permissionMode"]
+        if !mode.exists { app.buttons["composerMenu"].tap() }
+        XCTAssert(mode.waitForExistence(timeout: 5), "no mode in the + menu")
+        return mode
     }
 
     @MainActor

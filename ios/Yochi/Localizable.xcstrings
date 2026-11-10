@@ -452,22 +452,22 @@
         }
       }
     },
-    "Add Image or Phrase" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "添加图片或快捷语"
-          }
-        }
-      }
-    },
     "Add a working directory" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加工作目录"
+          }
+        }
+      }
+    },
+    "Add Image or Phrase, or Switch Mode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加图片或快捷语，或切换模式"
           }
         }
       }
@@ -838,16 +838,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法查看终端"
-          }
-        }
-      }
-    },
-    "Can't switch while the Agent is working or a dialog is open" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Agent 工作中或终端里有对话框时不能切换"
           }
         }
       }
@@ -3511,12 +3501,12 @@
         }
       }
     },
-    "Switches with Shift+Tab, checking the terminal after each press" : {
+    "Switching to %@…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按 Shift+Tab 切换，每按一次核对终端画面"
+            "value" : "正在切换到%@…"
           }
         }
       }

@@ -98,3 +98,24 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(kind, "unreachable")
     }
 }
+
+final class AgentModelNameTests: XCTestCase {
+    func testClaudeIdsReadAsFamilyAndVersion() {
+        XCTAssertEqual(AgentModelName.short("claude-opus-4-5-20251101"), "Opus 4.5")
+        XCTAssertEqual(AgentModelName.short("claude-sonnet-4-5"), "Sonnet 4.5")
+        XCTAssertEqual(AgentModelName.short("claude-opus-4-20250514"), "Opus 4")
+        XCTAssertEqual(AgentModelName.short("claude-fable-5-2"), "Fable 5.2")
+        XCTAssertEqual(AgentModelName.short("claude-3-5-sonnet-20241022"), "Sonnet 3.5")
+        XCTAssertEqual(AgentModelName.short("claude-haiku-4-5[1m]"), "Haiku 4.5")
+    }
+
+    func testCloudWrappedIds() {
+        XCTAssertEqual(AgentModelName.short("us.anthropic.claude-sonnet-4-5-20250929-v1:0"), "Sonnet 4.5")
+        XCTAssertEqual(AgentModelName.short("claude-opus-4-1@20250805"), "Opus 4.1")
+    }
+
+    func testOtherModelsShowAsTheyAre() {
+        XCTAssertEqual(AgentModelName.short("glm-4.6"), "glm-4.6")
+        XCTAssertEqual(AgentModelName.short("claude-"), "claude-")
+    }
+}

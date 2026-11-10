@@ -279,6 +279,9 @@ final class ConversationFeed {
     /// The permission mode as of the Agent's latest message; nil when the
     /// transcript has none or names one the app doesn't know.
     private(set) var mode: PermissionMode?
+    /// The model id of the Agent's latest reply (`claude-opus-4-5-20251101`);
+    /// nil before the first reply, or from an older Gateway.
+    private(set) var model: String?
 
     /// Agent replies that arrived while following, by item id. Claude Code
     /// writes a reply to its transcript only once it is whole, so the page
@@ -366,6 +369,7 @@ final class ConversationFeed {
             }
             // The Gateway says the mode again after a fresh conversation.
             if mode != nil { mode = nil }
+            if model != nil { model = nil }
             let phase: Phase = supported ? .following : .unsupported
             if self.phase != phase { self.phase = phase }
         case .items(let changed):
@@ -396,6 +400,8 @@ final class ConversationFeed {
         case .mode(let mode):
             let mode = PermissionMode(rawValue: mode)
             if self.mode != mode { self.mode = mode }
+        case .model(let model):
+            if self.model != model { self.model = model }
         case .closed(let reason):
             pending = nil
             phase = .closed(reason: reason == "finished" ? String(localized: "The session has ended") : reason)
@@ -417,11 +423,12 @@ enum ConversationMessage: Decodable {
     case items([ConversationItem])
     case pending(PendingQuestion?)
     case mode(String)
+    case model(String)
     case closed(reason: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, supported, items, pending, mode, reason
+        case type, supported, items, pending, mode, model, reason
     }
 
     init(from decoder: Decoder) throws {
@@ -436,6 +443,8 @@ enum ConversationMessage: Decodable {
             self = .pending(try c.decodeIfPresent(PendingQuestion.self, forKey: .pending))
         case "mode":
             self = .mode(try c.decode(String.self, forKey: .mode))
+        case "model":
+            self = .model(try c.decode(String.self, forKey: .model))
         case "closed":
             self = .closed(reason: (try? c.decode(String.self, forKey: .reason)) ?? String(localized: "The session has ended"))
         default:

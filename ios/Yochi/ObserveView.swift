@@ -31,7 +31,9 @@ struct ObserveView: View {
     /// records a newer one with the next message.
     @State private var switchedMode: PermissionMode?
     @State private var seenModes: Set<PermissionMode> = []
-    @State private var switchingMode = false
+    /// The mode a switch from the phone is on its way to.
+    @State private var switchingTo: PermissionMode?
+    private var switchingMode: Bool { switchingTo != nil }
     @State private var modeFailure: String?
     @State private var attachments: [ImageAttachment] = []
     @State private var pickedPhotos: [PhotosPickerItem] = []
@@ -320,12 +322,21 @@ struct ObserveView: View {
                              send: { client.sendQueued(session: session.id) },
                              withdraw: withdrawQueued)
             }
-            if isConversation, shownMode != nil || conversation.todoProgress != nil {
-                HStack(spacing: 10) {
-                    if let shownMode { modeChip(shownMode).layoutPriority(1) }
-                    if let progress = conversation.todoProgress { TodoProgressLine(progress: progress) }
+            if isConversation, let switchingTo {
+                Label {
+                    Text("Switching to \(switchingTo.title)…")
+                } icon: {
+                    ProgressView().controlSize(.mini)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .accessibilityIdentifier("switchingMode")
+            }
+            if isConversation, let progress = conversation.todoProgress {
+                TodoProgressLine(progress: progress)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
             if !slashMatches.isEmpty {
                 SlashSuggestions(commands: slashMatches, pick: pickCommand)
@@ -478,8 +489,15 @@ struct ObserveView: View {
 
     private func subtitle(at now: Date) -> String {
         let place = currentSession.machine ?? String(localized: "This Mac")
-        if let working = currentSession.working(at: now) { return "\(working) · \(place)" }
-        if isConversation { return String(localized: "Conversation · \(place)") }
+        // The model the Agent runs on, at a glance; "Conversation" until its first reply.
+        let model = isConversation ? conversation.model.map(AgentModelName.short) : nil
+        if let working = currentSession.working(at: now) {
+            return [model, working, place].compactMap { $0 }.joined(separator: " · ")
+        }
+        if isConversation {
+            if let model { return "\(model) · \(place)" }
+            return String(localized: "Conversation · \(place)")
+        }
         var parts = [String(localized: "Terminal"), place]
         if let grid { parts.append("\(grid.cols)×\(grid.rows)") }
         return parts.joined(separator: " · ")
@@ -541,7 +559,8 @@ struct ObserveView: View {
     }
 
     /// One "+" for everything that goes into the message, as in Messages:
-    /// images and the quick phrases.
+    /// images and the quick phrases, and the permission mode the Agent works
+    /// in, which is switched seldom enough not to take a row of its own.
     private var composerMenu: some View {
         Menu {
             Section {
@@ -555,6 +574,7 @@ struct ObserveView: View {
                     Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
                 }
             }
+            if let shownMode { Section { modePicker(shownMode) } }
         } label: {
             Image(systemName: "plus")
                 .font(.body.weight(.semibold))
@@ -565,7 +585,7 @@ struct ObserveView: View {
         .tint(.secondary)
         .frame(width: 44, height: 44)
         .disabled(isSending)
-        .accessibilityLabel("Add Image or Phrase")
+        .accessibilityLabel("Add Image or Phrase, or Switch Mode")
         .accessibilityIdentifier("composerMenu")
     }
 
@@ -743,41 +763,26 @@ struct ObserveView: View {
         draft = draft.isEmpty ? text : text + "\n\n" + draft
     }
 
-    /// A pop-up button: the system menu marks the current mode, and picking
-    /// another one starts the switch; the chip changes once the screen agrees.
-    private func modeChip(_ mode: PermissionMode) -> some View {
-        Menu {
-            Picker("Permission Mode", selection: Binding(get: { mode }, set: switchMode(to:))) {
-                ForEach(PermissionMode.targets(including: seenModes), id: \.self) { target in
-                    Label(target.title, systemImage: target.symbol).tag(target)
-                }
+    /// A submenu of the modes the phone switches to, with the current one as
+    /// its subtitle. Disabled while the Agent works or a dialog is open.
+    private func modePicker(_ mode: PermissionMode) -> some View {
+        let targets = PermissionMode.targets(including: seenModes)
+        return Picker(selection: Binding(get: { mode }, set: switchMode(to:))) {
+            // Bypass shows when Claude Code is in it, but isn't offered.
+            ForEach(targets.contains(mode) ? targets : targets + [mode], id: \.self) { target in
+                Label(target.title, systemImage: target.symbol).tag(target)
             }
-            .pickerStyle(.inline)
         } label: {
-            HStack(spacing: 4) {
-                if switchingMode {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: mode.symbol)
-                }
-                Text(mode.title)
-                Image(systemName: "chevron.up.chevron.down").imageScale(.small)
-            }
+            Label("Permission Mode", systemImage: mode.symbol)
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .controlSize(.small)
-        .tint(mode == .bypassPermissions ? .red : .secondary)
+        .pickerStyle(.menu)
         .disabled(!canSwitchMode)
-        .accessibilityLabel("Permission Mode")
-        .accessibilityValue(mode.title)
-        .accessibilityHint(canSwitchMode ? "Switches with Shift+Tab, checking the terminal after each press" : "Can't switch while the Agent is working or a dialog is open")
         .accessibilityIdentifier("permissionMode")
     }
 
     private func switchMode(to target: PermissionMode) {
         guard canSwitchMode, target != screenMode else { return }
-        switchingMode = true
+        switchingTo = target
         modeFailure = nil
         let switcher = PermissionModeSwitcher(
             feed: screen,
@@ -787,7 +792,7 @@ struct ObserveView: View {
             if case .failed(let reason) = await switcher.run(to: target) { modeFailure = reason }
             // The screen says where it ended, even after a failure.
             if let reached = screenMode { switchedMode = reached }
-            switchingMode = false
+            switchingTo = nil
         }
     }
 
