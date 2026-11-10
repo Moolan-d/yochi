@@ -1240,7 +1240,7 @@ final class YochiUITests: XCTestCase {
         app.buttons["moreMenu"].tap()
         app.buttons["切换 Pane"].tap()
         // Both names are cut to one line at the same point; the panes come in tab order.
-        let panes = app.collectionViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "companion-uites"))
+        let panes = app.collectionViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "yochi-uitest"))
         let paneB = panes.element(boundBy: 1)
         XCTAssert(paneB.waitForExistence(timeout: 5), "Switch Pane does not list the second pane")
         XCTAssert(panes.element(boundBy: 0).isSelected, "the open pane is not the selected one")
@@ -1530,7 +1530,11 @@ final class YochiUITests: XCTestCase {
     @MainActor
     private func waitUntilPaired(_ app: XCUIApplication, observing: Bool = false) {
         if observing {
-            XCTAssert(composer(app).waitForExistence(timeout: 15), "pairing did not finish")
+            // A conversation shows its message field; a terminal shows its
+            // grid and keeps the command field hidden until asked for.
+            let page = app.descendants(matching: .any).matching(NSPredicate(
+                format: "identifier IN %@", ["agentMessageField", "terminalCommandField", "terminalGrid"])).firstMatch
+            XCTAssert(page.waitForExistence(timeout: 15), "pairing did not finish")
         } else {
             XCTAssert(app.buttons["home.settings"].waitForExistence(timeout: 15), "pairing did not finish")
         }
