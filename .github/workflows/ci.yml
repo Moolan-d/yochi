@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push on the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    name: Gateway
+    # The Gateway is macOS-only (launchd, Tailscale, herdr-core), so this runs
+    # where it ships rather than on Linux.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gateway
+      # relay::tests runs the Node relay end to end; it skips itself without
+      # relay/node_modules, which would hide a broken test instead of failing.
+      - name: Install the Relay for the end-to-end test
+        run: npm ci --prefix relay --omit=dev
+      - name: Test
+        run: cargo test --locked --manifest-path gateway/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --manifest-path gateway/Cargo.toml -- -D warnings
+
+  relay:
+    name: Relay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  ios:
+    name: iOS
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      # libghostty is a prebuilt xcframework; the cache keeps it off the
+      # critical path on every run.
+      - uses: actions/cache@v4
+        with:
+          path: ios/Vendor
+          key: libghostty-${{ runner.os }}-${{ hashFiles('ios/scripts/fetch-libghostty.sh') }}
+      - name: Fetch libghostty
+        run: ios/scripts/fetch-libghostty.sh
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the project
+        run: xcodegen generate
+        working-directory: ios
+      # Unit tests only: the UI suite needs Herdr, Tailscale and Claude Code,
+      # so it runs through scripts/ui-test.sh on a Mac that has them.
+      - name: Test
+        working-directory: ios
+        run: |
+          xcodebuild test \
+            -project Yochi.xcodeproj \
+            -scheme Yochi \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath build \
+            -only-testing:YochiTests \
+            CODE_SIGNING_ALLOWED=NO

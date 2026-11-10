@@ -46,10 +46,22 @@ scripts/perf-test.sh   # frame pacing, time to first content, main-thread hangs
 
 `scripts/ui-test.sh` needs `cargo`, `node`, `tailscale` and `hc` on your `PATH`. Put personal signing in `ios/Local.xcconfig`, which git ignores; `ios/Signing.xcconfig` shows the keys.
 
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every pull request:
+
+- **Gateway**: `cargo test` and `cargo clippy --all-targets -- -D warnings`, on macOS, since the Gateway is macOS-only.
+- **Relay**: `npm test`.
+- **iOS**: the unit tests (`-only-testing:YochiTests`) in the simulator.
+
+Formatting isn't enforced: the Rust sources are hand-formatted and `cargo fmt` would rewrite several hundred lines, so match the surrounding style instead. The UI suite needs Herdr, Tailscale and Claude Code and stays a local check; run it before a change that spans screens.
+
+Pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds `yochi` for both Mac architectures, attaches them to the GitHub release and checks that [`scripts/install.sh`](scripts/install.sh) installs from it.
+
 ## Ground rules
 
-- **Leave other sessions alone.** UI tests only create, type into and close terminals named `companion-uitest*`.
+- **Leave other sessions alone.** UI tests only create, type into and close terminals named `yochi-uitest*`.
 - **Keep the protocol backward compatible.** Older apps and older Gateways must keep working. Document every change in [`protocol/README.md`](protocol/README.md) in the same commit as the code.
-- **Localize.** UI text is written in English and translated to Simplified Chinese in `ios/Companion/Localizable.xcstrings` in the same change.
+- **Localize.** UI text is written in English and translated to Simplified Chinese in `ios/Yochi/Localizable.xcstrings` in the same change.
 - **Follow Apple's Human Interface Guidelines.** Use system controls and 44 pt touch targets, and check changes with a simulator screenshot.
 - **Commit with Conventional Commits** (`type(scope): subject`, in English, one intent per commit).

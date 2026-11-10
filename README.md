@@ -10,6 +10,7 @@ An iPhone app for the Claude Code, Codex and pi sessions you run in [Herdr](http
 
 ![iOS 18+](https://img.shields.io/badge/iOS-18%2B-000000?logo=apple&logoColor=white)
 ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
+[![CI](https://github.com/Moolan-d/yochi/actions/workflows/ci.yml/badge.svg)](https://github.com/Moolan-d/yochi/actions/workflows/ci.yml)
 
 English | [简体中文](./README.zh-CN.md)
 
