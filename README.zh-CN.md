@@ -40,15 +40,26 @@ Yochi 只连你自己的 Mac：不用注册账号，中间也没有我们的服�
 
 ## 开始使用
 
-目前还没有 App Store 版本，App 需要自己构建。你需要一台运行 Herdr 的 Mac，装好 Rust、Xcode 和 [XcodeGen](https://github.com/yonaskolb/XcodeGen)；另外 Mac 和 iPhone 都装 Tailscale，或者准备一个免费的 Cloudflare 账号。
+目前还没有 App Store 版本，App 需要自己构建。你需要一台运行 Herdr 的 Mac，装好 Xcode 和 [XcodeGen](https://github.com/yonaskolb/XcodeGen)；另外 Mac 和 iPhone 都装 Tailscale，或者准备一个免费的 Cloudflare 账号。Gateway 本身只要有 macOS。
 
 1. **在 Mac 上安装 Gateway。** 它随登录启动，不打扰你。
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/Moolan-d/yochi/main/scripts/install.sh | sh
+   yochi service install
+   ```
+
+   <details>
+   <summary>从源码编译 Gateway</summary>
+
+   安装脚本装的是对应这台 Mac 架构的发行版。已装 Rust 的话，也可以用当前的源码自己编译：
 
    ```sh
    git clone https://github.com/Moolan-d/yochi && cd yochi
    cargo install --path gateway
    yochi service install
    ```
+   </details>
 
 2. **把 App 装到 iPhone 上。**
 

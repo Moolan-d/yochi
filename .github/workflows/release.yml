@@ -1,0 +1,90 @@
+name: Release
+
+# Tagging v0.1.0 publishes the `yochi` binary for both Mac architectures, so
+# scripts/install.sh can install it without a Rust toolchain.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gateway
+          key: ${{ matrix.target }}
+      - name: Build
+        run: |
+          cargo build --release --locked \
+            --manifest-path gateway/Cargo.toml \
+            --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          mkdir dist
+          cp "gateway/target/${{ matrix.target }}/release/yochi" dist/
+          cp LICENSE NOTICE dist/
+          tar -czf "yochi-${{ matrix.target }}.tar.gz" -C dist .
+          shasum -a 256 "yochi-${{ matrix.target }}.tar.gz" \
+            > "yochi-${{ matrix.target }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yochi-${{ matrix.target }}
+          path: yochi-${{ matrix.target }}.tar.gz*
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            yochi-*.tar.gz
+            yochi-*.tar.gz.sha256
+
+  verify:
+    name: Verify the installer
+    needs: publish
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      # The one-liner from the README, against the release just published.
+      - name: Install from the release
+        env:
+          YOCHI_BIN: ${{ runner.temp }}/bin
+          YOCHI_VERSION: ${{ inputs.tag || github.ref_name }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ inputs.tag || github.ref_name }}/scripts/install.sh | sh
+          "$YOCHI_BIN/yochi" --version

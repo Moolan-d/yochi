@@ -41,15 +41,26 @@ Yochi talks to your own Mac and nothing else: there is no account to create and 
 
 ## Get started
 
-There is no App Store build yet, so you build the app yourself. You need a Mac running Herdr, with Rust, Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and either Tailscale on both the Mac and the iPhone or a free Cloudflare account.
+There is no App Store build yet, so you build the app yourself. You need a Mac running Herdr, with Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen), and either Tailscale on both the Mac and the iPhone or a free Cloudflare account. The Gateway itself needs nothing but macOS.
 
 1. **Install the Gateway on your Mac.** It starts at login and stays out of your way.
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/Moolan-d/yochi/main/scripts/install.sh | sh
+   yochi service install
+   ```
+
+   <details>
+   <summary>Building the Gateway from source</summary>
+
+   The script installs the release for your Mac's architecture. With Rust installed, this builds the current source instead:
 
    ```sh
    git clone https://github.com/Moolan-d/yochi && cd yochi
    cargo install --path gateway
    yochi service install
    ```
+   </details>
 
 2. **Put the app on your iPhone.**
 
