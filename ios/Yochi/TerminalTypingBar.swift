@@ -1,7 +1,7 @@
 import GhosttyTerminal
 import SwiftUI
 
-/// The key bar of a takeover that types straight into the terminal: a glass
+/// The terminal page's key bar, typing straight into a taken-over terminal: a glass
 /// capsule of control keys that swipes through three pages, and beside it a
 /// button for the keyboard and one for the command field, which is where
 /// text the terminal's ASCII keyboard can't type is written (Chinese,

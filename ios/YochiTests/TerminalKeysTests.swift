@@ -23,10 +23,6 @@ final class TerminalKeysTests: XCTestCase {
         XCTAssertEqual(QuickCommand.insert("继续", into: "第一行\n"), "第一行\n继续")
     }
 
-    func testKeyBarUsesCoreKeyNames() {
-        XCTAssertEqual(TerminalKey.bar.map(\.id), ["ctrl+c", "tab", "up", "down", "enter", "esc"])
-    }
-
     /// The typing bar's three pages, what each key sends, and the core key
     /// names it falls back on.
     func testTypingBarPagesAndKeys() {

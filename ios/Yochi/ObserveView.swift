@@ -46,7 +46,7 @@ struct ObserveView: View {
     @State private var showingChanges = false
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
-    /// A terminal that types shows its command field while the user writes there.
+    /// A terminal shows its command field while the user writes there.
     @State private var composing = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -342,42 +342,35 @@ struct ObserveView: View {
                 SlashSuggestions(commands: slashMatches, pick: pickCommand)
             }
             if !isConversation {
-                // A takeover that types gets the keyboard on the terminal
-                // itself; otherwise the composer is the only text input.
+                // Keys go to the terminal to encode while it types, and
+                // through `terminal.keys` while it only watches.
                 let terminal = feeds.terminal
-                if terminal.offersTyping {
-                    TerminalTypingBar(model: terminal, composing: composing, composerFocused: composerFocused,
-                                      press: { key in
-                                          guard case .press(let press) = key.action else { return }
-                                          if terminal.press(press) { return }
-                                          if let name = key.fallbackName {
-                                              keys.press(name, session: session.id, client: client)
-                                          }
-                                      },
-                                      toggleKeyboard: {
-                                          if composerFocused {
-                                              composerFocused = false
-                                          } else {
-                                              terminal.setKeyboard(!terminal.keyboardShown)
-                                          }
-                                      },
-                                      toggleComposer: toggleComposer)
-                } else {
-                    TerminalKeyBar(keyboardShown: composerFocused,
-                                   toggleKeyboard: { composerFocused.toggle() }) { key in
-                        keys.press(key.id, session: session.id, client: client)
-                    }
-                }
+                TerminalTypingBar(model: terminal, composing: composing, composerFocused: composerFocused,
+                                  press: { key in
+                                      guard case .press(let press) = key.action else { return }
+                                      if terminal.press(press) { return }
+                                      if let name = key.fallbackName {
+                                          keys.press(name, session: session.id, client: client)
+                                      }
+                                  },
+                                  toggleKeyboard: {
+                                      if composerFocused {
+                                          composerFocused = false
+                                      } else {
+                                          terminal.setKeyboard(!terminal.keyboardShown)
+                                      }
+                                  },
+                                  toggleComposer: toggleComposer)
             }
             if showsComposer { composer }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(feeds.terminal.offersTyping && !isConversation ? AnyShapeStyle(.clear) : AnyShapeStyle(.bar))
+        .background(isConversation ? AnyShapeStyle(.bar) : AnyShapeStyle(.clear))
     }
 
-    /// A terminal that types shows its command field only when asked to.
-    private var showsComposer: Bool { isConversation || !feeds.terminal.offersTyping || composing }
+    /// A terminal shows its command field only when asked to.
+    private var showsComposer: Bool { isConversation || composing }
 
     /// The pencil: write a command in the field, or go back to typing.
     private func toggleComposer() {

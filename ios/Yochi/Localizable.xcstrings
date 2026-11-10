@@ -2942,16 +2942,6 @@
         }
       }
     },
-    "Return" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "回车"
-          }
-        }
-      }
-    },
     "Review Your Answers" : {
       "localizations" : {
         "zh-Hans" : {

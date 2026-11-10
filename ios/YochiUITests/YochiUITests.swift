@@ -484,15 +484,12 @@ final class YochiUITests: XCTestCase {
     /// only then, and core waits ~3 s of quiet before it pastes.
     @MainActor
     private func run(_ app: XCUIApplication, _ command: String) {
-        // A takeover that types shows its command field from the pencil.
-        let typing = app.buttons["toggleComposer"].exists
         let field = composer(app)
         field.tap()
         field.typeText(command)
         app.buttons["发送命令"].tap()
-        // A terminal that types puts its command field away once sent.
-        XCTAssertTrue(typing ? field.waitForNonExistence(timeout: 25) : waitUntilCleared(field, timeout: 25),
-                      "\(command) was not delivered")
+        // The terminal puts its command field away once sent.
+        XCTAssertTrue(field.waitForNonExistence(timeout: 25), "\(command) was not delivered")
         XCTAssert(text(app, containing: "已送达").exists, "\(command): no delivery shown")
     }
 
