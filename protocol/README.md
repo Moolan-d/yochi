@@ -1,70 +1,72 @@
-# Companion API
+# Yochi API
 
-Gateway 向 Companion App 暴露的有版本接口。
+The versioned interface the Gateway exposes to the Yochi app.
+
+English | [简体中文](./README.zh-CN.md)
 
 ## v0
 
-传输与认证的取舍见 ADR 0003。
+The transport and authentication choices are in ADR 0003.
 
-- **连接**：所有接口都是 WebSocket，地址为 `ws://<主 Mac 的 tailnet IPv4>:7420/v0/…`。Gateway 只监听 tailnet 地址，不监听 LAN 或 localhost。
-- **认证**：除配对外，都需带 HTTP 头 `Authorization: Bearer <设备 token>`。token 无效或设备已被撤销时返回 `401`。设备被撤销后，它已建立的连接会在几秒内被关闭。
-- **加密**：明文 WebSocket，依赖 Tailscale（WireGuard）加密链路。经 Relay 时见下文「经 Relay 连接」。
-- **语言**：App 在每个 `/v0/…` 地址后带查询参数 `lang=<BCP 47 语言标签>`（App 界面当前的语言，如 `en`、`zh-Hans`），经 Relay 时随 `path` 一起转发。Gateway 自己写的文字（失败原因、对话里的「已中断」「［图片］」「（另有 N 行）」等）按它选语言：`zh` 开头为中文，其余为英文。不带 `lang` 的旧 App 得到中文。herdr-core、git 和 Agent 写的内容原样转发，不翻译。旧版 Gateway 忽略 `lang`，仍发中文。
+- **Connection:** every endpoint is a WebSocket at `ws://<main Mac's tailnet IPv4>:7420/v0/…`. The Gateway listens on the tailnet address only, never on the LAN or localhost.
+- **Authentication:** every endpoint except pairing needs the HTTP header `Authorization: Bearer <device token>`. An invalid token or a revoked device returns `401`. Once a device is revoked, its open connections close within seconds.
+- **Encryption:** plain WebSocket, encrypted by the Tailscale (WireGuard) link. Through the Relay, see “Connecting through the Relay” below.
+- **Language:** the app adds `lang=<BCP 47 language tag>` to every `/v0/…` URL (the language of its interface, e.g. `en`, `zh-Hans`), and the Relay forwards it with `path`. Text the Gateway writes itself (failure reasons, a conversation's “interrupted”, “[Image]”, “(N more lines)”) follows it: anything starting with `zh` gets Chinese, everything else English. An old app that sends no `lang` gets Chinese. Text written by herdr-core, by git and by Agents is passed through, not translated. An old Gateway ignores `lang` and still sends Chinese.
 
-### 配对（Device Pairing）
+### Device pairing
 
-`ws://<host>:7420/v0/pair`，不需要认证。配对码由主 Mac 上的 `yochi pair` 生成：8 位，5 分钟内有效，单次使用，输错 5 次即作废。生成时同时显示二维码 `yochi://pair?host=<host:port>&code=<code>`。比对配对码时不区分大小写，忽略 `-` 和空格，并把 O 视为 0、I 和 L 视为 1。
+`ws://<host>:7420/v0/pair`, no authentication. The code comes from `yochi pair` on the main Mac: 8 characters, valid for five minutes, single use, void after five wrong tries. It also shows the QR code `yochi://pair?host=<host:port>&code=<code>`. Codes compare ignoring case, `-` and spaces, with O read as 0 and I and L as 1.
 
 ```jsonc
-// App → Gateway，连接后 10 秒内发送
+// App → Gateway, sent within 10 seconds of connecting
 {"type": "pair", "code": "ABCD-EFGH", "name": "iPhone"}
-// Gateway → App，随后关闭连接
-{"type": "paired", "device": "8653add4", "token": "<64 位十六进制>"}
-{"type": "rejected"}  // 配对码错误、过期或已作废
+// Gateway → App, then closes the connection
+{"type": "paired", "device": "8653add4", "token": "<64 hex digits>"}
+{"type": "rejected"}  // wrong, expired or already used code
 ```
 
-配置了 Relay（`yochi relay use`）时，二维码改为 link v2，App 不在 tailnet 上也能经 Relay 配对：
+With a Relay configured (`yochi relay use`) the QR code becomes link v2, so a phone that isn't on the tailnet can pair through the Relay:
 
 ```
-yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继地址，百分号编码>&route=<route token>&secret=<link secret>
+yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway public key>&relay=<relay URL, percent-encoded>&route=<route token>&secret=<link secret>
 ```
 
-- `key`、`secret` 都是 32 字节，base64url 不带填充；`route` 也是 base64url。
-- `secret` 与配对码属于同一次配对：单次使用，5 分钟内有效。配对码只在 tailnet 上用，`secret` 只在 Relay 上用，用掉任一个这次配对就结束。
-- Gateway 的 tailnet 关着（`yochi tailnet off`）或 Mac 不在 tailnet 上时，链接不带 `host` 和 `code`，手机只经 Relay 配对和连接，之后由下面的 `tailnet` 消息补上 tailnet 地址。
+- `key` and `secret` are 32 bytes, base64url without padding; `route` is base64url too.
+- `secret` belongs to the same pairing as the code: single use, valid for five minutes. The code is used on the tailnet only and `secret` through the Relay only; using either one ends this pairing.
+- When the tailnet is off (`yochi tailnet off`) or the Mac isn't on it, the link carries no `host` and no `code`: the phone pairs and connects through the Relay only, and the `tailnet` message below fills in the tailnet address afterwards.
 
-### 会话列表
+### Session list
 
-`ws://<host>:7420/v0/ws`。Gateway 向 App 推送 JSON 文本帧：
+`ws://<host>:7420/v0/ws`. The Gateway pushes JSON text frames to the app:
 
 ```jsonc
-// 连接建立后第一条
+// The first frame after connecting
 {"type": "hello", "api": 0, "gateway": "0.1.0"}
 
-// 随后立即发送，并在会话列表变化时整表重发
+// Sent right after, and again in full whenever the list changes
 {"type": "sessions", "core": "my-mac", "connected": true, "sessions": [
   {"id": "vps-us/t1", "machine": "vps-us", "title": "claude", "program": "claude", "command": "claude",
    "cwd": "/root/app", "turn": 7, "status_ms": 1762156800000, "parent": "vps-us/t0",
    "pinned": true, "seen": 6, "repo": {"name": "app", "worktree": "fix-login"},
-   "todo": {"text": "写测试中", "done": 3, "total": 7},
+   "todo": {"text": "Writing the tests", "done": 3, "total": 7},
    "status": {"state": "blocked", "app": "claude", "message": "Run ls?", "kind": "permission"}}
 ]}
 ```
 
-- `id`：core 的地址，对 App 不透明。`machine`：远端机器名，主 Mac 本机为 `null`。
-- `program`：终端里现在跑的程序；`command`：终端本身启动的命令，在 shell 里换程序时不变，用默认 shell 启动时省略。两者都取命令名，解释器跑的脚本取脚本名（`node …/gemini.js` 为 `gemini`）。App 据 `command` 定会话形式：`claude` 走对话页，其余走终端页；据 `program` 和 `status` 判断是不是 Agent。旧版 Gateway 不发送 `command`。
-- `status`：Agent 自报状态，`state` 为 idle / working / done / blocked / error；未上报时为 `null`。
-- `status_ms`：状态上次变化的时刻（Mac 的时钟，毫秒）；App 据此显示「工作中 · 12s」。没有时省略。
-- `parent`：启动它的终端（子 Agent 的父 Agent）；没有时省略。
-- `title`：终端标题，Claude Code 在这里写它的会话标题；开头的转圈字符已去掉。
-- `pinned`：在 Herdr 里置顶（`herdr.pinned` 标签）；没有时省略。`seen`：Herdr 桌面端看过的轮次（`herdr.seen`）；没有时省略。
-- `repo`：目录所在的 git 仓库，`name` 是主检出的文件夹名，`worktree` 是链接 worktree 的文件夹名（不在 worktree 里时省略）；不是仓库或还没查到时省略。
-- `todo`：Agent 工作时最新待办清单里进行中的那项（`text`，用 `activeForm`）和完成数 `done` / 总数 `total`；只有 Claude Code 在 `working` 时才有。
-- `turn`：core 记录的最后已完成 Agent 轮次；没有该字段时 Gateway 返回 `0`。它会在状态离开 `working` 时增加。
-- `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
-- 只包含 live 会话，finished 的不返回。
-- `cols` / `rows`：终端当前网格尺寸（上例省略）。
-- `spaces`：Herdr 的 Space 与 Tab，按 Herdr 中的顺序，本机在前；上例省略。旧版 Gateway 不发送此字段，App 按缺省为空处理。
+- `id`: the core's address, opaque to the app. `machine`: the remote machine's name, `null` for the main Mac.
+- `program`: the program running in the terminal now; `command`: the command the terminal itself started, unchanged when the program changes inside the shell, omitted when it was started with the default shell. Both are the command name; for a script run by an interpreter, the script's name (`node …/gemini.js` is `gemini`). The app picks the session's form from `command`: `claude` opens the conversation page, anything else the terminal page; `program` and `status` say whether it is an Agent. An old Gateway sends no `command`.
+- `status`: the status the Agent reports, `state` one of idle / working / done / blocked / error; `null` when it reports none.
+- `status_ms`: when the status last changed (the Mac's clock, in milliseconds); the app shows “working · 12s” from it. Omitted when absent.
+- `parent`: the terminal that started it (a child Agent's parent); omitted when absent.
+- `title`: the terminal's title, where Claude Code writes its session title; the spinner characters at its start are stripped.
+- `pinned`: pinned in Herdr (the `herdr.pinned` label); omitted when absent. `seen`: the turn seen in Herdr's desktop app (`herdr.seen`); omitted when absent.
+- `repo`: the git repository the directory is in; `name` is the main checkout's folder name, `worktree` the linked worktree's folder name (omitted outside a worktree); omitted when it isn't a repository or isn't known yet.
+- `todo`: the in-progress item of the newest to-do list while the Agent works (`text`, using `activeForm`) and how far the list is, `done` of `total`; only while Claude Code is `working`.
+- `turn`: the last completed Agent turn recorded by core; the Gateway returns `0` when the field is absent. It increases when the status leaves `working`.
+- `connected: false` means the Gateway cannot reach this Mac's herdr-core for now, and `sessions` is then empty.
+- Only live sessions are included; finished ones are not returned.
+- `cols` / `rows`: the terminal's current grid size (omitted in the examples).
+- `spaces`: Herdr's Spaces and Tabs, in Herdr's order, this Mac first; omitted in the examples. An old Gateway doesn't send it, and the app treats it as empty.
 
 ```jsonc
 "spaces": [
@@ -74,10 +76,10 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 ]
 ```
 
-- `id` 对 App 不透明。`name` 已是要显示的名字：没人命名的 Space 用 Herdr 自动起的名字，没人命名的 Tab 用位置序号。
-- `folder`：Herdr 在这个 Space 里启动终端的目录，可能为空；App 用它为新建会话预选 Space。旧版 Gateway 不发送此字段。
-- `sessions`：该 Tab 里的 live 会话 id，按分屏顺序；由 Agent 启动的子 Agent 不在布局里，紧跟在启动它的终端（和它之前的子 Agent）后面。
-- `layout`：Tab 的分屏树，App 用来画缩略图。节点要么是分屏：`split` 为 `row`（左右并排）或 `column`（上下堆叠），`children` 为子节点；要么是面板：`session` 为它显示的 live 会话，没有 `session` 的面板显示的是别的内容（文件浏览器）或已结束的终端。`weight` 是节点在所属分屏中的占比，缺省时按等分处理。子 Agent 不在树里。旧版 Gateway 不发送此字段。
+- `id` is opaque to the app. `name` is already the name to show: a Space nobody named uses the name Herdr gave it, a Tab nobody named its position.
+- `folder`: the directory Herdr starts terminals in for this Space, possibly empty; the app preselects the Space for a new session with it. An old Gateway doesn't send it.
+- `sessions`: the live session ids in that Tab, in pane order; Agents started by an Agent aren't in the layout but follow the terminal that started them (and that terminal's earlier child Agents).
+- `layout`: the Tab's split tree, which the app draws a thumbnail from. A node is either a split — `split` is `row` (side by side) or `column` (stacked), `children` the child nodes — or a pane: `session` is the live session it shows, and a pane without one shows something else (a file browser) or a finished terminal. `weight` is the node's share of its split, equal shares when absent. Child Agents aren't in the tree. An old Gateway doesn't send it.
 
 ```jsonc
 "layout": {"split": "row", "children": [
@@ -86,221 +88,221 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 ]}
 ```
 
-- 只列出含 live 会话的 Space 和 Tab。不在任何 Space 中的会话不出现在这里，App 按机器单独列出。
-- 数据来自各机器 herdr-core 中 Herdr 桌面端的布局文档，Gateway 只读不写。某台机器读不到布局（离线、没用过 Herdr 桌面端、core 不支持 `doc.get`）时，它的会话都不在 `spaces` 中。
+- Only Spaces and Tabs holding live sessions are listed. Sessions in no Space don't appear here; the app lists them per machine.
+- The data comes from the layout document Herdr's desktop app keeps in each machine's herdr-core, which the Gateway only reads. When a machine's layout can't be read (offline, the desktop app never used there, core without `doc.get`), none of its sessions appear in `spaces`.
 
-App 也可以在这个连接上发送 `{"type": "unpair"}`。Gateway 收到后删除这台设备并关闭连接。
+The app may also send `{"type": "unpair"}` on this connection. The Gateway then deletes this device and closes the connection.
 
-已配对的设备在这个连接上登记 Relay（ADR 0006）。App 每次在 tailnet 上连上时登记一次，从而拿到当前的中继地址和 psk：
+Paired devices enrol with the Relay on this connection (ADR 0006). The app enrols once each time it connects over the tailnet, and so learns the current relay address and psk:
 
 ```jsonc
-// App → Gateway；static_key 是 App 的 Noise 静态公钥（32 字节，base64url）
+// App → Gateway; static_key is the app's Noise static public key (32 bytes, base64url)
 {"type": "relay_enroll", "static_key": "…"}
 // Gateway → App
 {"type": "relay", "available": true, "url": "https://relay.example.com", "route": "…", "gateway_key": "…", "psk": "…"}
-{"type": "relay", "available": false}  // 没配置 Relay；出错时另带 "error"
+{"type": "relay", "available": false}  // no Relay configured; on error it also carries "error"
 ```
 
-静态公钥不变时，重复登记拿到同一个 psk；换了静态公钥会得到新 psk，旧的立即失效。同一个静态公钥只属于一台设备。
+Enrolling again with the same static key returns the same psk; a new static key gets a new psk and the old one stops working at once. One static key belongs to one device only.
 
-Gateway 在 hello 之后、以及 tailnet 地址变化时，告诉 App 它在 tailnet 上的地址。经 tailnet 或经 Relay 连上都会收到，App 据此更新保存的地址，不必重新扫码：
+After `hello`, and whenever the tailnet address changes, the Gateway tells the app where it is on the tailnet. A connection over the tailnet and one over the Relay both get it, so the app updates the address it stored and doesn't need to scan the code again:
 
 ```jsonc
 // Gateway → App
 {"type": "tailnet", "host": "100.64.0.1:7420"}
-{"type": "tailnet", "host": null}  // tailnet 已关（`yochi tailnet off`），只经 Relay
+{"type": "tailnet", "host": null}  // tailnet off (`yochi tailnet off`), Relay only
 ```
 
-Mac 暂时不在 tailnet 上时不发，App 保留原来的地址。tailnet 关掉时，Gateway 关闭经 tailnet 的连接，经 Relay 的连接不受影响。
+When the Mac isn't on the tailnet for now nothing is sent, and the app keeps the address it has. When the tailnet is turned off, the Gateway closes the connections over the tailnet; connections through the Relay are unaffected.
 
 ### Agent Message
 
-在同一个 `/v0/ws` 连接上发送一整段消息，不需要 Takeover：
+Send a whole message on the same `/v0/ws` connection; no Takeover needed:
 
 ```jsonc
-// App → Gateway；id 由客户端生成，force 默认为 false
-{"type": "send", "id": "<客户端生成>", "session": "vps-us/t1",
- "text": "请继续实现这个任务", "force": false}
+// App → Gateway; the id is made by the client, force defaults to false
+{"type": "send", "id": "<made by the client>", "session": "vps-us/t1",
+ "text": "Please implement this task", "force": false}
 
 // Gateway → App
-{"type": "sent", "id": "<客户端生成>", "turn": 7, "status": "working", "started": true}
-{"type": "send_failed", "id": "<客户端生成>", "kind": "blocked",
+{"type": "sent", "id": "<made by the client>", "turn": 7, "status": "working", "started": true}
+{"type": "send_failed", "id": "<made by the client>", "kind": "blocked",
  "message": "waiting for permission"}
 ```
 
-Gateway 校验会话仍存在且 live、文本非空且 UTF-8 不超过 16 KiB。每次发送使用独立的 plain 模式 `hc connect`，经 `hello` 后调用 herdr-core 的 `terminal.send`，不阻塞会话列表推送。core 会等待终端约 3 秒无人输入后再粘贴并回车；Gateway 等待回复最多 30 秒。
+The Gateway checks that the session still exists and is live, and that the text isn't empty and is at most 16 KiB of UTF-8. Each send uses its own plain-mode `hc connect`; after `hello` it calls herdr-core's `terminal.send` without holding up the session list. core waits until the terminal has had no input for about three seconds, then pastes and presses Return; the Gateway waits up to 30 seconds for a reply.
 
-`send_failed.kind` 包括 core 返回的 `not_found`、`machine_unknown`、`finished`、`unavailable`、`blocked`、`status_mismatch`、`invalid_params`、`config`，以及 Gateway 的 `too_long`、`unknown`、`timeout`。`blocked` 表示 Agent 正在等待权限或回答；App 必须让用户确认后才以 `force: true` 重发。
+`send_failed.kind` includes core's `not_found`, `machine_unknown`, `finished`, `unavailable`, `blocked`, `status_mismatch`, `invalid_params` and `config`, plus the Gateway's `too_long`, `unknown` and `timeout`. `blocked` means the Agent is waiting for permission or an answer; the app must have the user confirm before sending again with `force: true`.
 
-`sent.status` 是消息送入时的状态，`sent.started` 表示送入后几秒内是否进入 `working`；程序不上报状态时它们可以为 `null`。`started == false` 时 App 显示「Agent 尚未开始处理」，但仍属于已发送，不是失败。
+`sent.status` is the status when the message went in, and `sent.started` whether it entered `working` within a few seconds of that; both may be `null` when the program reports no status. With `started == false` the app shows “the Agent hasn't started on this yet”, but the message still counts as sent, not failed.
 
-`sent` 只表示 backend 已接受，不表示 Agent 已阅读。若送入时 `status != "working"`，此后会话 `turn > sent.turn` 可显示「Agent 已回应」。若送入时是 `working`，当前这一轮结束也会使 `turn` 增加，但消息可能排在下一轮，因此先显示「已发送 · Agent 正忙」，`turn > sent.turn` 时只显示「Agent 已结束一轮」，不能断言 Agent 已回应，也不要求再等一轮。
+`sent` only means the backend accepted it, not that the Agent read it. If `status != "working"` at that moment, `turn > sent.turn` afterwards can show “the Agent has replied”. If it was `working`, the end of that turn also increases `turn`, but the message may be queued for the next one, so the app first shows “Sent · Agent busy”, and `turn > sent.turn` only shows “the Agent finished a turn”: it can't claim a reply, and doesn't wait for another turn.
 
-发送请求写出后的连接中断、无效回复或超时都使结果不明；App 显示「结果未知，可能已发送」，保留 Draft，不自动重试。
+A connection lost after the request was written, an invalid reply or a timeout all leave the outcome unknown; the app shows “Outcome unknown, it may have been sent”, keeps the draft and doesn't retry by itself.
 
-### 按键
+### Keys
 
-在同一个 `/v0/ws` 连接上按命名按键，用于 Agent 的选择框、确认框和模式切换（ADR 0004）：
+Press named keys on the same `/v0/ws` connection, for an Agent's pickers, confirmations and mode switches (ADR 0004):
 
 ```jsonc
-// App → Gateway；keys 为 core 的按键名，最多 8 个，按顺序按下
-{"type": "keys", "id": "<客户端生成>", "session": "vps-us/t1", "keys": ["down", "enter"]}
+// App → Gateway; keys are core's key names, at most 8, pressed in order
+{"type": "keys", "id": "<made by the client>", "session": "vps-us/t1", "keys": ["down", "enter"]}
 
 // Gateway → App
-{"type": "keys_sent", "id": "<客户端生成>"}
-{"type": "keys_failed", "id": "<客户端生成>", "kind": "finished", "message": "finished"}
+{"type": "keys_sent", "id": "<made by the client>"}
+{"type": "keys_failed", "id": "<made by the client>", "kind": "finished", "message": "finished"}
 ```
 
-Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.keys`。它不 attach，因此不是 Takeover，不改变终端尺寸；core 同样等终端约 3 秒无人输入后再按。`kind` 同 Agent Message，另有 Gateway 的 `invalid_params`（按键为空、超过 8 个或会话不存在）、`unknown`、`timeout`。结果不明时 App 不自动重按。App 依次发送：上一个请求未返回时的点按合并进下一个请求，保证顺序。
+The Gateway calls core's `terminal.keys` over its own plain-mode `hc connect`. It doesn't attach, so this is not a Takeover and doesn't change the terminal's size; core again waits until the terminal has had no input for about three seconds. `kind` is as for Agent Message, plus the Gateway's `invalid_params` (no keys, more than 8, or no such session), `unknown` and `timeout`. When the outcome is unknown the app doesn't press again by itself. The app sends in order: taps made while an earlier request is unanswered are folded into the next request.
 
-### 停止
+### Interrupt
 
-在同一个 `/v0/ws` 连接上结束 Agent 当前这一轮：
+End the Agent's current turn on the same `/v0/ws` connection:
 
 ```jsonc
 // App → Gateway
-{"type": "interrupt", "id": "<客户端生成>", "session": "vps-us/t1"}
+{"type": "interrupt", "id": "<made by the client>", "session": "vps-us/t1"}
 // Gateway → App
-{"type": "interrupted", "id": "<客户端生成>", "outcome": "stopped"}
-{"type": "interrupt_failed", "id": "<客户端生成>", "kind": "finished", "message": "finished"}
+{"type": "interrupted", "id": "<made by the client>", "outcome": "stopped"}
+{"type": "interrupt_failed", "id": "<made by the client>", "kind": "finished", "message": "finished"}
 ```
 
-Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interrupt`（观察 5 秒）：会上报状态的程序按 Esc，否则按 Ctrl+C，只按一次，不升级。它不 attach，不是 Takeover。
+The Gateway calls core's `terminal.interrupt` over its own plain-mode `hc connect` (watching for five seconds): a program that reports status gets Esc, anything else Ctrl+C, pressed once and never escalating. It doesn't attach, so it isn't a Takeover.
 
-- `outcome`：`stopped`（离开了 working）、`exited`、`still_working`（5 秒内没变化）、`unknown`（程序不上报状态）。
-- `kind` 同 Agent Message，另有 Gateway 的 `not_found`、`unknown`、`timeout`。结果不明时 App 不自动再按。
-- App 只在 Agent 为 `working` 时提供停止；`blocked` 时 Esc 会取消对话框，由对话框卡片处理。
+- `outcome`: `stopped` (it left `working`), `exited`, `still_working` (nothing changed in five seconds), `unknown` (the program reports no status).
+- `kind` is as for Agent Message, plus the Gateway's `not_found`, `unknown` and `timeout`. When the outcome is unknown the app doesn't press again by itself.
+- The app offers stop only while the Agent is `working`; when it is `blocked`, Esc would cancel the dialog, which the dialog card handles.
 
-### 附图片
+### Image attachment
 
-把一个文件放到终端旁边，回复它在终端那台机器上的路径。App 把路径填进草稿，随 Agent Message 发出，Claude Code 看到路径会自己读这张图：
+Put a file next to the terminal and reply with its path on the machine that terminal is on. The app fills the path into the draft and sends it with an Agent Message; Claude Code reads the image when it sees the path:
 
 ```jsonc
-// App → Gateway；data 为 base64，解码后不超过 8 MB
-{"type": "put", "id": "<客户端生成>", "session": "vps-us/t1", "name": "image-20261103-192759-1.jpg", "data": "<base64>"}
+// App → Gateway; data is base64, at most 8 MB once decoded
+{"type": "put", "id": "<made by the client>", "session": "vps-us/t1", "name": "image-20261103-192759-1.jpg", "data": "<base64>"}
 // Gateway → App
-{"type": "put_done", "id": "<客户端生成>", "path": "/Users/me/.local/state/herdr-core/default/files/t1/image-20261103-192759-1.jpg"}
-{"type": "put_failed", "id": "<客户端生成>", "kind": "too_large", "message": "图片超过 8 MB"}
+{"type": "put_done", "id": "<made by the client>", "path": "/Users/me/.local/state/herdr-core/default/files/t1/image-20261103-192759-1.jpg"}
+{"type": "put_failed", "id": "<made by the client>", "kind": "too_large", "message": "the image is over 8 MB"}
 ```
 
-- Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.put`，不 attach，不是 Takeover。
-- `name` 只能含 ASCII 字母数字和 `.-_`，不以 `.` 开头，最长 100 字符，否则 `kind: "invalid"`。会话不存在为 `not_found`，过大为 `too_large`；其余同 Agent Message，另有 `unknown`、`timeout`。
-- App 先把图片长边缩到 2048 像素、编成 JPEG，一条消息最多 4 张。
+- The Gateway calls core's `terminal.put` over its own plain-mode `hc connect`; it doesn't attach, so it isn't a Takeover.
+- `name` may contain only ASCII letters, digits and `.-_`, must not start with `.`, and is at most 100 characters, otherwise `kind: "invalid"`. No such session is `not_found`, too big is `too_large`; the rest is as for Agent Message, plus `unknown` and `timeout`.
+- The app first shrinks the image's long side to 2048 pixels and encodes it as JPEG; at most 4 images per message.
 
-### 斜杠命令
+### Slash commands
 
-列出会话可用的自定义斜杠命令和 skill，供 App 补全；内置命令由 App 自带：
+List the custom slash commands and skills a session has, for the app to complete from; built-in commands ship with the app:
 
 ```jsonc
 // App → Gateway
-{"type": "commands", "id": "<客户端生成>", "session": "vps-us/t1"}
-// Gateway → App；name 带斜杠，按名字排序
-{"type": "command_list", "id": "<客户端生成>", "commands": [{"name": "/research", "description": "Investigate a question", "source": "skill"}]}
-{"type": "commands_failed", "id": "<客户端生成>", "kind": "unreachable", "message": "no answer from any machine"}
+{"type": "commands", "id": "<made by the client>", "session": "vps-us/t1"}
+// Gateway → App; names carry the slash and are sorted by name
+{"type": "command_list", "id": "<made by the client>", "commands": [{"name": "/research", "description": "Investigate a question", "source": "skill"}]}
+{"type": "commands_failed", "id": "<made by the client>", "kind": "unreachable", "message": "no answer from any machine"}
 ```
 
-- Gateway 经 core 的 `machine.exec`，在会话所在机器、会话的工作目录里跑一段写死的只读脚本（10 秒超时），列出项目和个人的 `.claude/commands/*.md`、`.claude/skills/*/SKILL.md` 的文件头，再读 frontmatter 的 `name`、`description`。
-- `source`：`project`、`user`、`skill`。同名时项目的优先。最多 200 项，说明截到 120 字。插件带来的不列。
-- `kind`：会话不存在为 `not_found`，其余为 core 的错误类型、`unavailable` 或 `timeout`。只读，失败可直接重试。
+- The Gateway runs a fixed read-only script over core's `machine.exec`, on the machine the session is on and in the session's working directory (10-second timeout); it lists the headers of the project's and the user's `.claude/commands/*.md` and `.claude/skills/*/SKILL.md`, then reads `name` and `description` from the frontmatter.
+- `source`: `project`, `user`, `skill`. The project's wins on a duplicate name. At most 200 entries, descriptions clipped to 120 characters. Those that plugins bring aren't listed.
+- `kind`: `not_found` when there is no such session; otherwise core's error kinds, `unavailable` or `timeout`. It is read-only, so a failure can simply be retried.
 
-### 改动（Changes）
+### Changes
 
-会话工作目录所在 git 仓库相对 HEAD 的改动，含未跟踪文件；只读：
+The changes relative to HEAD in the git repository the session's working directory is in, untracked files included; read-only:
 
 ```jsonc
 // App → Gateway
-{"type": "changes", "id": "<客户端生成>", "session": "vps-us/t1"}
-// Gateway → App；按路径排序，最多 1000 个
-{"type": "changes", "id": "<客户端生成>", "repo": "companion", "truncated": false, "files": [
+{"type": "changes", "id": "<made by the client>", "session": "vps-us/t1"}
+// Gateway → App; sorted by path, at most 1000
+{"type": "changes", "id": "<made by the client>", "repo": "app", "truncated": false, "files": [
   {"path": "ios/A.swift", "status": "M", "added": 12, "deleted": 3},
   {"path": "new.txt", "old_path": "old.txt", "status": "R", "added": 0, "deleted": 0},
   {"path": "logo.png", "status": "?"}
 ]}
-{"type": "changes_failed", "id": "<客户端生成>", "kind": "not_git", "message": "不是 git 仓库"}
+{"type": "changes_failed", "id": "<made by the client>", "kind": "not_git", "message": "not a git repository"}
 
-// 单个文件，path 必须是这个会话最近一次 changes 列出的
-{"type": "change_diff", "id": "<客户端生成>", "session": "vps-us/t1", "path": "ios/A.swift"}
-{"type": "change_diff", "id": "<客户端生成>", "patch": "diff --git a/ios/A.swift b/ios/A.swift\n…", "truncated": false}
-{"type": "change_diff_failed", "id": "<客户端生成>", "kind": "changed", "message": "改动已变化，请刷新"}
+// One file; path must be one this session's latest changes listed
+{"type": "change_diff", "id": "<made by the client>", "session": "vps-us/t1", "path": "ios/A.swift"}
+{"type": "change_diff", "id": "<made by the client>", "patch": "diff --git a/ios/A.swift b/ios/A.swift\n…", "truncated": false}
+{"type": "change_diff_failed", "id": "<made by the client>", "kind": "changed", "message": "these changes have changed, please refresh"}
 ```
 
-- Gateway 经 core 的 `machine.exec` 在会话所在机器跑固定的只读 git 命令：先在会话目录找仓库根，之后在根目录里跑。都带 `--no-optional-locks -c core.fsmonitor=false -c diff.autoRefreshIndex=false`，不写 index；diff 带 `--no-ext-diff --no-textconv`。还没有提交的仓库相对空树比较。
-- `status`：`M` 修改、`A` 新增、`D` 删除、`R` 改名（带 `old_path`）、`T` 类型变化、`U` 冲突、`?` 未跟踪。二进制文件没有 `added`、`deleted`。只是时间戳变了的文件（增删都是 0 的修改）不列。
-- `patch` 是统一 diff 原文，最多 5000 行、512 KB，超出时 `truncated: true`。未跟踪文件相对 `/dev/null` 比较。
-- `kind`：`not_found`（会话不在）、`not_git`、`changed`（路径不在最近的列表里，或 Gateway 重启过）、`timeout`、`unavailable`，以及 core 的错误类型。只读，失败可直接重试。
+- The Gateway runs fixed read-only git commands over core's `machine.exec`, on the machine the session is on: first it finds the repository root from the session's directory, then it runs in that root. All of them carry `--no-optional-locks -c core.fsmonitor=false -c diff.autoRefreshIndex=false` so they never write the index; diffs carry `--no-ext-diff --no-textconv`. A repository without commits is compared against the empty tree.
+- `status`: `M` modified, `A` added, `D` deleted, `R` renamed (with `old_path`), `T` type change, `U` conflict, `?` untracked. Binary files have no `added` or `deleted`. A file whose timestamp alone changed (a modification with 0 added and 0 deleted) isn't listed.
+- `patch` is the unified diff itself, at most 5000 lines and 512 KB; beyond that `truncated: true`. Untracked files are compared against `/dev/null`.
+- `kind`: `not_found` (no such session), `not_git`, `changed` (the path isn't in the latest list, or the Gateway restarted), `timeout`, `unavailable`, and core's error kinds. It is read-only, so a failure can simply be retried.
 
-### 作答（Agent Question）
+### Answering an Agent
 
-回答 Agent 正在等待的批准或单选提问，同样在 `/v0/ws` 上：
+Answer the approval or single-choice question an Agent is waiting on, also on `/v0/ws`:
 
 ```jsonc
-// App → Gateway；expect 为 App 展示的 pending.message
-{"type": "answer", "id": "<客户端生成>", "session": "t3", "choice": "allow", "expect": "approve Bash: date > stamp.txt"}
-// Gateway → App：与按键相同
-{"type": "keys_sent", "id": "<客户端生成>"}
-{"type": "keys_failed", "id": "<客户端生成>", "kind": "changed", "message": "Agent 等待的内容已变化"}
+// App → Gateway; expect is the pending.message the app is showing
+{"type": "answer", "id": "<made by the client>", "session": "t3", "choice": "allow", "expect": "approve Bash: date > stamp.txt"}
+// Gateway → App: as for Keys
+{"type": "keys_sent", "id": "<made by the client>"}
+{"type": "keys_failed", "id": "<made by the client>", "kind": "changed", "message": "what the Agent waits for has changed"}
 ```
 
-- `choice`：权限请求为 `allow` 或 `deny`；提问为选项序号 `1`–`9`（按 transcript 中 `options` 的顺序），或 `deny` 取消。
-- Gateway 先核对会话状态仍为 `blocked`、`status.message` 等于 `expect`，否则返回 `kind: "changed"`（例如桌面上已有人作答）。核对通过后按键：`allow` 按 `1`，`deny` 按 Esc，序号按对应数字（ADR 0004、实验 0001）。
-- 核对与按键之间 core 仍要等约 3 秒无人输入，这段时间内桌面作答的竞争无法排除；App 不自动重试。
-- 多题、多选和自由输入不支持，App 引导用户到终端作答。
+- `choice`: `allow` or `deny` for a permission request; `1`–`9` for a question (in the order of `options` in the transcript), or `deny` to cancel.
+- The Gateway first checks that the session is still `blocked` and that `status.message` equals `expect`, and otherwise returns `kind: "changed"` (someone at the desk answered, say). Once that holds it presses keys: `1` for `allow`, Esc for `deny`, and the digit itself for a number (ADR 0004, experiment 0001).
+- Between the check and the key presses core still waits about three seconds for input, and an answer at the desk during that window can't be ruled out; the app doesn't retry by itself.
+- Multiple questions, multiple choices and free text aren't supported; the app sends the user to the terminal for those.
 
-### 新建会话
+### New session
 
-在同一个 `/v0/ws` 连接上让 Gateway 经 core 启动一个新终端：
+Have the Gateway start a new terminal through core on the same `/v0/ws` connection:
 
 ```jsonc
-// App → Gateway；machine 为 null 表示主 Mac；cwd 留空用 core 的默认目录；
-// argv 为空时启动该机器的 shell；space 取自 spaces 列表、须在同一台机器上，省略表示新 Space
-{"type": "run", "id": "<客户端生成>", "machine": "vps-us", "cwd": "/root/app", "argv": ["claude"], "space": "vps-us/sp1"}
+// App → Gateway; machine null means the main Mac; an empty cwd uses core's default;
+// an empty argv starts that machine's shell; space comes from the spaces list and must be on the same machine, omitted means a new Space
+{"type": "run", "id": "<made by the client>", "machine": "vps-us", "cwd": "/root/app", "argv": ["claude"], "space": "vps-us/sp1"}
 
 // Gateway → App
-{"type": "run_created", "id": "<客户端生成>", "session": "vps-us/t25"}
-{"type": "run_failed", "id": "<客户端生成>", "kind": "machine_unknown", "message": "no such machine"}
+{"type": "run_created", "id": "<made by the client>", "session": "vps-us/t25"}
+{"type": "run_failed", "id": "<made by the client>", "kind": "machine_unknown", "message": "no such machine"}
 ```
 
-Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，带 `no_parent` 与 `no_notify`：Gateway 不是终端，新终端不会挂在它下面，也不会向任何父终端写入提示。它不 attach，因此不是 Takeover。
+The Gateway calls core's `terminal.run` over its own plain-mode `hc connect`, with `no_parent` and `no_notify`: the Gateway isn't a terminal, so the new terminal doesn't hang under it and gets no prompt written to any parent terminal. It doesn't attach, so it isn't a Takeover.
 
-- `argv` 不直接交给 core 启动：Gateway 先启动该机器的 shell（macOS 上是登录 shell），再用 `terminal.send` 把 `argv` 拼成的命令行（必要时加单引号）打进去，和 Herdr 桌面端一样。core 用自己的环境启动程序，由 launchd 拉起时 PATH 里没有 `~/.local/bin` 这类用户 shell 才加的目录，直接启动会报 `spawn_failed`。程序退出后终端留在 shell。打字失败时仍返回 `run_created`，App 打开的是那个 shell。旧版 Gateway 直接启动 `argv`。
-- `session` 已是会话列表里的 id（远端带机器前缀）；Gateway 通过 `sessions` 推送把新终端列出来，App 据此打开它。
-- `kind` 同 Agent Message，常见为 `machine_unknown`、`spawn_failed`、`name_taken`、`invalid_params`。
-- 请求写出后连接中断或超时，都返回 `unknown`：终端可能已经创建，App 提示到列表确认，不自动重试。
-- 新终端带 `herdr.space` 标签（该机器上的 Space id），不带 `herdr.tab`：Herdr 桌面端在这个 Space 里新开一个 Tab 收进它，不会拆分已有的分屏；省略 `space` 时 Gateway 生成一个新 Space id，桌面端新建 Space 并按目录自动命名。Gateway 不写布局文档。
-- 桌面端没开或连不上那台机器时，新终端暂不在任何 Space 中，App 按机器列出；桌面端之后打开时会收进去。
-- App 只提供会话列表中出现过的远端机器；Gateway 本身把 `machine` 原样交给 core。
+- `argv` isn't handed to core to start directly: the Gateway first starts that machine's shell (the login shell on macOS) and then types the command line built from `argv` (single-quoted where needed) into it with `terminal.send`, as Herdr's desktop app does. core starts programs with its own environment, and when launchd starts it, `PATH` lacks directories such as `~/.local/bin` that only the user's shell adds, so starting directly would fail with `spawn_failed`. The terminal stays in the shell once the program exits. When typing fails it still returns `run_created` and the app opens that shell. An old Gateway starts `argv` directly.
+- `session` is already the id in the session list (with the machine's prefix for a remote one); the Gateway lists the new terminal in a `sessions` push, and the app opens it from that.
+- `kind` is as for Agent Message, commonly `machine_unknown`, `spawn_failed`, `name_taken` and `invalid_params`.
+- A connection lost after the request was written, or a timeout, both return `unknown`: the terminal may already exist, so the app tells the user to check the list and doesn't retry by itself.
+- The new terminal carries the `herdr.space` label (the Space id on that machine) and no `herdr.tab`: Herdr's desktop app opens a new Tab in that Space and takes it in without splitting an existing pane; without `space` the Gateway makes up a new Space id, and the desktop app creates the Space and names it after the directory. The Gateway doesn't write the layout document.
+- When the desktop app isn't running or can't reach that machine, the new terminal is in no Space for now and the app lists it per machine; the desktop app takes it in when it opens.
+- The app only offers remote machines that have appeared in the session list; the Gateway passes `machine` to core as it is.
 
-### 对话（Conversation History）
+### Conversation history
 
-`ws://<host>:7420/v0/conversation?session=<id>`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。
+`ws://<host>:7420/v0/conversation?session=<id>`, with authentication and `404` as for the Observer. The Gateway reads the Agent Transcript of the Agent in the terminal's foreground and turns it into items for the app. The first supported Agent is Claude Code: the foreground process's pid → `~/.claude/sessions/<pid>.json` (the current sessionId and startup directory, updated after `/clear`) → `~/.claude/projects/<directory key>/<sessionId>.jsonl`, both read through core's `file.read`; the same works on remote machines with nothing installed there.
 
 ```jsonc
-// 开始时、以及换了对话（/clear、Agent 重启）时：整份替换
+// At the start, and whenever the conversation changes (/clear, Agent restart): the whole thing
 {"type": "conversation", "supported": true, "items": [ … ]}
-// 前台不是可解读的 Agent：App 只提供终端视图；之后若启动了 Claude Code 会再发 supported: true
+// The foreground isn't an Agent that can be read: the app offers only the terminal view; if Claude Code starts later, supported: true follows
 {"type": "conversation", "supported": false, "items": []}
-// 新增或变化的条目，按 id 覆盖
+// Items added or changed, replacing by id
 {"type": "items", "items": [ … ]}
-// Agent 在等什么；不再等待时为 null
+// What the Agent is waiting for; null when it no longer waits
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
-// 权限模式，取 transcript 最近一条消息记下的；变化时、以及每次 conversation 之后发
+// The permission mode, from the newest transcript message that recorded one; sent when it changes and after every conversation
 {"type": "mode", "mode": "acceptEdits"}
-// 会话结束或读取失败
+// The session ended or couldn't be read
 {"type": "closed", "reason": "finished"}
 ```
 
-条目（`kind` 区分）：
+Items, told apart by `kind`:
 
 ```jsonc
-{"kind": "user", "id": "…", "text": "请继续"}
-{"kind": "agent", "id": "…", "text": "Markdown 正文"}
+{"kind": "user", "id": "…", "text": "Please continue"}
+{"kind": "agent", "id": "…", "text": "Markdown body"}
 {"kind": "tool", "id": "toolu_01…", "name": "Bash", "summary": "date > stamp.txt",
- "state": "running", "output": "前 40 行、2000 字节以内"}
-// Edit、MultiEdit、Write 成功后带 edit：patch 是统一 diff 的块（无文件头），最多 200 行、16 KB
+ "state": "running", "output": "the first 40 lines, up to 2000 bytes"}
+// Edit, MultiEdit and Write carry edit once they succeed: patch is the unified diff's hunks (no file header), at most 200 lines and 16 KB
 {"kind": "tool", "id": "toolu_03…", "name": "Edit", "summary": "/x/A.swift", "state": "done",
  "edit": {"path": "/x/A.swift", "added": 2, "deleted": 1, "patch": "@@ -3,3 +3,4 @@\n keep\n-old\n…", "truncated": false}}
-// Write 新建文件时 "created": true，patch 是全文的 + 行
-// Agent（旧名 Task）带 agent；后台的结果回来后仍是 running，task-notification 到达时变成 done / error
+// Write creating a file has "created": true, and a patch of the whole file as + lines
+// Agent (formerly Task) carries agent; a background one is still running when its result arrives, and becomes done / error when the task-notification does
 {"kind": "tool", "id": "toolu_04…", "name": "Agent", "summary": "Find roadmap items", "state": "running",
  "agent": {"name": "Find roadmap items", "type": "Explore", "started_ms": 1762156800000, "background": true}}
 {"kind": "tool", "id": "toolu_02…", "name": "AskUserQuestion", "summary": "Cats or Dogs?", "state": "done",
@@ -308,107 +310,107 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
                 "options": [{"label": "Cats", "description": "…"}, {"label": "Dogs", "description": "…"}]}],
  "answers": {"Cats or Dogs?": "Cats"}}
 {"kind": "command", "id": "…", "name": "/model haiku", "output": "Set model to haiku"}
-{"kind": "notice", "id": "…", "text": "上下文已压缩", "code": "compacted"}   // 也用于「已中断」（interrupted）和 API 错误
-// 子代理或后台任务的完成汇报：Claude Code 把它记成一条 user 消息，但不是用户输入的
+{"kind": "notice", "id": "…", "text": "Context compacted", "code": "compacted"}   // also "Interrupted" and API errors
+// A subagent's or a background task's completion report: Claude Code records it as a user message, but the user didn't type it
 {"kind": "task", "id": "…", "summary": "Agent \"Find roadmap items\" finished", "state": "done",
- "text": "子代理的汇报（Markdown，后台命令没有）"}
-// 待办清单：TaskCreate、TaskUpdate、TodoWrite 不再是工具条目，换成那一刻的整张清单
-{"kind": "todos", "id": "toolu_05…", "items": [{"text": "修复水印", "active": "修复水印中", "status": "in_progress"}]}
-// Agent 之间的消息：发出的（SendMessage）和其他 Agent 发来的；name 查不到时省略
-{"kind": "peer", "id": "…", "direction": "received", "name": "static-workorder-2a", "text": "已改好…", "state": "done"}
+ "text": "the subagent's report (Markdown; background commands have none)"}
+// The to-do list: TaskCreate, TaskUpdate and TodoWrite are no longer tool items but the whole list at that moment
+{"kind": "todos", "id": "toolu_05…", "items": [{"text": "Fix the watermark", "active": "Fixing the watermark", "status": "in_progress"}]}
+// Messages between Agents: those sent (SendMessage) and those received from another Agent; name is omitted when unknown
+{"kind": "peer", "id": "…", "direction": "received", "name": "static-workorder-2a", "text": "Fixed it…", "state": "done"}
 ```
 
-- 只发显示所需的字段；thinking、用量、请求记录和附件不离开 Gateway。图片显示为「［图片］」。
-- 首次只发最近 300 条，最多回溯 transcript 的最后 2000 行。
-- `tool.state` 为 `running` / `done` / `error`；结果到达时同一 `id` 的条目被替换。
-- `agent.started_ms` 取 transcript 记录的时刻；同步的子任务跑完时有 `duration_ms`，后台的在通知到达时补上。
-- `todos.items[].status` 为 `pending` / `in_progress` / `completed`，删掉的项不再出现。中间没有别的条目的连续几次更新替换同一个条目，否则新起一个条目。
-- `peer.direction` 为 `sent` / `received`。发出的 `state` 先是 `running`，结果到达后为 `done` 或 `error`。`name` 对子任务是它的描述，对 `uds:` 地址是从该地址收到过的消息里对方报的名字。
-- 旧 App 不认识 `todos`、`peer` 条目，跳过；新字段忽略。
-- `notice.code` 标明是哪种提示：`interrupted`、`compacted`，以后可能有新值；API 错误等没有 `code`。App 认识的 `code` 用自己的文字显示，其余显示 `text`（已按 `lang` 选好语言）。旧版 Gateway 不发送 `code`。
-- `pending.tool` 是被询问的工具条目；状态先于 transcript 变化时可能暂为 `null`，下次读取后补上。
-- `mode` 原样转发 Claude Code 的值（`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`，以后可能有新值）。transcript 只在发消息时记模式：第一条消息之前没有 `mode`，在终端里切换后要到下一条消息才更新。App 优先显示屏幕底部的模式提示，切换按「按键」逐次发 `shift+tab`（ADR 0005）。
-- Claude Code 的回复按内容块写入，没有逐字流式；Agent 工作中由会话状态表示。
-- 曾有的 `drafts=1` 参数和 `draft` 消息已移除：Gateway 忽略这个参数，带它的旧 App 照常工作，只是不再收到草稿。
-- Gateway 在有 App 订阅时才读取：Agent 工作或等待时、以及状态变化后几秒内每秒一次，其余每 4 秒。core 的 `file.read` 每次读取整个文件，超过 64 MB 的 transcript 读取失败。
+- Only the fields the display needs are sent; thinking, usage, request records and attachments don't leave the Gateway. Images show as “[Image]”.
+- A first connection gets the newest 300 items only, reading back at most the transcript's last 2000 lines.
+- `tool.state` is `running` / `done` / `error`; when the result arrives, the item with the same `id` is replaced.
+- `agent.started_ms` is the moment the transcript recorded; a synchronous subtask has `duration_ms` when it finishes, and a background one gets it when the notification arrives.
+- `todos.items[].status` is `pending` / `in_progress` / `completed`; deleted items no longer appear. Several consecutive updates with no other item in between replace the same item; otherwise a new item starts.
+- `peer.direction` is `sent` / `received`. A sent one's `state` is `running` first, then `done` or `error` when the result arrives. `name` is the subtask's description, or for a `uds:` address the name the peer gave in messages received from it.
+- An old app doesn't know `todos` and `peer` items and skips them; new fields are ignored.
+- `notice.code` says which notice it is: `interrupted`, `compacted`, and possibly new values later; API errors and the like have no `code`. The app shows a `code` it knows in its own words and everything else as `text` (already in the language chosen by `lang`). An old Gateway sends no `code`.
+- `pending.tool` is the tool item being asked about; it may be `null` for a moment when the status changed before the transcript, and is filled in on the next read.
+- `mode` passes Claude Code's value through (`default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`, possibly new values later). The transcript records the mode only when a message is sent: there is no `mode` before the first message, and a switch made in the terminal shows only with the next message. The app prefers the mode hint at the bottom of the screen, and switches by sending `shift+tab` as Keys, one at a time (ADR 0005).
+- Claude Code writes its replies by content block, not word by word; the session's status says the Agent is working.
+- The `drafts=1` parameter and the `draft` message that used to exist are gone: the Gateway ignores the parameter, so an old app that sends it works as before and simply gets no drafts.
+- The Gateway reads only while an app is subscribed: once a second while the Agent works or waits, and for a few seconds after the status changes, otherwise every 4 seconds. core's `file.read` reads the whole file each time, and a transcript over 64 MB fails to read.
 
-### 查看终端（Observer）
+### Watching a terminal (Observer)
 
-`ws://<host>:7420/v0/observe?session=<id>`，认证同上；会话不存在时返回 `404`。Gateway 为每个查看连接单独执行 `hc connect` 并 attach。默认以 `observe` 模式 attach，不改变终端尺寸，手机也不能经这个连接向终端输入。
+`ws://<host>:7420/v0/observe?session=<id>`, with authentication as above; `404` when there is no such session. The Gateway runs its own `hc connect` and attaches for each watching connection. By default it attaches in `observe` mode, which doesn't change the terminal's size, and the phone can't type into the terminal through this connection.
 
-**按手机尺寸接管。** 加 `takeover=1&cols=<列>&rows=<行>` 时改以非 observe 的方式 attach，core 把终端改成这个网格，`attached` 和首屏都按它；列数、行数缺少或不在 1…1000 之内时返回 `400`。查看期间桌面上的终端跟着变小；连接断开后 core 把尺寸还原成仍在 attach 的桌面窗口的大小，没有窗口时还原成基础尺寸。接管的连接上 App 可以发 `{"type": "resize", "cols": 49, "rows": 30}`（键盘弹出收起、转屏），Gateway 转成 core 的 RESIZE 帧；只读连接上的这类消息被忽略。全屏程序（如 Claude Code）自己保存历史、靠鼠标滚轮翻看，终端里没有回滚可滑：接管的连接上 App 把手机终端为拖动编出的滚轮上报原样发来，`{"type": "wheel", "data": "\u001b[<64;10;5M"}`，Gateway 经 attach 通道写给程序。`data` 只能由 SGR 滚轮上报（`ESC [ < b ; x ; y M`，b 为 64–67，可带 shift/meta/ctrl 位）和 alt screen 上的光标上下键（`ESC [ A`/`B`、`ESC O A`/`B`）组成，最长 4096 字节，否则整条丢弃；点按、移动和打字都不会经这里送到终端。桌面再次操作这个终端时尺寸回到桌面的，`size` 帧会报出来，App 据此改回只读显示（ADR 0001 的 2026-11-04 修订）。
+**Takeover at the phone's size.** With `takeover=1&cols=<columns>&rows=<rows>` it attaches in a non-observe mode, core resizes the terminal to that grid, and `attached` and the first screen follow it; a missing column or row count, or one outside 1…1000, returns `400`. While watching, the terminal at the desk shrinks too; when the connection closes, core restores the size of the desktop window still attached to it, or the base size when there is none. On a takeover connection the app may send `{"type": "resize", "cols": 49, "rows": 30}` (keyboard up or down, rotation), and the Gateway passes it on as core's RESIZE frame; such messages are ignored on a read-only connection. A full-screen program (Claude Code, say) keeps its own history and scrolls by mouse wheel, so the terminal has no scrollback to swipe: on a takeover connection the app sends the wheel reports its terminal made for a drag as they are, `{"type": "wheel", "data": "\u001b[<64;10;5M"}`, and the Gateway writes them to the program over the attach channel. `data` may only be made of SGR wheel reports (`ESC [ < b ; x ; y M`, b from 64 to 67, optionally with the shift/meta/ctrl bits) and the cursor up and down keys on the alt screen (`ESC [ A`/`B`, `ESC O A`/`B`), at most 4096 bytes, otherwise the whole message is dropped; taps, movement and typing never reach the terminal this way. When the desktop touches the terminal again its size goes back to the desktop's, reported in a `size` frame, and the app switches back to the read-only display (the 2026-11-04 revision of ADR 0001).
 
-**接管时直接输入。** 接管的连接上 `attached` 多带 `"input": true`，表示 App 可以在终端光标处直接打字：App 把手机终端为按键编出的字节原样发来，`{"type": "input", "data": "ls\t"}`，Gateway 经 attach 通道写给程序，和桌面上敲键盘一样（Tab 补全、方向键、Ctrl 组合键都在其中）。`data` 不能为空，最长 64 KiB（一次粘贴），否则整条丢弃；只读连接上的 `input` 一律忽略。App 只发用户按下的键，手机终端自己对查询（DA、DSR、OSC 颜色等）的应答不发，core 已经应答过。旧 Gateway 的 `attached` 没有 `input`，App 据此不提供直接输入，按键仍走 `terminal.keys`；旧 App 不认识这个字段，照旧工作（ADR 0001 的 2026-11-09 修订）。
+**Typing directly during a takeover.** On a takeover connection `attached` also carries `"input": true`, meaning the app may type at the terminal's cursor: it sends the bytes its terminal made for the keys as they are, `{"type": "input", "data": "ls\t"}`, and the Gateway writes them to the program over the attach channel, just as typing at the desk would (Tab completion, arrow keys and Ctrl combinations are all in there). `data` must not be empty and is at most 64 KiB (one paste), otherwise the whole message is dropped; `input` is always ignored on a read-only connection. The app sends only what the user pressed, not its terminal's answers to queries (DA, DSR, OSC color and so on), which core has already answered. An old Gateway's `attached` has no `input`, so the app doesn't offer direct typing and keys still go through `terminal.keys`; an old app doesn't know the field and works as before (the 2026-11-09 revision of ADR 0001).
 
-- **文本帧**（控制）：
+- **Text frames** (control):
   ```jsonc
-  {"type": "attached", "cols": 200, "rows": 120}  // 开始；App 按此尺寸收下首屏（只读时再重排）
-  {"type": "attached", "cols": 49, "rows": 45, "resume": "9f2c…", "keep_ms": 30000}  // 带 resumable=1 时
-  {"type": "attached", "cols": 49, "rows": 45, "input": true}  // 接管时：可以发 input
-  {"type": "resumed", "resume": "41ab…", "keep_ms": 30000}  // 接回了；之后的二进制帧接着 offset 往下
-  {"type": "size", "cols": 160, "rows": 48}       // 终端尺寸变了（其他客户端，或接管后自己的 resize）
+  {"type": "attached", "cols": 200, "rows": 120}  // the start; the app takes the first screen at this size (and reflows it when read-only)
+  {"type": "attached", "cols": 49, "rows": 45, "resume": "9f2c…", "keep_ms": 30000}  // with resumable=1
+  {"type": "attached", "cols": 49, "rows": 45, "input": true}  // during a takeover: input may be sent
+  {"type": "resumed", "resume": "41ab…", "keep_ms": 30000}  // back again; binary frames continue from offset
+  {"type": "size", "cols": 160, "rows": 48}       // the terminal's size changed (another client, or this takeover's resize)
   {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
-  {"type": "closed", "reason": "no terminal t9"}  // attach 失败时为字符串
+  {"type": "closed", "reason": "no terminal t9"}  // a string when the attach failed
   ```
-- **二进制帧**：终端原始 VT 字节。先是首屏（当前屏幕和最多 1000 行历史），之后是程序输出。首屏按 core 的 `cols × rows` 绘制：App 先在同样大小的表面收下它，再把表面缩放到手机宽度让 Ghostty 重排，即可得到手机尺寸的终端；直接按别的大小写入首屏会错位。全屏 TUI 用绝对光标定位，重排后会错位——App 检测到全屏界面（首屏里的 `ESC[?1049h` 等切换）时不重排，按 core 的网格原样显示并缩放到手机宽度，可双指放大；程序进入或退出全屏时重新 attach。
-- **流控**：Gateway 在字节发到 WebSocket 之后才向 core 归还 credit。手机读得慢时，core 会改发一次完整重绘，不会无限积压。
+- **Binary frames**: the terminal's raw VT bytes. First the first screen (the current screen and up to 1000 lines of history), then the program's output. The first screen is drawn at core's `cols × rows`: the app takes it on a surface of that size first, then scales the surface to the phone's width and lets Ghostty reflow it, which gives a terminal at the phone's size; writing the first screen at any other size would misplace it. Full-screen TUIs position the cursor absolutely and the reflow would misalign them: when the app sees a full-screen interface (the `ESC[?1049h` switch and the like in the first screen) it doesn't reflow but shows core's grid as it is, scaled to the phone's width, with pinch to zoom; it attaches afresh when the program enters or leaves full screen.
+- **Flow control**: the Gateway gives credit back to core only after the bytes have gone out to the WebSocket. When the phone reads slowly, core sends a full redraw instead of letting the buffer grow without bound.
 
-**掉线续传。** 加 `resumable=1` 时 `attached` 多带 `resume`（token）和 `keep_ms`。之后连接若不是因 App 发 `{"type": "detach"}` 而断开（网络掉、App 进后台、关连接），Gateway 不断开 core 的 attach，保留 `keep_ms`（30 秒）：接管的尺寸照旧，core 的输出记下等补发，期间不归还 credit。App 用 `/v0/observe?session=<id>&resume=<token>&offset=<已收到的二进制字节数>` 接回（不再带 `takeover` 等参数），Gateway 回 `resumed`（带新 token，旧的作废），从第 `offset` 个字节起补发，再接着转发；保留期间尺寸变了会紧接着发 `size`。原连接还没断时也可以接回（tailnet 换到 Relay），原连接随之关闭。token 只认原设备和原会话；不认识、已过期、`offset` 超出已发字节数或缓冲（最近 4 MiB）里已没有时返回 `410`（经 Relay 为 close code 4410），App 改为重新 attach。不带 `resumable=1` 的连接断开即放手，和原来一样。App 离开终端页时先发 `{"type": "detach"}` 再关连接，Gateway 立即放手；任何连接都接受这条消息。
+**Resuming a dropped stream.** With `resumable=1`, `attached` also carries `resume` (a token) and `keep_ms`. If the connection then closes for any reason other than the app sending `{"type": "detach"}` (a lost network, the app going to the background, a closed connection), the Gateway doesn't end core's attach but keeps it for `keep_ms` (30 seconds): the takeover size stays, core's output is recorded for replay, and its credit is held back. The app comes back with `/v0/observe?session=<id>&resume=<token>&offset=<binary bytes received>` (without `takeover` and the like), the Gateway replies `resumed` (with a new token; the old one is void), sends from byte `offset` on and then follows along; a size change during the hold sends a `size` right after. It may also come back while the old connection is still open (the tailnet switching to the Relay), and the old connection closes with it. The token is good for the original device and session only; a token it doesn't know, an expired one, or an `offset` beyond the bytes sent or no longer in the buffer (the last 4 MiB) returns `410` (close code 4410 through the Relay), and the app attaches afresh. A connection without `resumable=1` lets go as soon as it closes, as before. When the app leaves the terminal page it sends `{"type": "detach"}` before closing, and the Gateway lets go at once; every connection accepts this message.
 
-**心跳。** Gateway 在 `/v0/observe` 上每 15 秒发一次 WebSocket ping，45 秒没收到 App 任何消息（含 pong）就当掉线处理：可续传的流进入保留，其余直接放手。
+**Heartbeat.** The Gateway pings every 15 seconds on `/v0/observe` and treats 45 seconds without any message from the app (pongs included) as a dropped connection: a resumable stream goes into its hold, any other is let go.
 
-### 读屏（Screen）
+### Reading the screen
 
-`ws://<host>:7420/v0/screen?session=<id>`，认证同上；会话不存在时返回 `404`。供对话页识别 Claude Code 的对话框（ADR 0005）：Gateway 以 `observe` 模式 attach（不要历史），用 `vt100` 维护屏幕，只发文本帧：
+`ws://<host>:7420/v0/screen?session=<id>`, with authentication as above; `404` when there is no such session. For the conversation page to recognize Claude Code's dialogs (ADR 0005): the Gateway attaches in `observe` mode (no history), keeps the screen with `vt100` and sends text frames only:
 
 ```jsonc
-// 屏幕安静 150 ms 后发；内容没变不发；Agent Status 为 working 时不发
+// Sent once the screen has been quiet for 150 ms; not sent when nothing changed, nor while the Agent Status is working
 {"type": "screen", "cols": 200, "rows": 50, "text": "…", "cursor": [49, 2]}
 {"type": "closed", "reason": {"reason": "exited", "exit_code": 0, "signal": null}}
 ```
 
-- `text`：可见的 `rows` 行，行间 `\r\n`；每次样式变化写一个从复位开始的 SGR（`ESC[0;…m`，只含粗体、暗色、斜体、反色和前景/背景色），行尾无背景的空白去掉。
-- `cursor`：`[行, 列]`，从 0 开始；光标隐藏时为 `null`。
-- 终端尺寸变化时按新尺寸重建屏幕。对话框的识别和作答按键都在 App 里，作答仍走「按键」消息。
+- `text`: the visible `rows` rows, with `\r\n` between them; every style change writes an SGR starting from a reset (`ESC[0;…m`, carrying only bold, dim, italic, reverse and foreground/background colors), and trailing spaces with no background are trimmed.
+- `cursor`: `[row, column]`, from 0; `null` while the cursor is hidden.
+- The screen is rebuilt at the new size when the terminal's size changes. Recognizing a dialog and the keys that answer it are both in the app; answering still goes through Keys.
 
-### 经 Relay 连接
+### Connecting through the Relay
 
-手机不在 tailnet 上时，经 Relay 连接（ADR 0006）。中继协议见 `relay/PROTOCOL.md`，中继只转发二进制帧，看不到明文。
+When the phone isn't on the tailnet it connects through the Relay (ADR 0006). The relay protocol is in `relay/PROTOCOL.md`; the relay forwards binary frames only and never sees plaintext.
 
-1. **连接**：App 打开 `wss://<中继>/c/<route token>`。中继找不到这个 Gateway（不在线或 route 不对）时返回 `502`。
-2. **握手**：Noise `Noise_IKpsk2_25519_ChaChaPoly_SHA256`，prologue 为 `yochi-relay-v1`，psk 放在第 2 个位置。App 是发起方，事先知道 Gateway 的静态公钥（`key` / `gateway_key`）。每条握手消息是一个二进制 WebSocket 消息，payload 为空。
-   - 已登记的设备用登记时拿到的 psk；正在配对的手机用 link v2 的 `secret`。
-   - Gateway 读完第一条握手消息后，按 App 的静态公钥选 psk：先找设备，再找正在等待的配对。都没有时关闭，close code `4401`。
-   - psk 不对时，App 读不了第二条握手消息，应当关闭连接。
-3. **请求**：握手后的第一条消息是 JSON 文本，说明要什么：
+1. **Connect**: the app opens `wss://<relay>/c/<route token>`. When the relay can't find this Gateway (offline, or the wrong route) it returns `502`.
+2. **Handshake**: Noise `Noise_IKpsk2_25519_ChaChaPoly_SHA256`, prologue `yochi-relay-v1`, the psk in position 2. The app is the initiator and knows the Gateway's static public key in advance (`key` / `gateway_key`). Each handshake message is one binary WebSocket message with an empty payload.
+   - A device that has enrolled uses the psk it got then; a phone in the middle of pairing uses link v2's `secret`.
+   - After reading the first handshake message, the Gateway picks the psk by the app's static public key: first a device, then a waiting pairing. With neither it closes, with close code `4401`.
+   - With the wrong psk the app can't read the second handshake message and should close the connection.
+3. **Request**: the first message after the handshake is JSON text saying what it wants:
    ```jsonc
-   {"path": "/v0/observe?session=t1&takeover=1&cols=49&rows=45"}  // 已配对设备：任一 /v0/ 接口，/v0/pair 除外
-   {"path": "/v0/pair", "name": "iPhone"}                        // 用 secret 配对
+   {"path": "/v0/observe?session=t1&takeover=1&cols=49&rows=45"}  // a paired device: any /v0/ endpoint but /v0/pair
+   {"path": "/v0/pair", "name": "iPhone"}                        // pairing with a secret
    ```
-   配对时 Gateway 回一条文本消息后以 `1000` 关闭。设备 token 只在 tailnet 上用，psk 用于以后经 Relay 连接：
+   When pairing, the Gateway answers with one text message and closes with `1000`. The device token is for the tailnet only; the psk is for later connections through the Relay:
    ```jsonc
-   {"type": "paired", "device": "8653add4", "token": "<64 位十六进制>", "psk": "…"}
+   {"type": "paired", "device": "8653add4", "token": "<64 hex digits>", "psk": "…"}
    {"type": "rejected"}
    ```
-4. **之后**：消息与 tailnet 上的同名接口完全相同，认证由握手完成，不带 Bearer token。接口拒绝时 close code 为 `4000 + HTTP 状态`，例如会话不存在为 `4404`。请求无效时为 `4400`。
+4. **After that**: messages are exactly those of the endpoint of the same name on the tailnet, with the handshake doing the authentication and no Bearer token. An endpoint refusing closes with `4000 + HTTP status`, `4404` for a session that doesn't exist, say. An invalid request is `4400`.
 
-**分片**：每个 WebSocket 消息加密为一条或多条 Noise 消息，每条单独作为一个二进制 WebSocket 消息发送。明文是 `[flags][payload]`：bit 0 置位表示二进制消息（否则为文本），bit 1 置位表示后面还有分片。每条 Noise 消息最多 65535 字节，所以每片 payload 最多 65518 字节；重组后的消息最多 64 MiB。Noise 消息不能重放、不能乱序，解密失败就结束连接。
+**Fragmentation**: each WebSocket message is encrypted as one or more Noise messages, each sent as its own binary WebSocket message. The plaintext is `[flags][payload]`: bit 0 set means a binary message (text otherwise), bit 1 set means more fragments follow. A Noise message carries at most 65535 bytes, so each fragment carries at most 65518 payload bytes; a reassembled message is at most 64 MiB. Noise messages can't be replayed or reordered, and a failed decryption ends the connection.
 
-### 一条连接多条流（`/v0/mux`）
+### Many streams on one connection (`/v0/mux`)
 
-页面不必各开一条连接：App 可以连一次 `/v0/mux`，在上面开任意多条流，每条流等同于单独连到那个接口（ADR 0007）。经 Relay 时，这省掉了每进一个页面就连中继、做 Noise 握手的几个往返；在 tailnet 上省掉 TCP 握手。认证同其他接口：tailnet 上带 Bearer token，经 Relay 时由握手完成，流沿用 mux 的认证。旧 Gateway 没有这个接口，返回 `404`（经 Relay 为 `4404`），App 照旧单独连接。
+A page doesn't need a connection of its own: the app may connect to `/v0/mux` once and open any number of streams on it, each equal to connecting to that endpoint by itself (ADR 0007). Through the Relay this saves the relay connection and the Noise handshake round trips for every page entered; on the tailnet it saves a TCP handshake. Authentication is as for the other endpoints: the Bearer token on the tailnet, the handshake through the Relay, with streams inheriting the mux's authentication. An old Gateway has no such endpoint and returns `404` (`4404` through the Relay), and the app connects separately as before.
 
-每个 WebSocket 消息是一帧二进制：`[流 id: u32][kind: u8][payload]`，小端。
+Each WebSocket message is one binary frame: `[stream id: u32][kind: u8][payload]`, little endian.
 
-| kind | 方向 | payload |
+| kind | direction | payload |
 | --- | --- | --- |
-| 0 OPEN | App → Gateway | 接口的路径和查询，UTF-8，例如 `/v0/observe?session=t1&resumable=1` |
-| 1 TEXT | 双向 | 这条流上的一条文本消息 |
-| 2 BINARY | 双向 | 这条流上的一条二进制消息 |
-| 3 CLOSE | 双向 | `[code: u16][reason]`，这条流结束 |
+| 0 OPEN | App → Gateway | the endpoint's path and query, UTF-8, e.g. `/v0/observe?session=t1&resumable=1` |
+| 1 TEXT | both | one text message on this stream |
+| 2 BINARY | both | one binary message on this stream |
+| 3 CLOSE | both | `[code: u16][reason]`, this stream ends |
 
-- **流 id** 由 App 分配，非 0，同一条 mux 上不重复使用。0 是 mux 自己的：Gateway 接受连接后先在 0 上发 TEXT `{"type": "mux", "v": 1}`。
-- **OPEN 之后**不必等回复，可以紧接着发这条流的消息。接口的第一条消息就是回复。
-- **结束**：接口拒绝时 CLOSE 的 code 为 `4000 + HTTP 状态`（与 Relay 相同，如 `4404`、`4410`）。接口自己关闭时带它的 close code。不能开的接口（`/v0/pair`、`/v0/mux`）为 `4400`。App 发 CLOSE 等同于关掉那条连接，对终端流来说就是掉线，可续传；要离开仍先发 `detach`。
-- **限制**：每条 mux 最多 32 条流，超出的 OPEN 以 `1013` 关闭。Gateway 为每条流缓冲 64 条 App 发来的消息，接口来不及读时这条流以 `1013` 关闭，不影响其他流。
-- **心跳**：Gateway 每 15 秒 ping 一次，45 秒没听到 App 就关掉 mux，上面的流都随之断开。
+- **Stream id** is assigned by the app, never 0, and never reused on the same mux. 0 is the mux's own: once it accepts the connection, the Gateway sends TEXT `{"type": "mux", "v": 1}` on it.
+- **After OPEN** the app needn't wait for a reply and may send this stream's messages right away. The endpoint's first message is the reply.
+- **Ending**: an endpoint refusing closes with `4000 + HTTP status` (as through the Relay, e.g. `4404`, `4410`). An endpoint closing by itself carries its own close code. Endpoints that can't be opened (`/v0/pair`, `/v0/mux`) are `4400`. An app CLOSE is the same as closing that connection, which for a terminal stream is a drop and can be resumed; leaving still sends `detach` first.
+- **Limits**: a mux carries at most 32 streams; an OPEN beyond that closes with `1013`. The Gateway buffers 64 messages from the app per stream, and a stream whose endpoint falls behind closes with `1013` without affecting the others.
+- **Heartbeat**: the Gateway pings every 15 seconds and closes the mux after 45 seconds without hearing from the app, dropping all its streams with it.
