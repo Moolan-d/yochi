@@ -45,7 +45,7 @@ TESTS="testPairObserveAndUnpair testShellCommandsRun" scripts/ui-test.sh
 ## Rules
 
 - **Leave the user's own sessions alone.** UI tests create, type into and kill only terminals named `yochi-uitest*`. Never attach to, type into or close any other Herdr terminal. Never restart a Gateway on port 7420; that one is the user's.
-- **Protocol changes stay backward compatible.** Older apps and older Gateways must keep working. Document every change in `protocol/README.md`, in the same commit as the code.
+- **Protocol changes stay backward compatible.** Older apps and older Gateways must keep working. Document every change in `protocol/README.md` and its translation `protocol/README.zh-CN.md`, in the same commit as the code. The English page is authoritative.
 - **Localization.**
   - English is the development language. Chinese (`zh-Hans`) is a full translation in `ios/Yochi/Localizable.xcstrings`.
   - New UI text goes in as English. Wrap it in `String(localized:)` wherever the type is `String` rather than `LocalizedStringKey`.

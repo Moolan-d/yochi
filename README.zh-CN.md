@@ -120,7 +120,7 @@ yochi push bark https://api.day.app/<your-key>/ --encrypt
 - **手机只要会话，不要文件。** 它从不指定 Mac 上的路径或命令；查看改动用的是一组固定的只读 git 命令。
 - **终端终究是终端。** 配对过的手机能在它看到的会话里打字，所以把它当成一台没锁屏的电脑。
 
-细节见 [Gateway 指南](gateway/README.zh-CN.md#安全模型)和[协议](protocol/README.md)。
+细节见 [Gateway 指南](gateway/README.zh-CN.md#安全模型)和[协议](protocol/README.zh-CN.md)。
 
 ## 参与开发
 

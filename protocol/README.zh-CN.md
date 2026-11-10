@@ -4,6 +4,8 @@ Gateway 向 Yochi App 暴露的有版本接口。
 
 [English](./README.md) | 简体中文
 
+> 本页是英文版的翻译；两者不一致时以英文版为准。
+
 ## v0
 
 传输与认证的取舍见 ADR 0003。
