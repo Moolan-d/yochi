@@ -4233,16 +4233,6 @@
         }
       }
     },
-    "Writing…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在写…"
-          }
-        }
-      }
-    },
     "XXXX-XXXX" : {
       "localizations" : {
         "zh-Hans" : {

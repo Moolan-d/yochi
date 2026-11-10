@@ -33,11 +33,6 @@ struct SampleConversationView: View {
             if let message = try? JSONDecoder().decode(ConversationMessage.self, from: data) {
                 feed.apply(message)
             }
-            // The draft comes after the page is up, as it does from the Gateway.
-            try? await Task.sleep(for: .seconds(1))
-            apply(["type": "draft", "text": SampleText.pick(
-                "The roadmap has three items left. The empty state is done, so next I'll compare the copy with the web version, and then check that the tests still pass on a small screen.",
-                "路线图里还剩三项。空状态已经改好了，接下来我对照网页版核一下文案，再确认小屏幕上测试仍然通过。")])
         }
     }
 

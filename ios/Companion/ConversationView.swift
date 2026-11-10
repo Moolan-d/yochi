@@ -94,11 +94,7 @@ struct ConversationPane: View {
                             if item.id == arriving { arrived(top: top) }
                         }
                 }
-                if let draft = feed.draft {
-                    DraftReply(text: draft)
-                }
-                // The draft already says the Agent is writing.
-                if working && feed.draft == nil {
+                if working {
                     Label {
                         Text("The Agent is working…")
                     } icon: {
@@ -164,9 +160,6 @@ struct ConversationPane: View {
             }
         }
         .onChange(of: working) { _, _ in follow() }
-        // The draft growing is followed as the content's height changes; its
-        // coming and going moves the end of the list at once.
-        .onChange(of: feed.draft == nil) { _, _ in follow() }
         .onChange(of: keyboardShown) { _, _ in followAfterKeyboard() }
         .accessibilityIdentifier("conversation")
         // After the identifier, which would otherwise name the button too.

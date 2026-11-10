@@ -951,11 +951,6 @@ final class CompanionUITests: XCTestCase {
             XCTAssertEqual(lists.element(boundBy: 0).value as? String, "已收起")
             XCTAssertTrue(app.staticTexts["查路线图"].exists || app.otherElements["查路线图，进行中"].exists
                           || app.descendants(matching: .any)["查路线图，进行中"].exists)
-            // The reply being written, last in the list, in place of the working line.
-            let draft = app.descendants(matching: .any)["draftReply"]
-            XCTAssertTrue(draft.waitForExistence(timeout: 5), "no draft reply")
-            XCTAssertEqual(draft.label, "正在写…")
-            XCTAssertTrue((draft.value as? String ?? "").hasPrefix("路线图里还剩三项"))
             snapshot("cards-bottom\(suffix)")
 
             let subtask = app.descendants(matching: .any).matching(identifier: "subtaskRow").firstMatch
