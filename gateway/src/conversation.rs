@@ -17,6 +17,9 @@ const MAX_PATCH_BYTES: usize = 16 * 1024;
 /// Items a phone gets when it starts following.
 pub const FIRST_ITEMS: usize = 300;
 
+// Tool items carry many optional fields, so this enum has one large variant.
+// Boxing it would only add an allocation to every clone of an item.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Item {
@@ -261,10 +264,11 @@ impl Conversation {
     }
 
     fn record(&mut self, record: &Value) -> Vec<String> {
-        if matches!(record["type"].as_str(), Some("permission-mode" | "user")) && record["isSidechain"] != true {
-            if let Some(mode) = record["permissionMode"].as_str().filter(|mode| !mode.is_empty()) {
-                self.mode = Some(mode.to_owned());
-            }
+        if matches!(record["type"].as_str(), Some("permission-mode" | "user"))
+            && record["isSidechain"] != true
+            && let Some(mode) = record["permissionMode"].as_str().filter(|mode| !mode.is_empty())
+        {
+            self.mode = Some(mode.to_owned());
         }
         let uuid = record["uuid"].as_str().unwrap_or_default();
         // Filed as a meta user message, but the Agent acts on it.
@@ -353,14 +357,14 @@ impl Conversation {
             None => (self.lang.pick("任务通知", "Task notification").to_owned(), Some(text)),
         };
         let report = report.filter(|report| !report.is_empty()).map(|report| clip(report, MAX_TEXT));
-        if let Some(call) = tag(text, "tool-use-id").and_then(|id| self.index.get(id)).map(|&i| self.items[i].clone()) {
-            if let Item::Tool { state: ToolState::Running, agent: Some(mut agent), .. } = call.clone() {
-                agent.duration_ms = agent.started_ms.zip(at).map(|(start, end)| end.saturating_sub(start));
-                if let Item::Tool { id, name, summary, output, questions, answers, edit, .. } = call {
-                    touched.push(self.upsert(Item::Tool {
-                        id, name, summary, state, output, questions, answers, edit, agent: Some(agent),
-                    }));
-                }
+        if let Some(call) = tag(text, "tool-use-id").and_then(|id| self.index.get(id)).map(|&i| self.items[i].clone())
+            && let Item::Tool { state: ToolState::Running, agent: Some(mut agent), .. } = call.clone()
+        {
+            agent.duration_ms = agent.started_ms.zip(at).map(|(start, end)| end.saturating_sub(start));
+            if let Item::Tool { id, name, summary, output, questions, answers, edit, .. } = call {
+                touched.push(self.upsert(Item::Tool {
+                    id, name, summary, state, output, questions, answers, edit, agent: Some(agent),
+                }));
             }
         }
         touched.push(self.upsert(Item::Task { id: uuid.into(), summary: clip(&summary, MAX_OUTPUT), state, text: report }));
