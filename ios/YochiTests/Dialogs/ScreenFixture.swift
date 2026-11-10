@@ -4,7 +4,7 @@
 import Foundation
 import Testing
 
-@testable import Companion
+@testable import Yochi
 
 /// Captured Agent screens under `Fixtures/screens/`, addressed by stem:
 /// `claude-27-n1-narrow-bash` reads `screens/claude/claude-27-n1-narrow-bash.ansi`.
@@ -30,6 +30,14 @@ enum ScreenFixture {
     ]
 
     static let all = claude
+
+    /// The stems of the captures on disk, for the test that checks the list
+    /// above covers them.
+    static var captured: [String] {
+        guard let root = Bundle(for: Locator.self).url(forResource: "Fixtures", withExtension: nil) else { return [] }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: root.appending(path: "screens/claude").path))
+        return (names ?? []).filter { $0.hasSuffix(".ansi") }.map { String($0.dropLast(".ansi".count)) }.sorted()
+    }
 
     static func path(_ stem: String) -> String {
         "screens/\(program(stem).rawValue)/\(stem).ansi"
