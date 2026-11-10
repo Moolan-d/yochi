@@ -434,10 +434,11 @@ final class YochiUITests: XCTestCase {
         unpair(app)
     }
 
-    /// Claude Code started by hand in a terminal page keeps the page its
-    /// terminal: Claude Code draws at the phone's grid there, and leaving
-    /// gives the desktop its size back (the script samples both). Its first
-    /// dialog, if any, is only looked at, never answered.
+    /// Claude Code started by hand in a terminal page turns the page into its
+    /// conversation. The More menu switches back to the terminal, where
+    /// Claude Code draws at the phone's grid, and leaving gives the desktop
+    /// its size back (the script samples both). Its first dialog, if any, is
+    /// only looked at, never answered.
     @MainActor
     func testClaudeStartedInTerminal() throws {
         let app = launchUnpaired()
@@ -449,15 +450,25 @@ final class YochiUITests: XCTestCase {
         session.tap()
         XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never attached")
         snapshot("1 shell")
-        run(app, "~/.local/bin/claude")
-        // Claude Code starts and the core reports it; the page stays.
-        RunLoop.current.run(until: .now.addingTimeInterval(10))
-        snapshot("2 claude in the terminal")
-        XCTAssertFalse(app.descendants(matching: .any)["agentMessageField"].exists,
-                       "the page turned into the conversation")
-        XCTAssert(app.descendants(matching: .any)["terminalCommandField"].exists || app.buttons["toggleComposer"].exists,
-                  "the terminal composer is gone")
+        let field = composer(app)
+        field.tap()
+        field.typeText("~/.local/bin/claude")
+        app.buttons["发送命令"].tap()
+        // Claude Code starts and the core reports it; the conversation takes the page.
+        let message = app.descendants(matching: .any)["agentMessageField"]
+        XCTAssert(message.waitForExistence(timeout: 30), "the page did not turn into the conversation")
+        XCTAssert(text(app, containing: "对话 ·").exists, "the title does not say conversation")
+        snapshot("2 claude as a conversation")
+
+        app.buttons["moreMenu"].tap()
+        let terminalPage = app.buttons["终端"]
+        XCTAssert(terminalPage.waitForExistence(timeout: 5), "no switch to the terminal")
+        terminalPage.tap()
         let terminal = app.descendants(matching: .any)["terminalGrid"]
+        XCTAssert(terminal.waitForExistence(timeout: 15), "the terminal page did not come back")
+        XCTAssert(text(app, containing: "×").waitForExistence(timeout: 15), "terminal never re-attached")
+        XCTAssertFalse(message.exists, "the conversation stayed")
+        snapshot("3 claude in the terminal")
         terminal.press(forDuration: 1.0)
         let view = app.textViews.firstMatch
         XCTAssert(view.waitForExistence(timeout: 5), "no selection sheet")
