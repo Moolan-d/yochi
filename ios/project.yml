@@ -56,8 +56,6 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         TARGETED_DEVICE_FAMILY: "1"
-    scheme:
-      testTargets: [YochiTests, YochiUITests]
   YochiTests:
     type: bundle.unit-test
     platform: iOS
@@ -92,3 +90,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.yochi.uitests$(BUNDLE_ID_SUFFIX)
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"
+
+schemes:
+  Yochi:
+    build:
+      targets:
+        Yochi: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [YochiTests, YochiUITests]
+      # The tests check the Chinese translation, so they run in Chinese on
+      # any simulator. Running the app keeps the simulator's language.
+      language: zh-Hans
+      region: CN
+    profile:
+      config: Release
+    archive:
+      config: Release
