@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var seen = SeenTurns()
     @State private var showingSettings = false
     @State private var showingNewSession = false
+    /// The space a new session starts in, when started from its page.
+    @State private var newSessionSpace: Space?
     @State private var tab: HomeTab = .inbox
     /// Each tab keeps its own stack.
     @State private var inboxPath: [Route] = []
@@ -49,8 +51,8 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingNewSession) {
-            NewSessionView(client: client) { session in
+        .sheet(isPresented: $showingNewSession, onDismiss: { newSessionSpace = nil }) {
+            NewSessionView(client: client, in: newSessionSpace) { session in
                 opening = session
                 openInCurrentTab = true
                 // The list may already carry it; otherwise its
@@ -182,7 +184,11 @@ struct ContentView: View {
                 .navigationTitle(title)
                 .navigationDestination(for: Route.self) { route in
                     HomeRouteView(route: route, sessions: client.sessions, spaces: client.spaces, seen: seen.turns,
-                                  queued: { client.queuedMessage(session: $0) != nil }) { session in
+                                  queued: { client.queuedMessage(session: $0) != nil },
+                                  newSession: client.phase == .connected ? { space in
+                                      newSessionSpace = space
+                                      showingNewSession = true
+                                  } : nil) { session in
                         ObserveView(session: session, config: config, client: client,
                                     open: { switchPane(from: session, to: $0) },
                                     showPanes: showPanes)

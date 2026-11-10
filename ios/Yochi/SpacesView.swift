@@ -184,6 +184,8 @@ struct SpaceDetailView: View {
     /// The machine's name, for the subtitle.
     let machine: String?
     let queued: (String) -> Bool
+    /// Starts a session in this space; nil while that can't be done.
+    var newSession: (() -> Void)? = nil
 
     var body: some View {
         List {
@@ -225,6 +227,11 @@ struct SpaceDetailView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New in This Space", systemImage: "plus") { newSession?() }
+                    .disabled(newSession == nil)
+                    .accessibilityIdentifier("newSessionInSpace")
             }
         }
     }

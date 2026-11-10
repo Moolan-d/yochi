@@ -935,6 +935,7 @@ final class YochiUITests: XCTestCase {
             XCTAssert(app.buttons["session-t5"].exists, "the space page lists no shell")
             XCTAssertLessThan(parent.frame.minY, app.buttons["session-t3"].frame.minY, "the child is not under its parent")
             XCTAssertFalse(app.tabBars.buttons["收件箱"].isHittable && app.tabBars.buttons["收件箱"].frame.height == 0, "tab bar")
+            XCTAssert(app.buttons["newSessionInSpace"].exists, "no + on the space page")
             snapshot("space-detail\(suffix)")
             app.navigationBars.buttons.firstMatch.tap()
             let others = app.buttons["others-"]
@@ -1120,6 +1121,34 @@ final class YochiUITests: XCTestCase {
         app.buttons["取消"].tap()
         XCTAssert(app.buttons["新建"].waitForExistence(timeout: 5), "sheet did not close")
         unpair(app)
+    }
+
+    /// A space's page starts a session in that space: the sheet opens with the
+    /// space and its folder filled in. Nothing is created.
+    @MainActor
+    func testNewSessionInSpace() throws {
+        let app = launchUnpaired()
+        pair(app, host: env("YOCHI_HOST"), code: env("YOCHI_CODE"))
+        waitUntilPaired(app)
+
+        app.tabBars.buttons["Space"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "space-")).firstMatch
+        guard row.waitForExistence(timeout: 10) else { throw XCTSkip("Herdr has no spaces") }
+        let name = String(row.label.prefix { $0 != "，" })
+        row.tap()
+        let plus = app.buttons["newSessionInSpace"]
+        XCTAssert(plus.waitForExistence(timeout: 5), "no + on the space page")
+        plus.tap()
+        XCTAssert(app.navigationBars["新建"].waitForExistence(timeout: 5), "no new session sheet")
+        let space = app.descendants(matching: .any)["newSessionSpace"]
+        XCTAssert(space.exists, "no space choice")
+        XCTAssert(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch.exists
+                  || app.staticTexts[name].exists, "the sheet is not in \(name)")
+        XCTAssert(app.staticTexts["Herdr 桌面端会在这个 Space 里新开一个标签页收进它。"].exists, "the sheet starts a new space")
+        snapshot("1 new in space")
+        app.buttons["取消"].tap()
+        XCTAssert(plus.waitForExistence(timeout: 5), "sheet did not close")
+        leaveAndUnpair(app)
     }
 
     /// Creates a shell terminal on the core and opens it. Off by default: it

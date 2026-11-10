@@ -9,6 +9,15 @@ struct NewSessionView: View {
     /// The new terminal's id in the session list; the list opens it.
     var onCreated: (String) -> Void
 
+    /// Opened from a space's page: its machine, the space, and its folder.
+    init(client: GatewayClient, in space: Space? = nil, onCreated: @escaping (String) -> Void) {
+        self.client = client
+        self.onCreated = onCreated
+        _machine = State(initialValue: space?.machine)
+        _pickedSpace = State(initialValue: space?.id)
+        _directory = State(initialValue: space?.folder ?? "")
+    }
+
     @Environment(\.dismiss) private var dismiss
     @State private var machine: String?
     @State private var program = Program.agent

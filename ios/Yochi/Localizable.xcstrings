@@ -2232,6 +2232,16 @@
         }
       }
     },
+    "New in This Space" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 Space 新建"
+          }
+        }
+      }
+    },
     "New Space" : {
       "localizations" : {
         "zh-Hans" : {

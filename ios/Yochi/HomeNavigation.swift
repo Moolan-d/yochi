@@ -36,6 +36,8 @@ struct HomeRouteView<Page: View>: View {
     let spaces: [Space]
     let seen: [String: UInt64]
     let queued: (String) -> Bool
+    /// Starts a session in a space, from its page; nil while it can't.
+    var newSession: ((Space) -> Void)? = nil
     @ViewBuilder var page: (Session) -> Page
 
     var body: some View {
@@ -45,7 +47,9 @@ struct HomeRouteView<Page: View>: View {
         case .space(let id):
             let board = makeSpacesBoard(sessions: sessions, spaces: spaces, seen: seen)
             let entry = board.lazy.flatMap(\.spaces).first { $0.id == id }
-            SpaceDetailView(entry: entry, machine: board.first { $0.spaces.contains { $0.id == id } }?.title, queued: queued)
+            let space = spaces.first { $0.id == id }
+            SpaceDetailView(entry: entry, machine: board.first { $0.spaces.contains { $0.id == id } }?.title, queued: queued,
+                            newSession: space.flatMap { space in newSession.map { start in { start(space) } } })
         case .others(let machine):
             let section = makeSpacesBoard(sessions: sessions, spaces: spaces, seen: seen).first { $0.machine == machine }
             OtherTerminalsView(
