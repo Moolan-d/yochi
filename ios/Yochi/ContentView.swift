@@ -5,9 +5,9 @@ struct ContentView: View {
     @State private var client = GatewayClient()
     @State private var seen = SeenTurns()
     @State private var showingSettings = false
-    @State private var showingNewSession = false
-    /// The space a new session starts in, when started from its page.
-    @State private var newSessionSpace: Space?
+    /// The new session sheet, with the space it starts in when started from
+    /// that space's page.
+    @State private var newSession: NewSessionRequest?
     @State private var tab: HomeTab = .inbox
     /// Each tab keeps its own stack.
     @State private var inboxPath: [Route] = []
@@ -51,8 +51,8 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingNewSession, onDismiss: { newSessionSpace = nil }) {
-            NewSessionView(client: client, in: newSessionSpace) { session in
+        .sheet(item: $newSession) { request in
+            NewSessionView(client: client, in: request.space) { session in
                 opening = session
                 openInCurrentTab = true
                 // The list may already carry it; otherwise its
@@ -76,7 +76,7 @@ struct ContentView: View {
             if let link = SessionLink(url: url) {
                 guard config != nil else { return }
                 showingSettings = false
-                showingNewSession = false
+                newSession = nil
                 opening = link.id
                 openInCurrentTab = false
                 // Opened from the background the list has it; from cold, its first list does.
@@ -163,14 +163,14 @@ struct ContentView: View {
             Tab("Inbox", systemImage: "tray.fill", value: HomeTab.inbox) {
                 stack($inboxPath, title: "Inbox", config: config) {
                     InboxScreen(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
-                                newSession: { showingNewSession = true })
+                                newSession: { newSession = NewSessionRequest() })
                 }
             }
             .badge(makeInbox(sessions: client.sessions, spaces: client.spaces, seen: seen.turns).badge)
             Tab("Spaces", systemImage: "square.grid.2x2.fill", value: HomeTab.spaces) {
                 stack($spacesPath, title: "Spaces", config: config) {
                     SpacesScreen(client: client, seen: seen, retry: { client.connect(config) }, reenter: forget,
-                                 newSession: { showingNewSession = true })
+                                 newSession: { newSession = NewSessionRequest() })
                 }
             }
         }
@@ -186,8 +186,7 @@ struct ContentView: View {
                     HomeRouteView(route: route, sessions: client.sessions, spaces: client.spaces, seen: seen.turns,
                                   queued: { client.queuedMessage(session: $0) != nil },
                                   newSession: client.phase == .connected ? { space in
-                                      newSessionSpace = space
-                                      showingNewSession = true
+                                      newSession = NewSessionRequest(space: space)
                                   } : nil) { session in
                         ObserveView(session: session, config: config, client: client,
                                     open: { switchPane(from: session, to: $0) },
@@ -203,7 +202,7 @@ struct ContentView: View {
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button("New", systemImage: "plus") { showingNewSession = true }
+                        Button("New", systemImage: "plus") { newSession = NewSessionRequest() }
                             .disabled(client.phase != .connected)
                         Button("Settings", systemImage: "gearshape") { showingSettings = true }
                             .accessibilityIdentifier("home.settings")
@@ -363,4 +362,11 @@ struct PairingView: View {
 
 #Preview {
     ContentView()
+}
+
+/// The new session sheet's request: a sheet item, so the sheet is built with
+/// the space it was asked for rather than whatever state it last read.
+private struct NewSessionRequest: Identifiable {
+    let id = UUID()
+    var space: Space?
 }
