@@ -40,6 +40,8 @@ struct TerminalTypingBar: View {
                         action: toggleKeyboard)
                 .accessibilityLabel(model.keyboardShown || composerFocused ? "Hide Keyboard" : "Show Keyboard")
                 .accessibilityIdentifier("toggleKeyboard")
+                // Still attaching, the terminal has no keyboard to give yet.
+                .disabled(!model.canType && !model.keyboardShown && !composerFocused)
             roundButton(systemImage: "square.and.pencil", highlighted: composing, action: toggleComposer)
                 .accessibilityLabel(composing ? "Hide Command Field" : "Write a Command")
                 .accessibilityHint("For Chinese, dictation or several lines")

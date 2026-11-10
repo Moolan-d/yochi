@@ -334,7 +334,7 @@ struct ObserveView: View {
                 // A takeover that types gets the keyboard on the terminal
                 // itself; otherwise the composer is the only text input.
                 let terminal = feeds.terminal
-                if terminal.canType {
+                if terminal.offersTyping {
                     TerminalTypingBar(model: terminal, composing: composing, composerFocused: composerFocused,
                                       press: { key in
                                           guard case .press(let press) = key.action else { return }
@@ -362,11 +362,11 @@ struct ObserveView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(feeds.terminal.canType && !isConversation ? AnyShapeStyle(.clear) : AnyShapeStyle(.bar))
+        .background(feeds.terminal.offersTyping && !isConversation ? AnyShapeStyle(.clear) : AnyShapeStyle(.bar))
     }
 
     /// A terminal that types shows its command field only when asked to.
-    private var showsComposer: Bool { isConversation || !feeds.terminal.canType || composing }
+    private var showsComposer: Bool { isConversation || !feeds.terminal.offersTyping || composing }
 
     /// The pencil: write a command in the field, or go back to typing.
     private func toggleComposer() {

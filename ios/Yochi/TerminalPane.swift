@@ -216,6 +216,20 @@ final class TerminalModel {
     var keyboardShown = false
     /// The terminal takes typing: taken over, on a Gateway that takes it.
     var canType: Bool { takeover != nil && observer.canType }
+    /// The page offers the key bar of a terminal that types: it types, or it
+    /// is still on its way to a takeover (attaching, or watching only until a
+    /// cell is measured), which a Gateway new enough lets type. Only once the
+    /// Gateway says it won't, the desktop took the size back or the stream
+    /// ended does the page fall back to the command field and the old keys.
+    var offersTyping: Bool {
+        if canType { return true }
+        guard !yielded else { return false }
+        switch observer.phase {
+        case .connecting: return true
+        case .observing: return takeover == nil
+        case .closed, .failed: return false
+        }
+    }
 
     /// Brings the keyboard up for the terminal, or puts it away.
     func setKeyboard(_ shown: Bool) {
