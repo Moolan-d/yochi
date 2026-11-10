@@ -60,13 +60,15 @@ jobs:
 
   ios:
     name: iOS
-    runs-on: macos-15
+    # The Xcode the app is developed with. Xcode 26's Swift 6.2 crashes
+    # compiling ObserveView, so an older image cannot stand in for it.
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "27.2"
       # libghostty is a prebuilt xcframework; the cache keeps it off the
       # critical path on every run.
       - uses: actions/cache@v4
