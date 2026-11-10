@@ -3,7 +3,7 @@
 // Forked from Alma Relay (https://github.com/yetone/alma-relay, MIT,
 // Copyright (c) 2025-2026 yetone) and cut down to one WebSocket tunnel.
 // Everything here uses WebCrypto and standard globals, so it runs unchanged
-// in Node >= 20 and inside a Worker. The wire protocol is in PROTOCOL.md.
+// in Node >= 22.12 and inside a Worker. The wire protocol is in PROTOCOL.md.
 
 export const VERSION = '0.1.0';
 

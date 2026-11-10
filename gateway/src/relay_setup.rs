@@ -57,7 +57,7 @@ impl Wrangler {
 
     fn missing(&self) -> String {
         if self.program[0] == "npx" {
-            "running npx; the relay deploys with Node.js 20 or later (`brew install node`)".into()
+            "running npx; the relay deploys with Node.js 22.12 or later (`brew install node`)".into()
         } else {
             format!("running {}", self.program[0])
         }

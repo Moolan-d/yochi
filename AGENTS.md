@@ -10,7 +10,7 @@ Yochi watches and drives a Mac's Herdr terminals and coding agents from an iPhon
 | --- | --- | --- |
 | `gateway/` | Gateway that runs on the Mac, plus the `yochi` CLI | Rust (stable) |
 | `ios/` | iPhone app | SwiftUI, Swift 6, XcodeGen, libghostty |
-| `relay/` | Self-hostable Relay that forwards opaque WebSocket frames (fork of Alma Relay, MIT) | Node ≥ 20 or Cloudflare Worker |
+| `relay/` | Self-hostable Relay that forwards opaque WebSocket frames (fork of Alma Relay, MIT) | Node ≥ 22.12 (26 LTS in CI and Docker) or Cloudflare Worker |
 | `protocol/` | The versioned app ↔ Gateway API | Markdown |
 
 The Gateway talks to herdr-core through `hc`. The phone reaches the Gateway over Tailscale or through a Relay, end-to-end encrypted with Noise IKpsk2.
