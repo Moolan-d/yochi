@@ -1,116 +1,51 @@
 {
-  "associated" : [
-    {
-      "body" : [
-        "Create empty file c1.txt",
-        "touch c1.txt",
-        "Do you want to proceed?"
-      ],
-      "fingerprint" : {
-        "requestLines" : null,
-        "ruleLines" : null,
-        "value" : "170b438e96c7299df81c513922212725aab28d5e0d5d8e83fa83fa9e4dd392c2"
+  "dialog" : {
+    "body" : [
+      "Create empty file c1.txt",
+      "touch c1.txt",
+      "Do you want to proceed?"
+    ],
+    "focus" : {
+      "feedbackOrdinal" : 4,
+      "focusedOrdinal" : 4,
+      "inputText" : "Do not create it; reply with the single word skipped"
+    },
+    "kind" : "claudeBash",
+    "options" : [
+      {
+        "label" : "Yes",
+        "number" : 1,
+        "ordinal" : 1,
+        "role" : "approve"
       },
-      "focus" : {
-        "checked" : [
-
-        ],
-        "composerDraftGuard" : false,
-        "feedbackOrdinal" : 4,
-        "focusedOrdinal" : 4,
-        "inputText" : "Do not create it; reply with the single word skipped",
-        "keysMissOptions" : false,
-        "notesText" : null
+      {
+        "label" : "Yes, and always allow access to /private/tmp/heeler-tmp-chat2/probe-claude from this project",
+        "number" : 2,
+        "ordinal" : 2,
+        "role" : "approvePersistent"
       },
-      "kind" : "claudeBash",
-      "note" : null,
-      "options" : [
-        {
-          "detail" : null,
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Yes",
-          "number" : 1,
-          "ordinal" : 1,
-          "role" : "approve",
-          "shortcut" : null
+      {
+        "detail" : "auto mode handles these prompts for you",
+        "label" : "Yes, and switch to auto mode",
+        "number" : 3,
+        "ordinal" : 3,
+        "role" : "approveModeSwitch"
+      },
+      {
+        "focused" : true,
+        "input" : {
+          "text" : "Do not create it; reply with the single word skipped"
         },
-        {
-          "detail" : null,
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Yes, and always allow access to \/private\/tmp\/heeler-tmp-chat2\/probe-claude from this project",
-          "number" : 2,
-          "ordinal" : 2,
-          "role" : "approvePersistent",
-          "shortcut" : null
-        },
-        {
-          "detail" : "auto mode handles these prompts for you",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Yes, and switch to auto mode",
-          "number" : 3,
-          "ordinal" : 3,
-          "role" : "approveModeSwitch",
-          "shortcut" : null
-        },
-        {
-          "detail" : null,
-          "input" : {
-            "associated" : [
-              "Do not create it; reply with the single word skipped"
-            ],
-            "case" : "text"
-          },
-          "isChecked" : null,
-          "isFocused" : true,
-          "label" : "No",
-          "number" : 4,
-          "ordinal" : 4,
-          "role" : "decline",
-          "shortcut" : null
-        }
-      ],
-      "picker" : null,
-      "positionLabel" : null,
-      "progress" : null,
-      "rows" : {
-        "lowerBound" : 11,
-        "upperBound" : 25
-      },
-      "sourceSuffix" : null,
-      "subject" : {
-        "command" : "touch c1.txt",
-        "commandDescription" : "Create empty file c1.txt",
-        "destinations" : [
-
-        ],
-        "environment" : null,
-        "filePath" : null,
-        "host" : null,
-        "notes" : [
-
-        ],
-        "planFilePath" : null,
-        "prompt" : null,
-        "question" : null,
-        "questionHeaders" : [
-
-        ],
-        "reason" : null,
-        "reviewAnswers" : [
-
-        ],
-        "toolName" : null,
-        "url" : null,
-        "workspacePath" : null
-      },
-      "title" : "Bash command"
-    }
-  ],
-  "case" : "dialog"
+        "label" : "No",
+        "number" : 4,
+        "ordinal" : 4,
+        "role" : "decline"
+      }
+    ],
+    "subject" : {
+      "command" : "touch c1.txt",
+      "commandDescription" : "Create empty file c1.txt"
+    },
+    "title" : "Bash command"
+  }
 }

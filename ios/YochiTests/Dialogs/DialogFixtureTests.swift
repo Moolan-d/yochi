@@ -3,76 +3,114 @@ import Testing
 
 @testable import Yochi
 
-private final class DialogFixtureBundleLocator {}
-
-/// Turns a parse result into stable JSON without depending on Swift's
-/// reflection order for dictionaries and sets. This is test-only code: the
-/// snapshots are a reviewable description of what the app would put on a card.
+/// What a parse result puts on the phone, as stable JSON: the dialog's kind,
+/// text, options, focus and keys, or the generic card's lines. Screen rows'
+/// styling, row ranges and fingerprints are left out, so a decoder or
+/// fingerprint change that leaves the cards alone does not touch a snapshot.
+/// Nil and empty values are dropped to keep the files short.
 private enum DialogSnapshot {
     static func text(for result: DialogParseResult) throws -> String {
-        let data = try JSONSerialization.data(
-            withJSONObject: normalize(result), options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed])
+        let data = try JSONSerialization.data(withJSONObject: object(result), options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         return String(decoding: data, as: UTF8.self) + "\n"
     }
 
-    private static func normalize(_ value: Any) -> Any {
-        if let range = value as? Range<Int> {
-            return ["lowerBound": range.lowerBound, "upperBound": range.upperBound]
-        }
-        let mirror = Mirror(reflecting: value)
-        if mirror.displayStyle == .optional {
-            guard let child = mirror.children.first else { return NSNull() }
-            return normalize(child.value)
-        }
-        switch mirror.displayStyle {
-        case .collection:
-            return mirror.children.map { normalize($0.value) }
-        case .set:
-            return mirror.children.map { normalize($0.value) }.sorted { canonical($0) < canonical($1) }
-        case .dictionary:
-            return mirror.children.map { child in
-                let pair = Array(Mirror(reflecting: child.value).children)
-                return ["key": normalize(pair[0].value), "value": normalize(pair[1].value)]
-            }.sorted { canonical($0) < canonical($1) }
-        case .enum:
-            let description = String(describing: value)
-            let name = description.split(separator: "(", maxSplits: 1, omittingEmptySubsequences: false).first
-                .map(String.init) ?? description
-            guard !mirror.children.isEmpty else { return name }
-            return ["case": name, "associated": mirror.children.map { normalize($0.value) }]
-        case .struct:
-            var object: [String: Any] = [:]
-            for child in mirror.children {
-                object[child.label ?? "_"] = normalize(child.value)
-            }
-            return object
-        default:
-            switch value {
-            case let value as String: return value
-            case let value as Bool: return value
-            case let value as Int: return value
-            case let value as Int8: return Int(value)
-            case let value as Int16: return Int(value)
-            case let value as Int32: return Int(value)
-            case let value as Int64: return Int(value)
-            case let value as UInt: return Int(value)
-            case let value as UInt8: return Int(value)
-            case let value as UInt16: return Int(value)
-            case let value as UInt32: return Int(value)
-            case let value as UInt64: return Int(value)
-            case let value as Double: return value
-            case let value as Float: return Double(value)
-            default: return String(reflecting: value)
-            }
+    private static func object(_ result: DialogParseResult) -> [String: Any] {
+        switch result {
+        case .dialog(let dialog): ["dialog": object(dialog)]
+        case .unrecognized(let excerpt): ["unrecognized": object(excerpt)]
+        case .none: ["none": true]
         }
     }
 
-    private static func canonical(_ value: Any) -> String {
-        // Wrapping also makes this valid for a scalar set element.
-        guard let data = try? JSONSerialization.data(withJSONObject: [value], options: [.sortedKeys, .fragmentsAllowed]) else {
-            return String(describing: value)
+    private static func object(_ dialog: BlockedDialog) -> [String: Any] {
+        compact([
+            "kind": dialog.kind.rawValue,
+            "title": dialog.title,
+            "sourceSuffix": dialog.sourceSuffix,
+            "positionLabel": dialog.positionLabel,
+            "body": dialog.body,
+            "progress": dialog.progress,
+            "options": dialog.options.map(object),
+            "focus": compact([
+                "focusedOrdinal": dialog.focus.focusedOrdinal,
+                "checked": dialog.focus.checked.sorted(),
+                "inputText": dialog.focus.inputText,
+                "feedbackOrdinal": dialog.focus.feedbackOrdinal,
+            ]),
+            "subject": object(dialog.subject),
+            "note": dialog.note,
+            "picker": dialog.picker.map { picker in
+                compact([
+                    "firstNumber": picker.firstNumber,
+                    "hiddenBelow": picker.hiddenBelow,
+                    "moreBelow": picker.moreBelow ? true : nil,
+                    "enterAction": picker.enterAction,
+                    "keys": picker.keys.map(object),
+                ])
+            },
+        ])
+    }
+
+    private static func object(_ option: DialogOption) -> [String: Any] {
+        var input: [String: Any]?
+        switch option.input {
+        case .placeholder(let hint): input = ["placeholder": hint]
+        case .text(let text): input = ["text": text]
+        case nil: input = nil
         }
-        return String(decoding: data, as: UTF8.self)
+        return compact([
+            "ordinal": option.ordinal,
+            "number": option.number,
+            "label": option.label,
+            "detail": option.detail,
+            "shortcut": option.shortcut,
+            "role": option.role.rawValue,
+            "focused": option.isFocused ? true : nil,
+            "checked": option.isChecked,
+            "input": input,
+        ])
+    }
+
+    private static func object(_ subject: DialogSubject) -> [String: Any] {
+        compact([
+            "command": subject.command,
+            "commandDescription": subject.commandDescription,
+            "filePath": subject.filePath,
+            "url": subject.url,
+            "host": subject.host,
+            "prompt": subject.prompt,
+            "question": subject.question,
+            "questionHeaders": subject.questionHeaders,
+            "reviewAnswers": subject.reviewAnswers.map { ["question": $0.question, "answer": $0.answer] },
+            "planFilePath": subject.planFilePath,
+            "workspacePath": subject.workspacePath,
+        ])
+    }
+
+    private static func object(_ excerpt: GenericDialogExcerpt) -> [String: Any] {
+        compact([
+            "reason": excerpt.reason,
+            "lines": excerpt.displayLines ?? excerpt.rows.map { $0.text.replacing(/\s+$/, with: "") },
+            "numbered": excerpt.numbered.sorted { $0.key < $1.key }.map { ["number": $0.key, "label": $0.value] },
+            "keys": excerpt.keys.map(object),
+        ])
+    }
+
+    private static func object(_ hint: DialogKeyHint) -> [String: Any] {
+        ["key": hint.key, "action": hint.action]
+    }
+
+    /// Drops nil values and empty strings, lists and objects.
+    private static func compact(_ fields: [String: Any?]) -> [String: Any] {
+        fields.compactMapValues { value -> Any? in
+            switch value {
+            case nil: nil
+            case let string as String where string.isEmpty: nil
+            case let list as [Any] where list.isEmpty: nil
+            case let object as [String: Any] where object.isEmpty: nil
+            case let value?: value
+            }
+        }
     }
 }
 
@@ -91,12 +129,12 @@ struct DialogFixtureTests {
         let actual = try DialogSnapshot.text(for: ClaudeDialogParser.parse(try ScreenFixture.screen(stem)))
         let path = "snapshots/claude/\(stem).json"
         if FileManager.default.fileExists(atPath: sourceSnapshotDirectory.appending(path: ".record").path) {
-            let url = sourceSnapshotURL(stem)
+            let url = sourceSnapshotDirectory.appending(path: "claude/\(stem).json")
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try actual.write(to: url, atomically: true, encoding: .utf8)
             return
         }
-        let fixtures = try #require(Bundle(for: DialogFixtureBundleLocator.self).url(forResource: "Fixtures", withExtension: nil))
+        let fixtures = try #require(ScreenFixture.fixtures)
         let expected = try String(contentsOf: fixtures.appending(path: path), encoding: .utf8)
         #expect(actual == expected, "\(stem) changed; review the parser diff and record new snapshots intentionally")
     }
@@ -106,9 +144,5 @@ struct DialogFixtureTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appending(path: "Fixtures/snapshots")
-    }
-
-    private func sourceSnapshotURL(_ stem: String) -> URL {
-        sourceSnapshotDirectory.appending(path: "claude/\(stem).json")
     }
 }

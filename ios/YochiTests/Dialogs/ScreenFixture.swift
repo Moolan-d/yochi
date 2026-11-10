@@ -34,7 +34,7 @@ enum ScreenFixture {
     /// The stems of the captures on disk, for the test that checks the list
     /// above covers them.
     static var captured: [String] {
-        guard let root = Bundle(for: Locator.self).url(forResource: "Fixtures", withExtension: nil) else { return [] }
+        guard let root = fixtures else { return [] }
         let names = (try? FileManager.default.contentsOfDirectory(atPath: root.appending(path: "screens/claude").path))
         return (names ?? []).filter { $0.hasSuffix(".ansi") }.map { String($0.dropLast(".ansi".count)) }.sorted()
     }
@@ -44,9 +44,13 @@ enum ScreenFixture {
     }
 
     static func text(_ stem: String) throws -> String {
-        let url = try #require(
-            Bundle(for: Locator.self).url(forResource: "Fixtures", withExtension: nil)?.appending(path: path(stem)))
+        let url = try #require(fixtures?.appending(path: path(stem)))
         return String(decoding: try Data(contentsOf: url), as: UTF8.self)
+    }
+
+    /// The test bundle's copy of `Fixtures/`.
+    static var fixtures: URL? {
+        Bundle(for: Locator.self).url(forResource: "Fixtures", withExtension: nil)
     }
 
     private final class Locator {}

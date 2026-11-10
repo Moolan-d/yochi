@@ -1,187 +1,99 @@
 {
-  "associated" : [
-    {
-      "body" : [
-        "Switch between Claude models. Your pick becomes the default for new sessions. For other\/previous model names, specify with --model.",
-        "● High effort (default) ←\/→ to adjust"
-      ],
-      "fingerprint" : {
-        "requestLines" : null,
-        "ruleLines" : null,
-        "value" : "aa791690b9e3336cfce69f00c915f96e7e3a59bfbbb7f58cfbd0b15ae6d86da8"
+  "dialog" : {
+    "body" : [
+      "Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.",
+      "● High effort (default) ←/→ to adjust"
+    ],
+    "focus" : {
+      "focusedOrdinal" : 10
+    },
+    "kind" : "claudePicker",
+    "options" : [
+      {
+        "detail" : "routing group · via router",
+        "label" : "Semantic Routing",
+        "number" : 6,
+        "ordinal" : 1,
+        "role" : "answer"
       },
-      "focus" : {
-        "checked" : [
-
-        ],
-        "composerDraftGuard" : false,
-        "feedbackOrdinal" : null,
-        "focusedOrdinal" : 10,
-        "inputText" : null,
-        "keysMissOptions" : false,
-        "notesText" : null
+      {
+        "detail" : "via router",
+        "label" : "Claude Opus 5.5 · routing group",
+        "number" : 7,
+        "ordinal" : 2,
+        "role" : "answer"
       },
-      "kind" : "claudePicker",
-      "note" : null,
-      "options" : [
+      {
+        "detail" : "via router",
+        "label" : "Claude Sonnet 5.5 · routing group",
+        "number" : 8,
+        "ordinal" : 3,
+        "role" : "answer"
+      },
+      {
+        "detail" : "via router",
+        "label" : "Claude Haiku 5.5 · routing group",
+        "number" : 9,
+        "ordinal" : 4,
+        "role" : "answer"
+      },
+      {
+        "detail" : "via router",
+        "label" : "Kimi K3 · routing group",
+        "number" : 10,
+        "ordinal" : 5,
+        "role" : "answer"
+      },
+      {
+        "detail" : "via router",
+        "label" : "GPT-6 Sol · routing group",
+        "number" : 11,
+        "ordinal" : 6,
+        "role" : "answer"
+      },
+      {
+        "detail" : "via router",
+        "label" : "GPT-6 Luna · routing group",
+        "number" : 12,
+        "ordinal" : 7,
+        "role" : "answer"
+      },
+      {
+        "detail" : "via router",
+        "label" : "GPT-6.1 Sol · routing group",
+        "number" : 13,
+        "ordinal" : 8,
+        "role" : "answer"
+      },
+      {
+        "detail" : "example-claude · via router",
+        "label" : "Claude Haiku 5.5",
+        "number" : 14,
+        "ordinal" : 9,
+        "role" : "answer"
+      },
+      {
+        "checked" : true,
+        "detail" : "example-cn · via router",
+        "focused" : true,
+        "label" : "DeepSeek V4.1 Flash",
+        "number" : 15,
+        "ordinal" : 10,
+        "role" : "answer"
+      }
+    ],
+    "picker" : {
+      "enterAction" : "set as default",
+      "firstNumber" : 6,
+      "hiddenBelow" : 8,
+      "keys" : [
         {
-          "detail" : "routing group · via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Semantic Routing",
-          "number" : 6,
-          "ordinal" : 1,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Claude Opus 5.5 · routing group",
-          "number" : 7,
-          "ordinal" : 2,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Claude Sonnet 5.5 · routing group",
-          "number" : 8,
-          "ordinal" : 3,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Claude Haiku 5.5 · routing group",
-          "number" : 9,
-          "ordinal" : 4,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Kimi K3 · routing group",
-          "number" : 10,
-          "ordinal" : 5,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "GPT-6 Sol · routing group",
-          "number" : 11,
-          "ordinal" : 6,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "GPT-6 Luna · routing group",
-          "number" : 12,
-          "ordinal" : 7,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "GPT-6.1 Sol · routing group",
-          "number" : 13,
-          "ordinal" : 8,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "example-claude · via router",
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Claude Haiku 5.5",
-          "number" : 14,
-          "ordinal" : 9,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "example-cn · via router",
-          "input" : null,
-          "isChecked" : true,
-          "isFocused" : true,
-          "label" : "DeepSeek V4.1 Flash",
-          "number" : 15,
-          "ordinal" : 10,
-          "role" : "answer",
-          "shortcut" : null
+          "action" : "use this session only",
+          "key" : "s"
         }
       ],
-      "picker" : {
-        "enterAction" : "set as default",
-        "firstNumber" : 6,
-        "hiddenBelow" : 8,
-        "keys" : [
-          {
-            "action" : "use this session only",
-            "key" : "s"
-          }
-        ],
-        "moreBelow" : true
-      },
-      "positionLabel" : null,
-      "progress" : null,
-      "rows" : {
-        "lowerBound" : 31,
-        "upperBound" : 50
-      },
-      "sourceSuffix" : null,
-      "subject" : {
-        "command" : null,
-        "commandDescription" : null,
-        "destinations" : [
-
-        ],
-        "environment" : null,
-        "filePath" : null,
-        "host" : null,
-        "notes" : [
-
-        ],
-        "planFilePath" : null,
-        "prompt" : null,
-        "question" : null,
-        "questionHeaders" : [
-
-        ],
-        "reason" : null,
-        "reviewAnswers" : [
-
-        ],
-        "toolName" : null,
-        "url" : null,
-        "workspacePath" : null
-      },
-      "title" : "Select model"
-    }
-  ],
-  "case" : "dialog"
+      "moreBelow" : true
+    },
+    "title" : "Select model"
+  }
 }

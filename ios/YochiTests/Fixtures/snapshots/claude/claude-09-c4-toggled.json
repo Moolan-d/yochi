@@ -1,138 +1,69 @@
 {
-  "associated" : [
-    {
-      "body" : [
-
+  "dialog" : {
+    "focus" : {
+      "checked" : [
+        1,
+        3
       ],
-      "fingerprint" : {
-        "requestLines" : null,
-        "ruleLines" : null,
-        "value" : "60a591149bb0135139831b9612cf99bbc8840771db6321bd1377cd03a01d0494"
+      "focusedOrdinal" : 1
+    },
+    "kind" : "claudeQuestion",
+    "options" : [
+      {
+        "checked" : true,
+        "detail" : "Red",
+        "focused" : true,
+        "label" : "Red",
+        "number" : 1,
+        "ordinal" : 1,
+        "role" : "answer"
       },
-      "focus" : {
-        "checked" : [
-          1,
-          3
-        ],
-        "composerDraftGuard" : false,
-        "feedbackOrdinal" : null,
-        "focusedOrdinal" : 1,
-        "inputText" : null,
-        "keysMissOptions" : false,
-        "notesText" : null
+      {
+        "checked" : false,
+        "detail" : "Green",
+        "label" : "Green",
+        "number" : 2,
+        "ordinal" : 2,
+        "role" : "answer"
       },
-      "kind" : "claudeQuestion",
-      "note" : null,
-      "options" : [
-        {
-          "detail" : "Red",
-          "input" : null,
-          "isChecked" : true,
-          "isFocused" : true,
-          "label" : "Red",
-          "number" : 1,
-          "ordinal" : 1,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "Green",
-          "input" : null,
-          "isChecked" : false,
-          "isFocused" : false,
-          "label" : "Green",
-          "number" : 2,
-          "ordinal" : 2,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : "Blue",
-          "input" : null,
-          "isChecked" : true,
-          "isFocused" : false,
-          "label" : "Blue",
-          "number" : 3,
-          "ordinal" : 3,
-          "role" : "answer",
-          "shortcut" : null
-        },
-        {
-          "detail" : null,
-          "input" : {
-            "associated" : [
-              "Type something"
-            ],
-            "case" : "placeholder"
-          },
-          "isChecked" : false,
-          "isFocused" : false,
-          "label" : "Type something",
-          "number" : 4,
-          "ordinal" : 4,
-          "role" : "otherText",
-          "shortcut" : null
-        },
-        {
-          "detail" : null,
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Next",
-          "number" : null,
-          "ordinal" : 5,
-          "role" : "next",
-          "shortcut" : null
-        },
-        {
-          "detail" : null,
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Chat about this",
-          "number" : 5,
-          "ordinal" : 6,
-          "role" : "chat",
-          "shortcut" : null
-        }
-      ],
-      "picker" : null,
-      "positionLabel" : null,
-      "progress" : "Colors",
-      "rows" : {
-        "lowerBound" : 23,
-        "upperBound" : 40
+      {
+        "checked" : true,
+        "detail" : "Blue",
+        "label" : "Blue",
+        "number" : 3,
+        "ordinal" : 3,
+        "role" : "answer"
       },
-      "sourceSuffix" : null,
-      "subject" : {
-        "command" : null,
-        "commandDescription" : null,
-        "destinations" : [
-
-        ],
-        "environment" : null,
-        "filePath" : null,
-        "host" : null,
-        "notes" : [
-
-        ],
-        "planFilePath" : null,
-        "prompt" : null,
-        "question" : "Which colors?",
-        "questionHeaders" : [
-          "Colors",
-          "Size"
-        ],
-        "reason" : null,
-        "reviewAnswers" : [
-
-        ],
-        "toolName" : null,
-        "url" : null,
-        "workspacePath" : null
+      {
+        "checked" : false,
+        "input" : {
+          "placeholder" : "Type something"
+        },
+        "label" : "Type something",
+        "number" : 4,
+        "ordinal" : 4,
+        "role" : "otherText"
       },
-      "title" : "Which colors?"
-    }
-  ],
-  "case" : "dialog"
+      {
+        "label" : "Next",
+        "ordinal" : 5,
+        "role" : "next"
+      },
+      {
+        "label" : "Chat about this",
+        "number" : 5,
+        "ordinal" : 6,
+        "role" : "chat"
+      }
+    ],
+    "progress" : "Colors",
+    "subject" : {
+      "question" : "Which colors?",
+      "questionHeaders" : [
+        "Colors",
+        "Size"
+      ]
+    },
+    "title" : "Which colors?"
+  }
 }

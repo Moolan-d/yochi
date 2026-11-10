@@ -1,92 +1,41 @@
 {
-  "associated" : [
-    {
-      "body" : [
-        "● Which colors?",
-        "→ Red, Blue",
-        "Ready to submit your answers?"
+  "dialog" : {
+    "body" : [
+      "● Which colors?",
+      "→ Red, Blue",
+      "Ready to submit your answers?"
+    ],
+    "focus" : {
+      "focusedOrdinal" : 1
+    },
+    "kind" : "claudeQuestionReview",
+    "options" : [
+      {
+        "focused" : true,
+        "label" : "Submit answers",
+        "number" : 1,
+        "ordinal" : 1,
+        "role" : "submit"
+      },
+      {
+        "label" : "Cancel",
+        "number" : 2,
+        "ordinal" : 2,
+        "role" : "cancel"
+      }
+    ],
+    "progress" : "Review your answers",
+    "subject" : {
+      "questionHeaders" : [
+        "Colors"
       ],
-      "fingerprint" : {
-        "requestLines" : null,
-        "ruleLines" : null,
-        "value" : "758d75a7a162911b9b1c02d41718000f04d9f9f9c9f40fa5824899525f1a0263"
-      },
-      "focus" : {
-        "checked" : [
-
-        ],
-        "composerDraftGuard" : false,
-        "feedbackOrdinal" : null,
-        "focusedOrdinal" : 1,
-        "inputText" : null,
-        "keysMissOptions" : false,
-        "notesText" : null
-      },
-      "kind" : "claudeQuestionReview",
-      "note" : null,
-      "options" : [
+      "reviewAnswers" : [
         {
-          "detail" : null,
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : true,
-          "label" : "Submit answers",
-          "number" : 1,
-          "ordinal" : 1,
-          "role" : "submit",
-          "shortcut" : null
-        },
-        {
-          "detail" : null,
-          "input" : null,
-          "isChecked" : null,
-          "isFocused" : false,
-          "label" : "Cancel",
-          "number" : 2,
-          "ordinal" : 2,
-          "role" : "cancel",
-          "shortcut" : null
+          "answer" : "Red, Blue",
+          "question" : "Which colors?"
         }
-      ],
-      "picker" : null,
-      "positionLabel" : null,
-      "progress" : "Review your answers",
-      "rows" : {
-        "lowerBound" : 23,
-        "upperBound" : 35
-      },
-      "sourceSuffix" : null,
-      "subject" : {
-        "command" : null,
-        "commandDescription" : null,
-        "destinations" : [
-
-        ],
-        "environment" : null,
-        "filePath" : null,
-        "host" : null,
-        "notes" : [
-
-        ],
-        "planFilePath" : null,
-        "prompt" : null,
-        "question" : null,
-        "questionHeaders" : [
-          "Colors"
-        ],
-        "reason" : null,
-        "reviewAnswers" : [
-          {
-            "answer" : "Red, Blue",
-            "question" : "Which colors?"
-          }
-        ],
-        "toolName" : null,
-        "url" : null,
-        "workspacePath" : null
-      },
-      "title" : "Review your answers"
-    }
-  ],
-  "case" : "dialog"
+      ]
+    },
+    "title" : "Review your answers"
+  }
 }
