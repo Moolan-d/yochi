@@ -23,8 +23,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned so a new Rust release's lints cannot turn CI red on unchanged
+      # code; bump it on purpose and fix what clippy finds in the same change.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.99.1"
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -81,11 +84,18 @@ jobs:
       # so it runs through scripts/ui-test.sh on a Mac that has them.
       - name: Test
         working-directory: ios
+        # The runner's simulators change with its Xcode, so take the first
+        # available iPhone rather than naming one.
         run: |
+          sim_id=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime in sorted(devices, reverse=True) if "iOS" in runtime
+                     for d in devices[runtime] if d["name"].startswith("iPhone")))')
           xcodebuild test \
             -project Yochi.xcodeproj \
             -scheme Yochi \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "id=$sim_id" \
             -derivedDataPath build \
             -only-testing:YochiTests \
             CODE_SIGNING_ALLOWED=NO
