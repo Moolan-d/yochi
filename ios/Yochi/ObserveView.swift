@@ -141,8 +141,16 @@ struct ObserveView: View {
         client.pageChoices[session.id] != nil || session.showsConversation || currentSession.showsConversation
     }
 
+    // The page is built in three stages, in modifier order: one chain of
+    // all of them takes the compiler seconds to type-check, and an older
+    // Xcode gives up on it.
     var body: some View {
         let _ = Perf.count("ObserveView")
+        following(attaching(page))
+    }
+
+    /// The conversation or the terminal, with its gestures, bars and prompts.
+    private var page: some View {
         Group {
             if isConversation {
                 ConversationPane(feed: conversation, status: currentSession.status,
@@ -179,6 +187,11 @@ struct ObserveView: View {
         } message: {
             Text("Once Claude Code quits, the program in the terminal ends")
         }
+    }
+
+    /// The draft, photos and Permission Mode as they change.
+    private func attaching(_ page: some View) -> some View {
+        page
         .onChange(of: draft) { _, draft in
             AgentMessageStore.saveDraft(draft, host: config.host, session: session.id)
         }
@@ -212,6 +225,11 @@ struct ObserveView: View {
         .onChange(of: screenMode) { _, mode in
             if let mode { seenModes.insert(mode) }
         }
+    }
+
+    /// Delivery, dialogs, app state and the page's streams.
+    private func following(_ page: some View) -> some View {
+        page
         // Returning while a send was in flight restores the draft from before the
         // send; once it is accepted, this view clears it too.
         .onChange(of: delivery) { _, delivery in
