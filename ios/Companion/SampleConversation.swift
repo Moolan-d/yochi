@@ -3,10 +3,12 @@ import SwiftUI
 
 /// A made-up conversation with every kind of card, for UI tests and
 /// screenshots without a running Agent: SIMCTL_CHILD_COMPANION_SAMPLE_CONVERSATION=1.
-/// `=long` is a long one with long replies, and more replies arriving.
+/// `=long` is a long one with long replies, and more replies arriving;
+/// `=markdown` is one reply with every kind of Markdown block.
 struct SampleConversationView: View {
     static var requested: Bool { ProcessInfo.processInfo.environment["COMPANION_SAMPLE_CONVERSATION"] != nil }
     static var long: Bool { ProcessInfo.processInfo.environment["COMPANION_SAMPLE_CONVERSATION"] == "long" }
+    static var markdown: Bool { ProcessInfo.processInfo.environment["COMPANION_SAMPLE_CONVERSATION"] == "markdown" }
 
     @State private var feed = ConversationFeed()
 
@@ -27,6 +29,12 @@ struct SampleConversationView: View {
         .task {
             if Self.long {
                 await playLong()
+                return
+            }
+            if Self.markdown {
+                apply(["type": "conversation", "supported": true, "items": [
+                    ["kind": "user", "id": "u1", "text": SampleText.pick("How does the list keep its place?", "列表是怎样保持位置的？")],
+                    ["kind": "agent", "id": "a1", "text": Self.markdownReply]]])
                 return
             }
             let data = Data(SampleText.localized(Self.json(now: .now)).utf8)
@@ -74,6 +82,87 @@ struct SampleConversationView: View {
             }
         }
         return parts.joined(separator: "\n\n")
+    }
+
+    static var markdownReply: String {
+        let code = """
+            ```swift
+            // Keep the newest reply in view as rows arrive.
+            struct ConversationPane: View {
+                @State private var position = ScrollPosition(edge: .bottom)
+                let feed: ConversationFeed
+
+                var body: some View {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(feed.items) { item in
+                                ConversationRow(item: item)
+                            }
+                        }
+                    }
+                    .scrollPosition($position)
+                    .onChange(of: feed.items.count) { _, count in
+                        if count > 0 { position.scrollTo(edge: .bottom) }
+                    }
+                }
+            }
+            ```
+            """
+        let english = """
+            ## Why the list jumps
+
+            A lazy list only **guesses** the height of rows it hasn't drawn. When `ConversationPane` scrolls to the newest reply, a bad guess stops it past the end. See [the docs](https://developer.apple.com/documentation/swiftui/scrollposition).
+
+            ### What changed
+
+            1. Keep the position in `ScrollPosition` instead of an id
+            2. Scroll again once the last row has its real height
+            3. Leave the keyboard's inset to the system
+
+            - [x] Read `ConversationPane.swift`
+            - [x] Reproduce with 40 long replies
+            - [ ] Check the iPad split view
+
+            > The guess comes from the rows already drawn, so it gets better as you scroll.
+
+            \(code)
+
+            | File | Change | Lines |
+            | --- | --- | ---: |
+            | `ConversationPane.swift` | Scroll position | 24 |
+            | `ConversationFeed.swift` | Row heights | 8 |
+            | `README.md` | Notes | 3 |
+
+            Run `xcodebuild test` to check, then try it on the phone.
+            """
+        let chinese = """
+            ## 列表为什么会跳
+
+            按需排版的列表只能**估计**还没画出来的行有多高。`ConversationPane` 滚到最新一条时，估得不准就会停在内容之外。参见[官方文档](https://developer.apple.com/documentation/swiftui/scrollposition)。
+
+            ### 改了什么
+
+            1. 用 `ScrollPosition` 记位置，不再记 id
+            2. 最后一行有了真实高度后再滚一次
+            3. 键盘的留白交给系统
+
+            - [x] 读 `ConversationPane.swift`
+            - [x] 用 40 条长回复复现
+            - [ ] 检查 iPad 分屏
+
+            > 估计来自已经画过的行，所以越往回滚越准。
+
+            \(code)
+
+            | 文件 | 改动 | 行数 |
+            | --- | --- | ---: |
+            | `ConversationPane.swift` | 滚动位置 | 24 |
+            | `ConversationFeed.swift` | 行高 | 8 |
+            | `README.md` | 说明 | 3 |
+
+            运行 `xcodebuild test` 检查，再到手机上试一下。
+            """
+        return SampleText.pick(english, chinese)
     }
 
     static func json(now: Date) -> String {

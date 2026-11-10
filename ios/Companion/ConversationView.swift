@@ -271,6 +271,8 @@ struct ConversationRow: View {
             HStack {
                 Spacer(minLength: 48)
                 Text(item.text ?? "")
+                    // The size of the Agent's replies.
+                    .font(.callout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .foregroundStyle(.white)

@@ -12,6 +12,9 @@ struct MarkdownBlock: Equatable {
         /// The first block of a list item, drawn after its marker: a bullet
         /// that changes with depth, or the item's number.
         case listItem(marker: String)
+        /// The first block of a task list item, `- [ ]` or `- [x]`, drawn
+        /// after a check circle instead of a bullet.
+        case taskItem(done: Bool)
         /// The first word of the fence's info string, if any.
         case code(language: String?)
         case table(MarkdownTable)
@@ -100,7 +103,7 @@ extension MarkdownBlock {
             // Clear already, or not text the fade can be drawn on.
             guard Double(start + length) > position - fade else { continue }
             switch block.kind {
-            case .paragraph, .heading, .listItem: break
+            case .paragraph, .heading, .listItem, .taskItem: break
             case .code, .table, .rule: continue
             }
             let base: Color = block.quoteDepth > 0 ? .secondary : .primary
@@ -114,7 +117,10 @@ extension MarkdownBlock {
                 let next = characters.index(after: at)
                 var piece = AttributedString(content[at..<next])
                 let opacity = min(1, max(0, (position - Double(start + offset)) / fade))
-                if opacity < 1 { piece.swiftUI.foregroundColor = base.opacity(opacity) }
+                if opacity < 1 {
+                    let color = MarkdownStyle.isTintedCode(piece.runs.first) ? MarkdownStyle.codeTint : base
+                    piece.swiftUI.foregroundColor = color.opacity(opacity)
+                }
                 faded.append(piece)
                 at = next
             }
@@ -229,11 +235,13 @@ extension MarkdownBlock {
             case .header(let level):
                 kind = .heading(level)
             case .codeBlock(let language):
-                kind = .code(language: language?.split(separator: " ").first.map(String.init))
+                let name = language?.split(separator: " ").first.map(String.init)
+                kind = .code(language: name)
                 // The fence's closing newline is not part of the code.
-                while content.characters.last == "\n" {
-                    content.removeSubrange(content.index(beforeCharacter: content.endIndex)..<content.endIndex)
-                }
+                var code = String(content.characters)
+                while code.last == "\n" { code.removeLast() }
+                // Colored here, once, so a reveal only cuts the colored text.
+                content = SyntaxHighlight.highlighted(code, language: name)
             case .thematicBreak:
                 kind = .rule
                 content = AttributedString()
@@ -241,7 +249,12 @@ extension MarkdownBlock {
                 kind = .paragraph
             }
             if kind == .paragraph, let item, markedItems.insert(item.id).inserted {
-                kind = .listItem(marker: item.ordered ? "\(item.ordinal)." : Self.bullet(depth: listDepth))
+                if !item.ordered, let done = Self.taskMark(content) {
+                    kind = .taskItem(done: done)
+                    content.removeSubrange(content.startIndex..<content.characters.index(content.startIndex, offsetBy: 4))
+                } else {
+                    kind = .listItem(marker: item.ordered ? "\(item.ordinal)." : Self.bullet(depth: listDepth))
+                }
             }
             current = (innermost.identity,
                        MarkdownBlock(kind: kind, content: content, listDepth: listDepth, quoteDepth: quoteDepth))
@@ -270,6 +283,17 @@ extension MarkdownBlock {
         }
     }
 
+    /// GitHub's task list syntax, which Foundation's parser leaves as text:
+    /// whether `[ ] ` or `[x] ` starts the item, and if so whether it is done.
+    private static func taskMark(_ content: AttributedString) -> Bool? {
+        let start = String(content.characters.prefix(4))
+        switch start {
+        case "[ ] ": return false
+        case "[x] ", "[X] ": return true
+        default: return nil
+        }
+    }
+
     private static func bullet(depth: Int) -> String {
         ["•", "◦", "▪︎"][(depth - 1) % 3]
     }
@@ -283,9 +307,10 @@ struct MarkdownText: View {
     var shown: Double?
     var fade: Double = 0
 
-    @ScaledMetric(relativeTo: .body) private var blockGap: CGFloat = 12
-    @ScaledMetric(relativeTo: .body) private var itemGap: CGFloat = 6
-    @ScaledMetric(relativeTo: .body) private var aboveHeading: CGFloat = 20
+    @ScaledMetric(relativeTo: .callout) private var blockGap: CGFloat = 10
+    @ScaledMetric(relativeTo: .callout) private var itemGap: CGFloat = 4
+    @ScaledMetric(relativeTo: .callout) private var belowHeading: CGFloat = 6
+    @ScaledMetric(relativeTo: .callout) private var aboveHeading: CGFloat = 18
 
     var body: some View {
         let _ = Perf.count("MarkdownText")
@@ -305,73 +330,81 @@ struct MarkdownText: View {
         guard index > 0 else { return 0 }
         let block = blocks[index], previous = blocks[index - 1]
         if case .heading = block.kind { return aboveHeading }
-        if case .heading = previous.kind { return itemGap }
+        if case .heading = previous.kind { return belowHeading }
         // Items of one list, and what continues an item, sit closer than paragraphs.
         if block.listDepth > 0, previous.listDepth > 0 { return itemGap }
         return blockGap
     }
 }
 
+/// One block, in a type scale a step below the system's body size: replies
+/// are long and the phone is narrow, so 16 pt text with room between lines
+/// reads better than 17 pt packed tight, as in Apple's own Mail and Notes.
 private struct MarkdownBlockView: View {
     let block: MarkdownBlock
 
-    @ScaledMetric(relativeTo: .body) private var indent: CGFloat = 20
-    @ScaledMetric(relativeTo: .body) private var lineSpacing: CGFloat = 4
+    @ScaledMetric(relativeTo: .callout) private var indent: CGFloat = 20
+    @ScaledMetric(relativeTo: .callout) private var lineSpacing: CGFloat = 5
+    @ScaledMetric(relativeTo: .callout) private var codeSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .subheadline) private var quoteCodeSize: CGFloat = 13
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             ForEach(0..<block.quoteDepth, id: \.self) { _ in
-                Capsule().fill(Color(.tertiaryLabel)).frame(width: 3)
+                Capsule().fill(Color(.separator)).frame(width: 3)
             }
             content
-                .foregroundStyle(block.quoteDepth > 0 ? .secondary : .primary)
+                .foregroundStyle(isQuote ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, leadingIndent)
     }
 
+    private var isQuote: Bool { block.quoteDepth > 0 }
+    /// 16 pt, a quote one step smaller.
+    private var bodyFont: Font { isQuote ? .subheadline : .callout }
+    /// Monospaced type looks a size larger than proportional type at the same size.
+    private var codeFont: Font { .system(size: isQuote ? quoteCodeSize : codeSize, design: .monospaced) }
+
     /// An item's marker sits one level out from its text; a block continuing
     /// the item lines up with that text.
     private var leadingIndent: CGFloat {
         guard block.listDepth > 0 else { return 0 }
-        if case .listItem = block.kind { return CGFloat(block.listDepth - 1) * indent }
-        return CGFloat(block.listDepth) * indent
+        switch block.kind {
+        case .listItem, .taskItem: return CGFloat(block.listDepth - 1) * indent
+        default: return CGFloat(block.listDepth) * indent
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         switch block.kind {
         case .paragraph:
-            styled(.body)
+            styled(bodyFont, code: codeFont)
         case .heading(let level):
-            styled(Self.headingFont(level))
+            let font = Self.headingFont(level)
+            styled(font, code: font.monospaced(), lineSpacing: 2)
                 .accessibilityAddTraits(.isHeader)
         case .listItem(let marker):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(marker)
-                    .font(.body.monospacedDigit())
+                    .font(bodyFont.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(minWidth: indent - 6, alignment: .trailing)
-                styled(.body)
+                styled(bodyFont, code: codeFont)
+            }
+        case .taskItem(let done):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .font(bodyFont)
+                    .foregroundStyle(done ? Color.green : Color.secondary)
+                    .frame(minWidth: indent - 6, alignment: .trailing)
+                    .accessibilityLabel(done ? String(localized: "Completed") : String(localized: "To Do"))
+                styled(bodyFont, code: codeFont, done: done)
+                    .foregroundStyle(done ? .secondary : .primary)
             }
         case .code(let language):
-            VStack(alignment: .leading, spacing: 6) {
-                if let language {
-                    Text(language)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                // Code scrolls sideways rather than wrapping, so its lines stay lines.
-                ScrollView(.horizontal) {
-                    Text(verbatim: block.text)
-                        .font(.footnote.monospaced())
-                        .lineSpacing(2)
-                        .fixedSize()
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10))
+            MarkdownCodeBlock(code: block.content, language: language)
         case .table(let table):
             MarkdownTableView(table: table)
         case .rule:
@@ -384,43 +417,227 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    private func styled(_ font: Font) -> some View {
-        Text(MarkdownStyle.styled(block.content, in: font))
+    private func styled(_ font: Font, code: Font, lineSpacing: CGFloat? = nil, done: Bool = false) -> some View {
+        MarkdownStyle.text(block.content, in: font, code: code)
+            .strikethrough(done, color: Color(.tertiaryLabel))
             .font(font)
-            .lineSpacing(lineSpacing)
+            .lineSpacing(lineSpacing ?? self.lineSpacing)
+            .textRenderer(InlineCodeRenderer())
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Every level is bold, as Claude Code's terminal draws them; the top two are larger.
+    /// Headings step down from 20 pt to the body's 16, all semibold: on a
+    /// phone, size marks only the top two levels and weight does the rest.
     private static func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: .title2.weight(.bold)
-        case 2: .title3.weight(.bold)
-        default: .body.weight(.bold)
+        case 1: .title3.weight(.semibold)
+        case 2: .headline
+        default: .callout.weight(.semibold)
         }
     }
 }
 
+/// A fenced code block: its language and a copy button above the code,
+/// colored when the language is known. Code scrolls sideways rather than
+/// wrapping, so its lines stay lines; a long block shows its start until
+/// asked for the rest.
+struct MarkdownCodeBlock: View {
+    let code: AttributedString
+    let language: String?
+
+    @State private var expanded = false
+    @State private var copied = false
+    @ScaledMetric(relativeTo: .footnote) private var lineSpacing: CGFloat = 6
+
+    /// Blocks longer than this fold to `foldedLines`.
+    static let foldsAbove = 15
+    static let foldedLines = 10
+
+    var body: some View {
+        let text = String(code.characters)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).count
+        let folded = lines > Self.foldsAbove && !expanded
+        VStack(alignment: .leading, spacing: 0) {
+            header(copying: text)
+            Divider()
+            ScrollView(.horizontal) {
+                Text(folded ? Self.prefix(of: code, lines: Self.foldedLines) : code)
+                    .font(.footnote.monospaced())
+                    .lineSpacing(lineSpacing)
+                    .fixedSize()
+                    .padding(12)
+            }
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: folded ? 0.6 : 1),
+                                       .init(color: .black.opacity(folded ? 0.1 : 1), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            if lines > Self.foldsAbove {
+                Divider()
+                Button {
+                    withAnimation(.snappy) { expanded.toggle() }
+                } label: {
+                    Text(expanded ? "Show Less" : "Show All (\(lines) Lines)")
+                        .font(.footnote.weight(.medium))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10, style: .continuous))
+    }
+
+    private func header(copying text: String) -> some View {
+        HStack {
+            Text(verbatim: language ?? "")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                UIPasteboard.general.string = text
+                copied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    copied = false
+                }
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 8)
+                    // The row is shorter than a touch target; the button is not.
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .sensoryFeedback(.success, trigger: copied) { _, new in new }
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 4)
+        .frame(height: 34)
+    }
+
+    /// The first `lines` lines of the code, colors kept.
+    static func prefix(of code: AttributedString, lines: Int) -> AttributedString {
+        var seen = 0
+        var index = code.startIndex
+        while index < code.endIndex {
+            if code.characters[index] == "\n" {
+                seen += 1
+                if seen == lines { return AttributedString(code[code.startIndex..<index]) }
+            }
+            index = code.characters.index(after: index)
+        }
+        return code
+    }
+}
+
 enum MarkdownStyle {
-    /// Strong text in a real bold weight and inline code tinted. `Text` draws
-    /// the strong intent only semibold, which barely shows in Chinese; and the
-    /// monospaced design has no CJK glyphs, so code in Chinese needs the tint
-    /// to read as code.
-    static func styled(_ content: AttributedString, in font: Font) -> AttributedString {
+    /// Inline code's color. The monospaced design has no CJK glyphs, so in a
+    /// Chinese reply the font alone would not set code apart.
+    static let codeTint = Color(light: 0x8A4F62, dark: 0xD2A7B5)
+    /// Space either side of inline code, inside its box.
+    static let codeInset: CGFloat = 3
+
+    /// Whether a run is inline code drawn in `codeTint`; code in a link keeps the link's color.
+    static func isTintedCode(_ run: AttributedString.Runs.Run?) -> Bool {
+        guard let run, run.inlinePresentationIntent?.contains(.code) == true else { return false }
+        return run.link == nil
+    }
+
+    /// Strong text in a real bold weight and inline code in `code`, tinted.
+    /// `Text` draws the strong intent only semibold, which barely shows in Chinese.
+    static func styled(_ content: AttributedString, in font: Font, code codeFont: Font? = nil) -> AttributedString {
+        typealias ForegroundColor = AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute
+        typealias Kern = AttributeScopes.SwiftUIAttributes.KerningAttribute
         var result = content
+        var previous: AttributedString.Runs.Run?
         for run in content.runs {
+            defer { previous = run }
             guard var intent = run.inlinePresentationIntent else { continue }
             if intent.contains(.stronglyEmphasized) {
                 intent.remove(.stronglyEmphasized)
                 result[run.range].inlinePresentationIntent = intent.isEmpty ? nil : intent
                 result[run.range].font = font.weight(.bold)
             }
-            if intent.contains(.code) {
-                result[run.range].font = font.monospaced()
-                result[run.range].backgroundColor = Color(.tertiarySystemFill)
+            guard intent.contains(.code) else { continue }
+            result[run.range].font = codeFont ?? font.monospaced()
+            if isTintedCode(run), run[ForegroundColor.self] == nil {
+                result[run.range][ForegroundColor.self] = codeTint
+            }
+            // Room for the box: after the code's last character, and after
+            // the character before it, unless the code starts a line.
+            let last = content.index(beforeCharacter: run.range.upperBound)
+            result[last..<run.range.upperBound][Kern.self] = codeInset + 1
+            if let previous, previous.inlinePresentationIntent?.contains(.code) != true {
+                let before = content.index(beforeCharacter: run.range.lowerBound)
+                if content.characters[before] != "\n" {
+                    result[before..<run.range.lowerBound][Kern.self] = codeInset + 1
+                }
             }
         }
         return result
+    }
+
+    /// The content as one `Text`, its inline code marked for `InlineCodeRenderer`.
+    static func text(_ content: AttributedString, in font: Font, code codeFont: Font? = nil) -> Text {
+        let styled = styled(content, in: font, code: codeFont)
+        var result: Text?
+        var segment = AttributedString()
+        var segmentIsCode = false
+        func close() {
+            guard !segment.characters.isEmpty else { return }
+            let text = segmentIsCode ? Text(segment).customAttribute(InlineCode()) : Text(segment)
+            result = result.map { $0 + text } ?? text
+            segment = AttributedString()
+        }
+        for run in styled.runs {
+            let isCode = run.inlinePresentationIntent?.contains(.code) == true
+            if isCode != segmentIsCode {
+                close()
+                segmentIsCode = isCode
+            }
+            segment.append(styled[run.range])
+        }
+        close()
+        return result ?? Text(styled)
+    }
+}
+
+/// Marks the inline code in a `Text` for `InlineCodeRenderer`.
+struct InlineCode: TextAttribute {}
+
+/// Draws a rounded box behind each stretch of inline code on a line, then
+/// the text. `Text` can color a run's background, but only edge to edge
+/// with square corners, which reads as a highlight rather than code.
+struct InlineCodeRenderer: TextRenderer {
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        var boxes: [CGRect] = []
+        for line in layout {
+            var box: CGRect?
+            for run in line {
+                if run[InlineCode.self] != nil {
+                    let rect = run.typographicBounds.rect
+                    box = box.map { $0.union(rect) } ?? rect
+                } else if let done = box {
+                    boxes.append(done)
+                    box = nil
+                }
+            }
+            if let box { boxes.append(box) }
+        }
+        let inset = MarkdownStyle.codeInset
+        for box in boxes {
+            // The kern after the last character is inside the run; leave a point
+            // of it outside. Code that starts a line keeps to the text's margin.
+            let left = max(0, box.minX - inset)
+            let rect = CGRect(x: left, y: box.minY - 1, width: box.maxX - 1 - left, height: box.height + 2)
+            context.fill(Path(roundedRect: rect, cornerRadius: 4, style: .continuous),
+                         with: .color(Color(.quaternarySystemFill)))
+        }
+        for line in layout { context.draw(line) }
     }
 }
 
@@ -430,6 +647,8 @@ private struct MarkdownTableView: View {
     let table: MarkdownTable
 
     @ScaledMetric(relativeTo: .subheadline) private var minimumColumnWidth: CGFloat = 96
+    @ScaledMetric(relativeTo: .subheadline) private var cellSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .subheadline) private var codeSize: CGFloat = 12.5
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -454,17 +673,22 @@ private struct MarkdownTableView: View {
 
     private func cell(row: Int, column: Int) -> some View {
         let header = row == 0
-        let font: Font = header ? .subheadline.weight(.semibold) : .subheadline
+        // A size below the reply's text, the header smaller still and gray.
+        let font: Font = header ? .footnote.weight(.semibold) : .system(size: cellSize)
         let alignment = table.columns[column]
-        return Text(MarkdownStyle.styled(table.rows[row][column], in: font))
+        return MarkdownStyle.text(table.rows[row][column], in: font,
+                                  code: .system(size: codeSize, design: .monospaced))
             .font(font)
-            .lineSpacing(2)
+            .foregroundStyle(header ? .secondary : .primary)
+            .lineSpacing(3)
+            .textRenderer(InlineCodeRenderer())
             .multilineTextAlignment(alignment == .center ? .center : alignment == .trailing ? .trailing : .leading)
             .frame(maxWidth: .infinity, maxHeight: .infinity,
                    alignment: alignment == .center ? .top : alignment == .trailing ? .topTrailing : .topLeading)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(header ? Color(.tertiarySystemFill) : .clear)
+            // Every other body row shaded, so a wide row is easy to follow.
+            .background(header ? Color(.tertiarySystemFill) : row.isMultiple(of: 2) ? Color(.quaternarySystemFill) : .clear)
             .overlay(alignment: .bottom) {
                 if row < table.rows.count - 1 { Rectangle().fill(Color(.separator)).frame(height: 0.5) }
             }

@@ -3273,6 +3273,34 @@
         }
       }
     },
+    "Show All (%lld Lines)" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Show All (%lld Line)"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Show All (%lld Lines)"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展开全部（%lld 行）"
+          }
+        }
+      }
+    },
     "Show Keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3299,6 +3327,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看费用和用量"
+          }
+        }
+      }
+    },
+    "Show Less" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起"
           }
         }
       }
@@ -3979,6 +4017,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "之后需要在主 Mac 上重新运行 yochi pair 才能再次连接。"
+          }
+        }
+      }
+    },
+    "To Do" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待办"
           }
         }
       }

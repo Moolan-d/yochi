@@ -199,6 +199,42 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(MarkdownTableLayout.share(0, ideal: [60, 400, 500], minimum: 96), [60, 96, 96])
     }
 
+    func testTaskListItems() {
+        let blocks = MarkdownBlock.parse("- [x] Read `Pane.swift`\n- [ ] Check iPad\n- [link](x) stays\n1. [ ] ordered stays")
+        XCTAssertEqual(blocks.map(\.kind), [
+            .taskItem(done: true), .taskItem(done: false), .listItem(marker: "•"), .listItem(marker: "1."),
+        ])
+        XCTAssertEqual(blocks.map(\.text), ["Read Pane.swift", "Check iPad", "link stays", "[ ] ordered stays"])
+        XCTAssertEqual(blocks[0].content.runs.last?.inlinePresentationIntent, .code)
+    }
+
+    func testSyntaxHighlightTokens() throws {
+        func tokens(_ code: String, _ language: String) throws -> [String: SyntaxHighlight.Token] {
+            let lang = try XCTUnwrap(SyntaxHighlight.language(named: language))
+            var out: [String: SyntaxHighlight.Token] = [:]
+            for (text, token) in SyntaxHighlight.tokens(code, in: lang) { if let token { out[text] = token } }
+            return out
+        }
+        XCTAssertEqual(try tokens("let x = \"a\\\"b\" // done\nreturn 42", "swift"),
+                       ["let": .keyword, "\"a\\\"b\"": .string, "// done": .comment, "return": .keyword, "42": .number])
+        XCTAssertEqual(try tokens("def f():\n    return 'x'  # why", "py"),
+                       ["def": .keyword, "return": .keyword, "'x'": .string, "# why": .comment])
+        // `#` inside a word or `$#` is not a comment; `x1` is not a number.
+        XCTAssertEqual(try tokens("echo $# a#b x1 # note", "bash"), ["# note": .comment])
+        XCTAssertEqual(try tokens("fn f<'a>() /* c */ {}", "rs"), ["fn": .keyword, "/* c */": .comment])
+        XCTAssertNil(SyntaxHighlight.language(named: "cobol"))
+        // Highlighting never changes the text, so a reveal and Copy see the same code.
+        let code = "const a = `t ${b}` /* open"
+        XCTAssertEqual(String(SyntaxHighlight.highlighted(code, language: "ts").characters), code)
+        XCTAssertEqual(MarkdownBlock.parse("```ts\n\(code)\n```").first?.text, code)
+    }
+
+    func testLongCodeBlockFoldsToItsFirstLines() {
+        let code = AttributedString((1...20).map { "line \($0)" }.joined(separator: "\n"))
+        XCTAssertEqual(String(MarkdownCodeBlock.prefix(of: code, lines: 3).characters), "line 1\nline 2\nline 3")
+        XCTAssertEqual(MarkdownCodeBlock.prefix(of: code, lines: 30), code)
+    }
+
     func testUnclosedCodeFenceKeepsItsText() {
         let blocks = MarkdownBlock.parse("```\nstill typing")
         XCTAssertEqual(blocks.map(\.kind), [.code(language: nil)])
