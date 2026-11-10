@@ -554,8 +554,9 @@ final class ObservedTerminalView: UIView, UIScrollViewDelegate, TerminalSurfaceG
     static let padding = CGSize(width: 6, height: 4)
 
     /// Ghostty's default theme backgrounds (Alabaster, Afterglow), so the area
-    /// around the text reads as part of the terminal.
-    private static let terminalBackground = UIColor { traits in
+    /// around the text, and the key bar's strip beneath, read as part of the
+    /// terminal.
+    static let terminalBackground = UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0x21 / 255, green: 0x21 / 255, blue: 0x21 / 255, alpha: 1)
             : UIColor(red: 0xF7 / 255, green: 0xF7 / 255, blue: 0xF7 / 255, alpha: 1)

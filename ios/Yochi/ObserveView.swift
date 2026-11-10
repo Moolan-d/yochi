@@ -366,7 +366,15 @@ struct ObserveView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isConversation ? AnyShapeStyle(.bar) : AnyShapeStyle(.clear))
+        .background {
+            if isConversation {
+                Rectangle().fill(.bar).ignoresSafeArea()
+            } else {
+                // The terminal's own color down to the screen's edge, so the
+                // key bar floats on the terminal rather than on a black strip.
+                Color(uiColor: ObservedTerminalView.terminalBackground).ignoresSafeArea()
+            }
+        }
     }
 
     /// A terminal shows its command field only when asked to.
