@@ -17,11 +17,16 @@ repo=$(git rev-parse --show-toplevel)
 state="$HOME/Library/Caches/dev.yochi"
 label=dev.yochi.renew
 agent="$HOME/Library/LaunchAgents/$label.plist"
+# System Settings > General > Login Items lists the agent by its executable's
+# name, so it runs this launcher rather than /bin/sh.
+launcher="$HOME/Library/Application Support/dev.yochi/Yochi Renew"
 domain="gui/$(id -u)"
 
 case "${1:-}" in
 --enable)
-    mkdir -p "$(dirname "$agent")"
+    mkdir -p "$(dirname "$agent")" "$(dirname "$launcher")"
+    printf '#!/bin/sh\nexec /bin/sh "%s/scripts/renew-device.sh"\n' "$(pwd)" > "$launcher"
+    chmod +x "$launcher"
     cat > "$agent" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,7 +34,7 @@ case "${1:-}" in
 <dict>
     <key>Label</key><string>$label</string>
     <key>ProgramArguments</key>
-    <array><string>/bin/sh</string><string>$(pwd)/scripts/renew-device.sh</string></array>
+    <array><string>$launcher</string></array>
     <key>EnvironmentVariables</key>
     <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
     <key>StartCalendarInterval</key>
@@ -46,7 +51,7 @@ EOF
     ;;
 --disable)
     launchctl bootout "$domain/$label" 2>/dev/null || true
-    rm -f "$agent"
+    rm -f "$agent" "$launcher"
     echo "daily renewal off"
     exit 0
     ;;
