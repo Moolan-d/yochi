@@ -63,21 +63,29 @@ Yochi 只连你自己的 Mac：不用注册账号，中间也没有我们的服�
 
 2. **把 App 装到 iPhone 上。**
 
-   ```sh
-   cd ios
-   scripts/fetch-libghostty.sh
-   xcodegen generate
-   open Yochi.xcodeproj
-   ```
-
-   <details>
-   <summary>用自己的 Apple ID 签名</summary>
-
    在 `ios/Local.xcconfig`（git 会忽略它）里填你的团队。免费的 Personal Team 还要加一个 bundle ID 后缀：
 
    ```
    DEVELOPMENT_TEAM = ABCDE12345
    BUNDLE_ID_SUFFIX = .yourname
+   ```
+
+   在 Xcode 里登录这个 Apple ID，并用数据线把 iPhone 和 Mac 配对一次。之后运行下面的脚本即可构建、签名并安装，以后走 Wi-Fi 就行：
+
+   ```sh
+   ios/scripts/install-device.sh
+   ```
+
+   用免费 Personal Team 签名的 App 七天后打不开。到期前再运行一次脚本，它会续签。
+
+   <details>
+   <summary>改用 Xcode</summary>
+
+   ```sh
+   cd ios
+   scripts/fetch-libghostty.sh
+   xcodegen generate
+   open Yochi.xcodeproj
    ```
 
    </details>

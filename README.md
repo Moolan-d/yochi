@@ -64,21 +64,29 @@ There is no App Store build yet, so you build the app yourself. You need a Mac r
 
 2. **Put the app on your iPhone.**
 
-   ```sh
-   cd ios
-   scripts/fetch-libghostty.sh
-   xcodegen generate
-   open Yochi.xcodeproj
-   ```
-
-   <details>
-   <summary>Signing with your own Apple ID</summary>
-
    Put your team in `ios/Local.xcconfig`, which git ignores. A free Personal Team also needs a bundle ID suffix:
 
    ```
    DEVELOPMENT_TEAM = ABCDE12345
    BUNDLE_ID_SUFFIX = .yourname
+   ```
+
+   Sign in to that Apple ID in Xcode and pair the iPhone with the Mac once, over a cable. Then this builds, signs and installs the app, over Wi-Fi from then on:
+
+   ```sh
+   ios/scripts/install-device.sh
+   ```
+
+   With a free Personal Team the app stops opening after seven days. Run the script again before then; it renews the signing.
+
+   <details>
+   <summary>Working in Xcode instead</summary>
+
+   ```sh
+   cd ios
+   scripts/fetch-libghostty.sh
+   xcodegen generate
+   open Yochi.xcodeproj
    ```
 
    </details>
