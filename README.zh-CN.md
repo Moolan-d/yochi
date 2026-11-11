@@ -76,7 +76,11 @@ Yochi 只连你自己的 Mac：不用注册账号，中间也没有我们的服�
    ios/scripts/install-device.sh
    ```
 
-   用免费 Personal Team 签名的 App 七天后打不开。到期前再运行一次脚本，它会续签。
+   用免费 Personal Team 签名的 App 七天后打不开。到期前再运行一次脚本，它会续签。也可以交给 Mac 自动处理：下面的命令每天检查一次，签名剩不到三天时安装 `main` 上的最新提交：
+
+   ```sh
+   ios/scripts/renew-device.sh --enable
+   ```
 
    <details>
    <summary>改用 Xcode</summary>

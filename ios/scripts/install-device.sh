@@ -59,4 +59,7 @@ app="$DERIVED/Build/Products/$CONFIGURATION-iphoneos/Yochi.app"
 xcrun devicectl device install app --quiet --device "$DEVICE" "$app"
 
 expires=$(security cms -D -i "$app/embedded.mobileprovision" | plutil -extract ExpirationDate raw -o - -)
+# For renew-device.sh, which checks it before building anything.
+mkdir -p "$HOME/Library/Caches/dev.yochi"
+echo "$expires" > "$HOME/Library/Caches/dev.yochi/installed-until"
 echo "Installed $(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist"); its profile expires $expires"

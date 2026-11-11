@@ -77,7 +77,11 @@ There is no App Store build yet, so you build the app yourself. You need a Mac r
    ios/scripts/install-device.sh
    ```
 
-   With a free Personal Team the app stops opening after seven days. Run the script again before then; it renews the signing.
+   With a free Personal Team the app stops opening after seven days. Run the script again before then; it renews the signing. Or have the Mac do it: this checks once a day and, when the signing has under three days left, installs the latest commit on `main`:
+
+   ```sh
+   ios/scripts/renew-device.sh --enable
+   ```
 
    <details>
    <summary>Working in Xcode instead</summary>
