@@ -84,6 +84,28 @@ There is no App Store build yet, so you build the app yourself. You need a Mac r
    ```
 
    <details>
+   <summary>Installing and renewing in detail</summary>
+
+   | To | Run |
+   | --- | --- |
+   | Install the current checkout now | `ios/scripts/install-device.sh` |
+   | Install on a particular iPhone | `DEVICE="My iPhone" ios/scripts/install-device.sh` (a name or UDID; the first paired iPhone otherwise) |
+   | Install a Debug build | `CONFIGURATION=Debug ios/scripts/install-device.sh` |
+   | Turn daily renewal on | `ios/scripts/renew-device.sh --enable` |
+   | Turn it off | `ios/scripts/renew-device.sh --disable` |
+   | Run the check now | `ios/scripts/renew-device.sh` |
+   | Run it now through launchd | `launchctl kickstart gui/$(id -u)/dev.yochi.renew` |
+   | See whether it is on | `launchctl print gui/$(id -u)/dev.yochi.renew` |
+   | Read its log | `tail ~/Library/Logs/yochi-renew.log` |
+
+   - `install-device.sh` builds the current checkout, edits included. Xcode keeps signing with a cached profile until it lapses, so the script first deletes Yochi's cached profiles that expire within three days, and Xcode fetches a new seven-day one. It records the installed build's expiry in `~/Library/Caches/dev.yochi/installed-until`.
+   - `renew-device.sh` does nothing while that expiry is more than three days off. Otherwise it checks out the latest commit on `main` in `~/Library/Caches/dev.yochi/worktree`, copies `ios/Local.xcconfig` in and runs `install-device.sh` there, so unfinished edits never reach the phone.
+   - `--enable` writes the LaunchAgent `~/Library/LaunchAgents/dev.yochi.renew.plist`, which runs the check at noon each day, or on waking if the Mac slept through noon. A day it cannot install is retried the next day. Run `--enable` again after moving the checkout.
+   - Deleting `~/Library/Caches/dev.yochi` is safe: the next check reinstalls and sets it up again.
+
+   </details>
+
+   <details>
    <summary>Working in Xcode instead</summary>
 
    ```sh

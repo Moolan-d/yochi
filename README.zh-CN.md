@@ -83,6 +83,28 @@ Yochi 只连你自己的 Mac：不用注册账号，中间也没有我们的服�
    ```
 
    <details>
+   <summary>安装与续签详解</summary>
+
+   | 想要 | 运行 |
+   | --- | --- |
+   | 立即安装当前代码 | `ios/scripts/install-device.sh` |
+   | 装到指定的 iPhone | `DEVICE="My iPhone" ios/scripts/install-device.sh`（设备名或 UDID；不指定则用第一台已配对的 iPhone） |
+   | 安装 Debug 构建 | `CONFIGURATION=Debug ios/scripts/install-device.sh` |
+   | 开启每日续签 | `ios/scripts/renew-device.sh --enable` |
+   | 关闭 | `ios/scripts/renew-device.sh --disable` |
+   | 立即检查一次 | `ios/scripts/renew-device.sh` |
+   | 通过 launchd 立即运行一次 | `launchctl kickstart gui/$(id -u)/dev.yochi.renew` |
+   | 查看是否已开启 | `launchctl print gui/$(id -u)/dev.yochi.renew` |
+   | 查看日志 | `tail ~/Library/Logs/yochi-renew.log` |
+
+   - `install-device.sh` 构建当前检出的代码，包括未提交的修改。Xcode 会一直沿用缓存里还没过期的描述文件，所以脚本先删掉 Yochi 那些三天内到期的缓存描述文件，让 Xcode 重新申请一份七天的。它把已装构建的到期时间记在 `~/Library/Caches/dev.yochi/installed-until`。
+   - `renew-device.sh` 在离到期还有三天以上时什么都不做。否则它在 `~/Library/Caches/dev.yochi/worktree` 检出 `main` 的最新提交，复制 `ios/Local.xcconfig` 过去，在那里运行 `install-device.sh`，所以改到一半的代码不会装到手机上。
+   - `--enable` 会写入 LaunchAgent `~/Library/LaunchAgents/dev.yochi.renew.plist`，每天中午检查一次；中午 Mac 在睡眠的话，唤醒后补跑。某天没装上，第二天会再试。移动了代码目录后要重新运行一次 `--enable`。
+   - 删掉 `~/Library/Caches/dev.yochi` 是安全的：下一次检查会重新安装并重建它。
+
+   </details>
+
+   <details>
    <summary>改用 Xcode</summary>
 
    ```sh

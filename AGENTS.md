@@ -39,12 +39,24 @@ TESTS="testPairObserveAndUnpair testShellCommandsRun" scripts/ui-test.sh
 ```
 
 - `scripts/ui-test.sh` needs `cargo`, `node`, `tailscale` and `hc` on `PATH`.
+
+## Install on the iPhone
+
+```sh
+ios/scripts/install-device.sh             # build this checkout, sign, install on the paired iPhone
+ios/scripts/renew-device.sh               # reinstall main's latest commit if the signing has < 3 days left
+ios/scripts/renew-device.sh --enable      # run that check daily (LaunchAgent dev.yochi.renew)
+ios/scripts/renew-device.sh --disable
+```
+
+- `install-device.sh` takes `DEVICE` (name or UDID) and `CONFIGURATION` (default `Release`). It renews a free Personal Team's profile by deleting Yochi's cached profiles that expire within three days, and records the installed expiry in `~/Library/Caches/dev.yochi/installed-until`.
+- `renew-device.sh` builds in its own worktree, `~/Library/Caches/dev.yochi/worktree`, and logs to `~/Library/Logs/yochi-renew.log`. README's "Installing and renewing in detail" has the full table.
 - Personal signing goes in `ios/Local.xcconfig`, which is git-ignored. `ios/Signing.xcconfig` shows the keys.
 - Run the targeted tests for what you changed. Run the full UI suite when a change spans several screens.
 
 ## Rules
 
-- **Leave the user's own sessions alone.** UI tests create, type into and kill only terminals named `yochi-uitest*`. Never attach to, type into or close any other Herdr terminal. Never restart a Gateway on port 7420; that one is the user's.
+- **Leave the user's own sessions alone.** UI tests create, type into and kill only terminals named `yochi-uitest*`. Never attach to, type into or close any other Herdr terminal. Never restart a Gateway on port 7420; that one is the user's. Run `install-device.sh` or `renew-device.sh` only when asked: installing quits the app on the user's iPhone. Do not turn the daily renewal on or off unless asked.
 - **Protocol changes stay backward compatible.** Older apps and older Gateways must keep working. Document every change in `protocol/README.md` and its translation `protocol/README.zh-CN.md`, in the same commit as the code. The English page is authoritative.
 - **Localization.**
   - English is the development language. Chinese (`zh-Hans`) is a full translation in `ios/Yochi/Localizable.xcstrings`.
