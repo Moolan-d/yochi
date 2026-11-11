@@ -72,6 +72,7 @@ yochi [OPTIONS] [COMMAND]
 | `yochi service install` | Install or update the LaunchAgent and start it, with the current settings |
 | `yochi service status` | Whether the LaunchAgent is installed and running, where it listens and where it logs |
 | `yochi service uninstall` | Stop the LaunchAgent and remove it |
+| `yochi dashboard [--port <PORT>] [--no-open]` | Open a page in the browser that shows all of the above at a glance and drives it. See [Dashboard](#dashboard) |
 
 | Option | Environment | Default |
 | --- | --- | --- |
@@ -92,6 +93,24 @@ yochi [OPTIONS] [COMMAND]
 - Upgrading from `companion-gateway`: `yochi service install` removes the old `dev.companion.gateway` agent, and pairings move from `~/Library/Application Support/Companion Gateway`. The iOS bundle ID is now `dev.yochi.app`, so the app installs as a new app and you'll need to pair again.
 
 </details>
+
+## Dashboard
+
+```sh
+yochi dashboard
+```
+
+This opens a page in your browser with the Gateway's state in one place, refreshed every few seconds:
+
+- **Gateway**: whether the LaunchAgent is running, with Start, Stop and Restart.
+- **How phones reach this Mac**: the tailnet address and whether the Gateway listens there, the Relay and whether it is connected.
+- **Phones**: every paired phone, with Unpair, and Pair a Phone, which shows the same QR code as `yochi pair`.
+- **Notifications**: where they go, and Send a Test.
+- **App on the iPhone**: on a Mac that installs the app with `ios/scripts/install-device.sh`, how long its signing lasts, whether the daily renewal is on, and Check Now.
+
+The dashboard is a process of its own, apart from the Gateway. It uses no memory while closed, and it still opens when the Gateway is stopped. It stops on Ctrl-C, or by itself ten minutes after its page closes; a pairing code it was showing stops working then.
+
+It listens on `127.0.0.1` only, on a free port unless you pass `--port`. The link it opens carries a one-time token, and every request must present it, so other pages in your browser and other users of the Mac can't read the page or act through it. `--no-open` prints the link instead of opening it.
 
 ## Security model
 

@@ -72,6 +72,7 @@ yochi [OPTIONS] [COMMAND]
 | `yochi service install` | 安装或更新 LaunchAgent 并启动，沿用当前的设置 |
 | `yochi service status` | LaunchAgent 是否装了、是否在运行、监听地址、日志位置 |
 | `yochi service uninstall` | 停止并移除 LaunchAgent |
+| `yochi dashboard [--port <PORT>] [--no-open]` | 在浏览器里打开一个页面，一眼看到上面这些状态并操作。见 [Dashboard](#dashboard) |
 
 | 选项 | 环境变量 | 默认值 |
 | --- | --- | --- |
@@ -95,6 +96,24 @@ yochi [OPTIONS] [COMMAND]
   - iOS 的 bundle ID 改成了 `dev.yochi.app`，手机上会装成一个新 App，需要重新配对，旧 App 可以删掉。
 
 </details>
+
+## Dashboard
+
+```sh
+yochi dashboard
+```
+
+它在浏览器里打开一个页面，把 Gateway 的状态放在一处，每隔几秒刷新：
+
+- **Gateway**：LaunchAgent 是否在运行，可以启动、停止、重启。
+- **手机怎么连到这台 Mac**：tailnet 地址和 Gateway 是否在那里监听，中继和它是否连着。
+- **手机**：每台已配对的手机，可以取消配对；「配对手机」显示和 `yochi pair` 一样的二维码。
+- **通知**：发到哪里，可以发送测试。
+- **iPhone 上的 App**：在用 `ios/scripts/install-device.sh` 装 App 的 Mac 上，显示签名还剩多久、每日续签是否开着，可以立即检查。
+
+Dashboard 是独立于 Gateway 的进程：关着的时候不占内存，Gateway 停了也能打开。按 Ctrl-C 停止，页面关闭十分钟后也会自己停止；当时显示着的配对码随之失效。
+
+它只在 `127.0.0.1` 上监听，不传 `--port` 时用一个空闲端口。打开的链接带一次性令牌，每个请求都要带上它，所以浏览器里的其他页面和这台 Mac 的其他用户都读不到这个页面，也不能通过它操作。`--no-open` 只打印链接，不打开浏览器。
 
 ## 安全模型
 

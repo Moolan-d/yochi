@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Yochi</title>
+<style>
+:root {
+  --bg: #f5f5f7; --card: #fff; --text: #1d1d1f; --dim: #6e6e73; --line: #e3e3e8;
+  --accent: #0071e3; --good: #1f9d55; --bad: #d70015; --warn: #b25000; --idle: #8e8e93;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e; --card: #2c2c2e; --text: #f5f5f7; --dim: #a1a1a6; --line: #3a3a3c;
+    --accent: #2997ff; --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --idle: #8e8e93;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+main { max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; }
+header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 20px; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 13px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; margin: 24px 4px 8px; }
+.dim { color: var(--dim); }
+.small { font-size: 13px; }
+.card { background: var(--card); border-radius: 12px; overflow: hidden; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-height: 52px; }
+.row + .row { border-top: 1px solid var(--line); }
+.row .grow { flex: 1; min-width: 0; }
+.row .grow > div { overflow-wrap: anywhere; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--idle); flex: none; }
+.dot.good { background: var(--good); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
+.buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+button { font: inherit; min-height: 32px; padding: 4px 14px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--accent); cursor: pointer; }
+button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.1); }
+button.danger { color: var(--bad); }
+button.danger:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+button:disabled { opacity: .5; cursor: default; }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+#pairing { padding: 20px 16px; text-align: center; border-top: 1px solid var(--line); }
+#pair-row { border-top: 1px solid var(--line); }
+#pairing .qr { width: 220px; max-width: 100%; margin: 0 auto 12px; border-radius: 8px; overflow: hidden; }
+#pairing .qr svg { display: block; width: 100%; height: auto; }
+#pairing .code { font: 600 22px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+#notice { position: sticky; top: 0; z-index: 1; margin-bottom: 12px; padding: 10px 16px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
+#notice.error { border-color: var(--bad); color: var(--bad); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Yochi</h1><span class="dim small" id="version"></span></header>
+  <div id="notice" role="status" hidden></div>
+  <div id="content" hidden>
+    <h2 data-t="gateway"></h2>
+    <div class="card">
+      <div class="row">
+        <span class="dot" id="service-dot"></span>
+        <div class="grow"><div id="service-title"></div><div class="dim small" id="service-detail"></div></div>
+        <div class="buttons" id="service-buttons"></div>
+      </div>
+    </div>
+
+    <h2 data-t="reach"></h2>
+    <div class="card">
+      <div class="row">
+        <span class="dot" id="tailnet-dot"></span>
+        <div class="grow"><div>Tailscale</div><div class="dim small" id="tailnet-detail"></div></div>
+      </div>
+      <div class="row">
+        <span class="dot" id="relay-dot"></span>
+        <div class="grow"><div data-t="relay"></div><div class="dim small" id="relay-detail"></div></div>
+      </div>
+    </div>
+
+    <h2 data-t="phones"></h2>
+    <div class="card">
+      <div id="devices"></div>
+      <div id="pairing" hidden>
+        <div class="qr" id="qr"></div>
+        <div class="code" id="code"></div>
+        <div class="dim small" id="pairing-detail"></div>
+        <p><button id="cancel-pairing" data-t="cancel"></button></p>
+      </div>
+      <div class="row" id="pair-row">
+        <div class="grow dim small" id="pair-hint"></div>
+        <div class="buttons"><button class="primary" id="pair" data-t="pair"></button></div>
+      </div>
+    </div>
+
+    <h2 data-t="notifications"></h2>
+    <div class="card">
+      <div class="row">
+        <span class="dot" id="push-dot"></span>
+        <div class="grow"><div>Bark</div><div class="dim small" id="push-detail"></div></div>
+        <div class="buttons"><button id="push-test" data-t="sendTest"></button></div>
+      </div>
+    </div>
+
+    <div id="signing" hidden>
+      <h2 data-t="signing"></h2>
+      <div class="card">
+        <div class="row">
+          <span class="dot" id="signing-dot"></span>
+          <div class="grow"><div id="signing-title"></div><div class="dim small" id="signing-detail"></div></div>
+        </div>
+        <div class="row">
+          <span class="dot" id="renewal-dot"></span>
+          <div class="grow"><div data-t="renewal"></div><div class="dim small" id="renewal-detail"></div></div>
+          <div class="buttons"><button id="renew" data-t="checkNow"></button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+"use strict";
+const zh = (navigator.language || "").toLowerCase().startsWith("zh");
+document.documentElement.lang = zh ? "zh-Hans" : "en";
+const TEXT = {
+  gateway: ["Gateway", "Gateway"],
+  reach: ["How phones reach this Mac", "手机怎么连到这台 Mac"],
+  relay: ["Relay", "中继"],
+  phones: ["Phones", "手机"],
+  notifications: ["Notifications", "通知"],
+  signing: ["App on the iPhone", "iPhone 上的 App"],
+  renewal: ["Daily renewal", "每日续签"],
+  pair: ["Pair a Phone", "配对手机"],
+  cancel: ["Cancel", "取消"],
+  sendTest: ["Send a Test", "发送测试"],
+  checkNow: ["Check Now", "立即检查"],
+  start: ["Start", "启动"], stop: ["Stop", "停止"], restart: ["Restart", "重启"],
+  unpair: ["Unpair", "取消配对"],
+  running: ["Running", "运行中"],
+  stopped: ["Stopped", "已停止"],
+  notInstalled: ["Not installed as a service", "未安装为服务"],
+  notInstalledHint: ["`yochi service install` runs it at login.", "运行 `yochi service install` 让它随登录启动。"],
+  pid: ["pid {0}", "进程 {0}"],
+  lastExit: ["last exit: {0}", "上次退出：{0}"],
+  log: ["log: {0}", "日志：{0}"],
+  off: ["Off", "未开启"],
+  listening: ["Listening on {0}", "正在监听 {0}"],
+  notListening: ["Nothing is listening on {0}", "{0} 上没有服务在监听"],
+  tailnetOffHint: ["`yochi tailnet on` turns it on.", "运行 `yochi tailnet on` 开启。"],
+  relayOffHint: ["`yochi relay setup` deploys one to your Cloudflare account.", "运行 `yochi relay setup` 部署到你的 Cloudflare 账号。"],
+  connected: ["Connected", "已连接"],
+  connectedSince: ["Connected for {0}", "已连接 {0}"],
+  notConnected: ["Not connected", "未连接"],
+  unknown: ["No report from a running Gateway", "没有运行中的 Gateway 上报状态"],
+  relayPhones1: ["1 phone can use it", "1 台手机可以走它"],
+  relayPhones: ["{0} phones can use it", "{0} 台手机可以走它"],
+  noPhones: ["No phone is paired yet.", "还没有配对手机。"],
+  pairedAgo: ["Paired {0} ago", "{0}前配对"],
+  viaRelay: ["Tailscale or relay", "Tailscale 或中继"],
+  viaTailnet: ["Tailscale only", "仅 Tailscale"],
+  pairHint: ["Shows a code to scan with the iPhone's camera.", "显示一个二维码，用 iPhone 相机扫描。"],
+  scan: ["Scan with the iPhone's camera. Works once, for {0}.", "用 iPhone 相机扫描。单次有效，还剩 {0}。"],
+  pairedNow: ["Paired {0}.", "已配对 {0}。"],
+  confirmUnpair: ["Unpair {0}? It is cut off within seconds and has to pair again.", "取消配对 {0}？几秒内它会被断开，之后需要重新配对。"],
+  confirmStop: ["Stop the Gateway? Phones lose their connection until you start it again.", "停止 Gateway？在你重新启动之前，手机会断开连接。"],
+  confirmRestart: ["Restart the Gateway? Phones reconnect in a few seconds.", "重启 Gateway？手机会在几秒后重新连上。"],
+  confirmRenew: ["Run the renewal check now? If the signing has under three days left, it reinstalls the app, which quits it on the iPhone.", "现在检查续签？如果签名剩不到三天，会重新安装 App，iPhone 上的 Yochi 会被退出。"],
+  pushOn: ["On, through {0}", "已开启，经由 {0}"],
+  encrypted: ["end-to-end encrypted", "端到端加密"],
+  pushOffHint: ["`yochi push bark <address>` turns them on.", "运行 `yochi push bark <地址>` 开启。"],
+  testSent: ["Test notification sent.", "测试通知已发送。"],
+  renewStarted: ["The check is running; its result shows in the log line below.", "检查已开始，结果会出现在下面的日志行里。"],
+  signedFor: ["Signed for another {0}", "签名还剩 {0}"],
+  signedUntil: ["until {0}", "到 {0}"],
+  expired: ["The signing has expired", "签名已过期"],
+  neverInstalled: ["No install recorded", "没有安装记录"],
+  renewalOn: ["On, checks at noon", "已开启，每天中午检查"],
+  renewalOffHint: ["`ios/scripts/renew-device.sh --enable` turns it on.", "运行 `ios/scripts/renew-device.sh --enable` 开启。"],
+  noToken: ["This page needs the link that `yochi dashboard` prints. Run it again.", "这个页面要用 `yochi dashboard` 打印的链接打开，请重新运行一次。"],
+  gone: ["The dashboard has stopped. Run `yochi dashboard` again.", "Dashboard 已停止，请重新运行 `yochi dashboard`。"],
+};
+const t = (key, ...args) => TEXT[key][zh ? 1 : 0].replace(/\{(\d)\}/g, (_, i) => args[i]);
+const $ = id => document.getElementById(id);
+for (const el of document.querySelectorAll("[data-t]")) el.textContent = t(el.dataset.t);
+
+function lasted(seconds) {
+  seconds = Math.max(0, Math.floor(seconds));
+  const units = zh ? [[86400, " 天"], [3600, " 小时"], [60, " 分钟"], [1, " 秒"]] : [[86400, " d"], [3600, " h"], [60, " min"], [1, " s"]];
+  for (const [size, name] of units) if (seconds >= size) return Math.floor(seconds / size) + name;
+  return 0 + units[3][1];
+}
+
+// The token arrives in the link's fragment; out of the address bar it goes.
+let token = location.hash.slice(1);
+try {
+  if (token) sessionStorage.setItem("token", token); else token = sessionStorage.getItem("token") || "";
+} catch {}
+history.replaceState(null, "", location.pathname);
+
+let noticeTimer;
+function notice(text, error) {
+  const el = $("notice");
+  clearTimeout(noticeTimer);
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.classList.toggle("error", !!error);
+  if (text && !error) noticeTimer = setTimeout(() => (el.hidden = true), 6000);
+}
+
+async function api(method, path) {
+  const response = await fetch("/api" + path, { method, headers: { Authorization: "Bearer " + token } });
+  if (response.status === 401) throw new Error(t("noToken"));
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+async function act(button, method, path, done) {
+  button.disabled = true;
+  try {
+    await api(method, path);
+    notice(done || "");
+  } catch (error) {
+    notice(error.message, true);
+  }
+  button.disabled = false;
+  await refresh();
+}
+
+function button(label, kind, onClick) {
+  const el = document.createElement("button");
+  el.textContent = label;
+  if (kind) el.className = kind;
+  el.addEventListener("click", () => onClick(el));
+  return el;
+}
+
+function dot(id, state) { $(id).className = "dot " + (state || ""); }
+
+let serviceKey = "", announced = null, skew = 0;
+
+function render(s) {
+  skew = s.now - Date.now() / 1000;
+  $("version").textContent = "v" + s.version;
+  $("content").hidden = false;
+
+  const service = s.service, running = service.pid != null;
+  dot("service-dot", running ? "good" : service.installed ? "bad" : "");
+  $("service-title").textContent = running ? t("running") : service.installed ? t("stopped") : t("notInstalled");
+  $("service-detail").textContent = !service.installed ? t("notInstalledHint")
+    : [running ? t("pid", service.pid) : service.last_exit && t("lastExit", service.last_exit), t("log", service.log)].filter(Boolean).join(" · ");
+  const key = service.installed + "/" + running;
+  if (key !== serviceKey) {
+    serviceKey = key;
+    const actions = !service.installed ? [] : running
+      ? [button(t("restart"), "", el => confirm(t("confirmRestart")) && act(el, "POST", "/service/restart")),
+         button(t("stop"), "danger", el => confirm(t("confirmStop")) && act(el, "POST", "/service/stop"))]
+      : [button(t("start"), "primary", el => act(el, "POST", "/service/start"))];
+    $("service-buttons").replaceChildren(...actions);
+  }
+
+  const tailnet = s.tailnet;
+  dot("tailnet-dot", !tailnet.enabled ? "" : tailnet.listening ? "good" : "bad");
+  $("tailnet-detail").textContent = !tailnet.enabled ? t("off") + " · " + t("tailnetOffHint")
+    : tailnet.address ? t(tailnet.listening ? "listening" : "notListening", tailnet.address) : tailnet.error;
+
+  const relay = s.relay;
+  dot("relay-dot", !relay ? "" : relay.connected === true ? "good" : relay.connected === false ? "bad" : "warn");
+  $("relay-detail").textContent = !relay ? t("off") + " · " + t("relayOffHint") : [
+    relay.connected === true ? (relay.since ? t("connectedSince", lasted(s.now - relay.since)) : t("connected"))
+      : relay.connected === false ? t("notConnected") + (relay.error ? ": " + relay.error : "") : t("unknown"),
+    relay.phones === 1 ? t("relayPhones1") : t("relayPhones", relay.phones),
+    relay.url,
+  ].join(" · ");
+
+  $("devices").replaceChildren(...(s.devices.length ? s.devices.map(device => {
+    const row = document.createElement("div"); row.className = "row";
+    const grow = document.createElement("div"); grow.className = "grow";
+    const name = document.createElement("div"); name.textContent = device.name;
+    const detail = document.createElement("div"); detail.className = "dim small";
+    detail.textContent = t("pairedAgo", lasted(s.now - device.paired_at)) + " · " + t(device.relay ? "viaRelay" : "viaTailnet");
+    grow.append(name, detail);
+    const buttons = document.createElement("div"); buttons.className = "buttons";
+    buttons.append(button(t("unpair"), "danger", el => confirm(t("confirmUnpair", device.name)) && act(el, "POST", "/devices/" + encodeURIComponent(device.id) + "/revoke")));
+    row.append(grow, buttons);
+    return row;
+  }) : [Object.assign(document.createElement("div"), { className: "row dim", textContent: t("noPhones") })]));
+
+  showPairing(s.pairing);
+  if (s.paired && s.paired !== announced) notice(t("pairedNow", s.paired));
+  announced = s.paired;
+
+  const push = s.push;
+  dot("push-dot", push ? "good" : "");
+  $("push-detail").textContent = push ? t("pushOn", push.server) + (push.encrypted ? " · " + t("encrypted") : "") : t("off") + " · " + t("pushOffHint");
+  $("push-test").hidden = !push;
+
+  const signing = s.signing;
+  $("signing").hidden = !signing;
+  if (signing) {
+    const until = signing.until ? Date.parse(signing.until) / 1000 : null;
+    const left = until == null ? null : until - s.now;
+    dot("signing-dot", left == null ? "" : left <= 0 ? "bad" : left < 2 * 86400 ? "warn" : "good");
+    $("signing-title").textContent = left == null ? t("neverInstalled") : left <= 0 ? t("expired") : t("signedFor", lasted(left));
+    $("signing-detail").textContent = until == null ? "" : t("signedUntil", new Date(until * 1000).toLocaleString());
+    dot("renewal-dot", signing.renewal ? "good" : "");
+    $("renewal-detail").textContent = signing.renewal ? [t("renewalOn"), signing.last].filter(Boolean).join(" · ") : t("off") + " · " + t("renewalOffHint");
+    $("renew").hidden = !signing.renewal;
+  }
+}
+
+let pairing = null;
+function showPairing(next) {
+  if ((next && next.code) !== (pairing && pairing.code)) {
+    // The SVG is this server's own, drawn from the pairing link.
+    $("qr").innerHTML = next ? next.qr : "";
+    $("code").textContent = next ? next.code : "";
+  }
+  pairing = next;
+  $("pairing").hidden = !next;
+  $("pair-row").hidden = !!next;
+  tick();
+}
+function tick() {
+  if (pairing) $("pairing-detail").textContent = t("scan", lasted(pairing.expires_at - (Date.now() / 1000 + skew)));
+}
+setInterval(tick, 1000);
+
+$("pair-hint").textContent = t("pairHint");
+$("pair").addEventListener("click", async event => {
+  event.target.disabled = true;
+  try { showPairing(await api("POST", "/pair")); notice(""); } catch (error) { notice(error.message, true); }
+  event.target.disabled = false;
+});
+$("cancel-pairing").addEventListener("click", event => act(event.target, "DELETE", "/pair"));
+$("push-test").addEventListener("click", event => act(event.target, "POST", "/push/test", t("testSent")));
+$("renew").addEventListener("click", event => confirm(t("confirmRenew")) && act(event.target, "POST", "/renew", t("renewStarted")));
+
+let failures = 0;
+async function refresh() {
+  if (!token) return notice(t("noToken"), true);
+  try {
+    render(await api("GET", "/status"));
+    if (failures) notice("");
+    failures = 0;
+  } catch (error) {
+    failures += 1;
+    notice(error instanceof TypeError ? t("gone") : error.message, true);
+  }
+}
+refresh();
+setInterval(() => { if (!document.hidden) refresh(); }, 3000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>

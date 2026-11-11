@@ -145,7 +145,7 @@ yochi push bark https://api.day.app/<your-key>/ --encrypt
 
 </details>
 
-`yochi` 命令的其他用法见 [Gateway 指南](gateway/README.zh-CN.md)。
+`yochi dashboard` 在浏览器里打开一个页面，显示上面这些的状态并操作：配对和取消配对手机、启动和停止 Gateway。`yochi` 命令的其他用法见 [Gateway 指南](gateway/README.zh-CN.md)。
 
 ## 隐私与安全
 

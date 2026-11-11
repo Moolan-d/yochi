@@ -146,7 +146,7 @@ yochi push bark https://api.day.app/<your-key>/ --encrypt
 
 </details>
 
-Everything else the `yochi` command can do is in the [Gateway guide](gateway/README.md).
+`yochi dashboard` opens a page in your browser that shows how all of this stands and drives it: pair and unpair phones, start and stop the Gateway. Everything else the `yochi` command can do is in the [Gateway guide](gateway/README.md).
 
 ## Privacy and security
 

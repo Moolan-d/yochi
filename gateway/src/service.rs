@@ -143,6 +143,28 @@ pub fn uninstall(label: &str) -> Result<bool> {
     Ok(loaded || existed)
 }
 
+/// Starts an installed LaunchAgent that was stopped; a running one is left alone.
+pub fn start(label: &str) -> Result<()> {
+    let plist = plist_path(label)?;
+    if !plist.exists() {
+        bail!("the LaunchAgent {label} is not installed; `yochi service install` installs it");
+    }
+    if launchctl(&["print", &target(label)?]).is_err() {
+        launchctl(&["bootstrap", &domain()?, &plist.display().to_string()])?;
+    }
+    launchctl(&["kickstart", &target(label)?]).map(drop)
+}
+
+/// Stops a LaunchAgent until `start` or the next login; it stays installed.
+pub fn stop(label: &str) -> Result<()> {
+    launchctl(&["bootout", &target(label)?]).map(drop)
+}
+
+/// Stops a loaded LaunchAgent's process, if any, and starts it again.
+pub fn restart(label: &str) -> Result<()> {
+    launchctl(&["kickstart", "-k", &target(label)?]).map(drop)
+}
+
 pub struct Status {
     pub plist: Option<PathBuf>,
     pub running: Option<u32>,

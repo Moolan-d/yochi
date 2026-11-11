@@ -4,6 +4,7 @@ mod changes;
 mod commands;
 mod conversation;
 mod core;
+mod dashboard;
 mod devices;
 mod exec;
 mod following;
@@ -104,6 +105,21 @@ enum Command {
     Push {
         #[command(subcommand)]
         action: PushAction,
+    },
+    /// Open a page in the browser that shows how the Gateway stands and drives
+    /// it: pair and unpair phones, start and stop the LaunchAgent.
+    Dashboard {
+        #[command(flatten)]
+        listen: ListenArg,
+        /// The port on 127.0.0.1 to serve the page on; any free one by default.
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        /// Only print the page's address.
+        #[arg(long)]
+        no_open: bool,
+        /// The Gateway's LaunchAgent, if not the usual one.
+        #[arg(long, default_value = service::LABEL, hide = true)]
+        label: String,
     },
     /// Run the Gateway at login, as a LaunchAgent.
     Service {
@@ -236,6 +252,9 @@ async fn main() -> Result<()> {
         Command::Tailnet { action } => tailnet_command(&store, action).await,
         Command::Relay { action } => relay_command(&store, action),
         Command::Push { action } => push_command(&store, action).await,
+        Command::Dashboard { listen, port, no_open, label } => {
+            dashboard::run(store, dashboard::Options { port, open: !no_open, label, listen: listen.listen }).await
+        }
         Command::Service { action, label } => match action {
             ServiceAction::Install(serve) => install(&label, serve.listen.listen, args.state_dir, &serve.hc).await,
             ServiceAction::Uninstall => {
