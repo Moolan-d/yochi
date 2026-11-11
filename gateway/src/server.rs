@@ -323,7 +323,7 @@ async fn multiplex(
     ws: WebSocketUpgrade,
 ) -> Response {
     let relayed = via_relay.as_ref().map(|Extension(RelayDevice(device))| device.clone());
-    let Some(caller) = authorize(&headers, via_relay, &state.devices.borrow()) else {
+    let Some(caller) = state.caller(&headers, via_relay) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let pass = match (relayed, headers.get(header::AUTHORIZATION)) {
@@ -409,7 +409,7 @@ async fn upgrade(
     Query(query): Query<LangQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
+    let Some(device) = state.caller(&headers, via_relay) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let lang = Lang::from_tag(query.lang.as_deref());
@@ -469,7 +469,7 @@ async fn observe(
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
+    let Some(device) = state.caller(&headers, via_relay) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if let Some(token) = &query.resume {
@@ -798,7 +798,7 @@ async fn screen(
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
+    let Some(device) = state.caller(&headers, via_relay) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(size) = session_size(&state.view.borrow(), &query.session) else {
@@ -897,7 +897,7 @@ async fn conversation(
     Query(query): Query<ObserveQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(device) = authorize(&headers, via_relay, &state.devices.borrow()) else {
+    let Some(device) = state.caller(&headers, via_relay) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if session_size(&state.view.borrow(), &query.session).is_none() {
@@ -978,6 +978,15 @@ async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: Stri
                 () = access.lost() => return,
             }
         }
+    }
+}
+
+impl AppState {
+    /// The paired device a request comes from, noted as having connected.
+    fn caller(&self, headers: &HeaderMap, via_relay: Option<Extension<RelayDevice>>) -> Option<Caller> {
+        let caller = authorize(headers, via_relay, &self.devices.borrow())?;
+        self.store.saw(&caller.device);
+        Some(caller)
     }
 }
 

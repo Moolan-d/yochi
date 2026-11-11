@@ -55,7 +55,7 @@ yochi [OPTIONS] [COMMAND]
 | --- | --- |
 | `yochi` / `yochi serve` | Run the Gateway in the foreground (the default) |
 | `yochi pair` | Show a single-use pairing code and QR code, valid for five minutes |
-| `yochi devices` | List paired devices |
+| `yochi devices` | List paired devices, and when each last connected |
 | `yochi revoke <ID>` | Unpair a device. Its open connections close within seconds |
 | `yochi tailnet on` | Listen on the tailnet whenever this Mac is on it (the default) |
 | `yochi tailnet off` | Stop listening on the tailnet and close its connections. Phones then come in only through the Relay |

@@ -88,7 +88,12 @@ fn resolve_dir(home: &std::path::Path, legacy_agent: bool) -> Result<PathBuf> {
 
 pub struct Store {
     dir: PathBuf,
+    /// When this process last noted each device connecting.
+    noted: std::sync::Mutex<std::collections::HashMap<String, u64>>,
 }
+
+/// A device that keeps connecting is noted this often, not every time.
+const SEEN_EVERY: u64 = 60;
 
 impl Store {
     /// `~/Library/Application Support/Yochi`. Pairings kept under the
@@ -107,7 +112,7 @@ impl Store {
             .mode(0o700)
             .create(&dir)
             .with_context(|| format!("creating {}", dir.display()))?;
-        Ok(Self { dir })
+        Ok(Self { dir, noted: Default::default() })
     }
 
     pub fn path(&self) -> PathBuf {
@@ -253,10 +258,46 @@ impl Store {
     }
 
     pub fn revoke(&self, id: &str) -> Result<Option<Device>> {
-        self.update(|state| {
+        let revoked = self.update(|state| {
             let index = state.devices.iter().position(|device| device.id == id)?;
             Some(state.devices.remove(index))
-        })
+        })?;
+        if revoked.is_some() {
+            let mut seen = self.last_seen();
+            if seen.remove(id).is_some() {
+                let _ = self.write_seen(&seen);
+            }
+        }
+        Ok(revoked)
+    }
+
+    /// Notes that device `id` connected just now. It is kept apart from the
+    /// pairings, which hold secrets and are watched for changes, and a write
+    /// that fails only leaves the time stale.
+    pub fn saw(&self, id: &str) {
+        let now = now();
+        {
+            let mut noted = self.noted.lock().unwrap();
+            if noted.get(id).is_some_and(|at| now.saturating_sub(*at) < SEEN_EVERY) {
+                return;
+            }
+            noted.insert(id.to_owned(), now);
+        }
+        let mut seen = self.last_seen();
+        seen.insert(id.to_owned(), now);
+        let _ = self.write_seen(&seen);
+    }
+
+    /// When each device last connected, in Unix seconds; a device that has
+    /// not connected since this was first recorded is absent.
+    pub fn last_seen(&self) -> std::collections::HashMap<String, u64> {
+        fs::read(self.dir.join("seen.json")).ok().and_then(|text| serde_json::from_slice(&text).ok()).unwrap_or_default()
+    }
+
+    fn write_seen(&self, seen: &std::collections::HashMap<String, u64>) -> Result<()> {
+        let tmp = self.dir.join("seen.json.tmp");
+        fs::write(&tmp, serde_json::to_vec(seen)?)?;
+        Ok(fs::rename(&tmp, self.dir.join("seen.json"))?)
     }
 
     fn read(&self) -> Result<State> {
@@ -424,6 +465,25 @@ mod tests {
         let store = store();
         let first = store.gateway_key().unwrap();
         assert_eq!(store.gateway_key().unwrap().public, first.public);
+    }
+
+    #[test]
+    fn connecting_is_noted_until_the_device_is_revoked() {
+        let store = store();
+        let code = store.offer().unwrap();
+        let (device, _) = store.pair(&code, "iPhone").unwrap().unwrap();
+        assert!(store.last_seen().is_empty());
+        store.saw(&device.id);
+        let at = store.last_seen()[&device.id];
+        assert!(now().saturating_sub(at) < 5);
+        // Within the minute, a second connection writes nothing.
+        fs::remove_file(store.dir().join("seen.json")).unwrap();
+        store.saw(&device.id);
+        assert!(store.last_seen().is_empty());
+
+        store.write_seen(&[(device.id.clone(), at), ("other".to_owned(), 1)].into()).unwrap();
+        store.revoke(&device.id).unwrap().unwrap();
+        assert_eq!(store.last_seen(), [("other".to_owned(), 1)].into());
     }
 
     #[test]

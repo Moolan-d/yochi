@@ -190,6 +190,7 @@ async fn snapshot(dashboard: &Dashboard) -> Result<Value> {
         json!({ "enabled": false, "address": null, "listening": false })
     };
     let devices = dashboard.store.devices()?;
+    let seen = dashboard.store.last_seen();
     let relay = relay::Config::load(dir)?.map(|config| {
         let status = relay::Status::load(dir).filter(|status| status.url == config.url);
         let connected = crate::relay_connected(dir, &config);
@@ -220,6 +221,7 @@ async fn snapshot(dashboard: &Dashboard) -> Result<Value> {
             "id": device.id,
             "name": device.name,
             "paired_at": device.paired_at,
+            "seen_at": seen.get(&device.id),
             "relay": device.uses_relay(),
         })).collect::<Vec<_>>(),
         "signing": signing(),

@@ -55,7 +55,7 @@ yochi [OPTIONS] [COMMAND]
 | --- | --- |
 | `yochi` / `yochi serve` | 在前台运行 Gateway（默认） |
 | `yochi pair` | 显示单次有效的配对码和二维码，5 分钟内有效 |
-| `yochi devices` | 列出已配对的设备 |
+| `yochi devices` | 列出已配对的设备，以及每台上次连接的时间 |
 | `yochi revoke <ID>` | 取消某台设备的配对，它已建立的连接几秒内关闭 |
 | `yochi tailnet on` | Mac 在 tailnet 上时就在 tailnet 上监听（默认） |
 | `yochi tailnet off` | 不在 tailnet 上监听，并关闭已有的 tailnet 连接，手机只能经 Relay 连接 |

@@ -239,7 +239,7 @@ async fn main() -> Result<()> {
         }
         Command::Pair { listen, link } => pair(&store, listen.listen, link).await,
         Command::Devices => {
-            list(&store.devices()?);
+            list(&store.devices()?, &store.last_seen());
             Ok(())
         }
         Command::Revoke { id } => match store.revoke(&id)? {
@@ -636,15 +636,17 @@ fn qr(text: &str) -> Result<String> {
     Ok(out)
 }
 
-fn list(devices: &[Device]) {
+fn list(devices: &[Device], seen: &std::collections::HashMap<String, u64>) {
     if devices.is_empty() {
         println!("No paired devices. Pair one with `yochi pair`.");
         return;
     }
     let width = devices.iter().map(|device| device.name.chars().count()).max().unwrap_or(0).max(4);
-    println!("{:<8}  {:<width$}  PAIRED", "ID", "NAME");
+    println!("{:<8}  {:<width$}  {:<14}  LAST CONNECTED", "ID", "NAME", "PAIRED");
+    let now = devices::now();
     for device in devices {
-        println!("{:<8}  {:<width$}  {}", device.id, device.name, ago(devices::now().saturating_sub(device.paired_at)));
+        let connected = seen.get(&device.id).map_or_else(|| "-".to_owned(), |at| ago(now.saturating_sub(*at)));
+        println!("{:<8}  {:<width$}  {:<14}  {connected}", device.id, device.name, ago(now.saturating_sub(device.paired_at)));
     }
 }
 
