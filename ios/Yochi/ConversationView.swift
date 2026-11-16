@@ -281,6 +281,52 @@ struct ConversationPane: View {
     }
 }
 
+/// Quotes a message into the composer; set by the page that owns it.
+private struct QuoteReplyKey: EnvironmentKey {
+    static let defaultValue: (@MainActor @Sendable (String) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var quoteReply: (@MainActor @Sendable (String) -> Void)? {
+        get { self[QuoteReplyKey.self] }
+        set { self[QuoteReplyKey.self] = newValue }
+    }
+}
+
+enum QuoteReply {
+    /// The draft with `text` quoted above what was already typed, as
+    /// Markdown: `> ` on every line, a blank line, then the draft.
+    static func draft(quoting text: String, into draft: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return draft }
+        let quote = trimmed
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.isEmpty ? ">" : "> \($0)" }
+            .joined(separator: "\n")
+        return quote + "\n\n" + draft
+    }
+}
+
+/// Copy, quote and share for one message, on a long press.
+private struct MessageMenu: ViewModifier {
+    let text: String
+    @Environment(\.quoteReply) private var quoteReply
+
+    func body(content: Content) -> some View {
+        if text.isEmpty {
+            content
+        } else {
+            content.contextMenu {
+                Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }
+                if let quoteReply {
+                    Button("Quote Reply", systemImage: "quote.opening") { quoteReply(text) }
+                }
+                ShareLink(item: text)
+            }
+        }
+    }
+}
+
 struct ConversationRow: View {
     let item: ConversationItem
     /// The newest to-do list opens; earlier ones fold.
@@ -302,11 +348,13 @@ struct ConversationRow: View {
                     .background(Color.accentColor, in: .rect(cornerRadius: 18, style: .continuous))
                     .textSelection(.enabled)
             }
+            .modifier(MessageMenu(text: item.text ?? ""))
             .accessibilityElement(children: .combine)
             .accessibilityLabel("You: \(item.text ?? "")")
         case .agent:
             AgentReply(text: item.text ?? "", arrival: arrival)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(MessageMenu(text: item.text ?? ""))
         case .tool:
             if let edit = item.edit {
                 EditRow(item: item, edit: edit)

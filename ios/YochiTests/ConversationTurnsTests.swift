@@ -60,3 +60,18 @@ final class ConversationTurnsTests: XCTestCase {
         XCTAssertTrue(ConversationTurns.entries([], inProgress: false).isEmpty)
     }
 }
+
+final class QuoteReplyTests: XCTestCase {
+    func testQuotesEveryLineAboveTheDraft() {
+        XCTAssertEqual(QuoteReply.draft(quoting: "one\ntwo", into: ""), "> one\n> two\n\n")
+        XCTAssertEqual(QuoteReply.draft(quoting: "hi", into: "and also"), "> hi\n\nand also")
+    }
+
+    func testBlankLinesStayInsideTheQuote() {
+        XCTAssertEqual(QuoteReply.draft(quoting: "a\n\nb\n", into: ""), "> a\n>\n> b\n\n")
+    }
+
+    func testNothingToQuoteLeavesTheDraft() {
+        XCTAssertEqual(QuoteReply.draft(quoting: " \n", into: "keep"), "keep")
+    }
+}

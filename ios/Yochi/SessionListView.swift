@@ -15,7 +15,9 @@ struct InboxScreen: View {
             inbox: makeInbox(sessions: client.sessions, spaces: client.spaces, seen: seen.turns),
             queued: { client.queuedMessage(session: $0) != nil },
             newSession: client.phase == .connected ? newSession : nil,
-            showsEmpty: client.listIsSettled
+            showsEmpty: client.listIsSettled,
+            markRead: { seen.record($0.session) },
+            stop: { row in Task { _ = await client.interrupt(session: row.id) } }
         ) {
             StaleBanner(client: client)
         }

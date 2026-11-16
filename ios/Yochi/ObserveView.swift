@@ -159,6 +159,10 @@ struct ObserveView: View {
                                  keyboardShown: composerFocused) {
                     conversation.start(config, session: session.id)
                 }
+                .environment(\.quoteReply) { text in
+                    draft = QuoteReply.draft(quoting: text, into: draft)
+                    composerFocused = true
+                }
             } else {
                 TerminalPane(session: session.id, config: config, model: feeds.terminal, grid: $grid)
             }

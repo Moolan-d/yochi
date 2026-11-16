@@ -19,7 +19,7 @@ struct SampleHomeView: View {
             Tab("Inbox", systemImage: "tray.fill", value: HomeTab.inbox) {
                 stack($inboxPath, title: "Inbox") {
                     InboxList(inbox: makeInbox(sessions: data.sessions, spaces: data.spaces, seen: seen),
-                              queued: { $0 == "t4" }, newSession: {}) {}
+                              queued: { $0 == "t4" }, newSession: {}, markRead: { _ in }, stop: { _ in }) {}
                 }
             }
             .badge(makeInbox(sessions: data.sessions, spaces: data.spaces, seen: seen).badge)

@@ -11,6 +11,9 @@ struct InboxList<Banner: View>: View {
     /// False while the screen says why it has nothing yet (connecting and
     /// the like), so the two never draw over each other.
     var showsEmpty = true
+    /// What a long press on an Agent offers; nil leaves the action out.
+    var markRead: ((HomeRow) -> Void)?
+    var stop: ((HomeRow) -> Void)?
     @ViewBuilder var banner: Banner
 
     /// The search field's text, as typed.
@@ -104,6 +107,14 @@ struct InboxList<Banner: View>: View {
         }
         .accessibilityIdentifier("session-\(row.id)")
         .homeRow()
+        .contextMenu {
+            if row.unseen, let markRead {
+                Button("Mark as Read", systemImage: "checkmark.circle") { markRead(row) }
+            }
+            if row.session.status?.state == "working", let stop {
+                Button("Stop", systemImage: "stop.circle") { stop(row) }
+            }
+        }
     }
 
     private func terminalLink(_ row: HomeRow) -> some View {
