@@ -45,7 +45,7 @@ struct SpacesScreen: View {
     var body: some View {
         let _ = Perf.count("SpacesScreen")
         SpacesList(
-            board: makeSpacesBoard(sessions: client.sessions, spaces: client.spaces, seen: seen.turns),
+            board: makeSpacesBoard(sessions: client.sessions, spaces: client.spaces, seen: seen.turns, machines: client.machines),
             newSession: client.phase == .connected ? newSession : nil,
             showsEmpty: client.listIsSettled
         ) {

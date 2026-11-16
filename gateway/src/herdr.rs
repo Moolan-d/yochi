@@ -24,6 +24,72 @@ pub struct CoreView {
     /// Herdr's spaces holding those sessions; machines whose layout can't be
     /// read have none, and the app groups their sessions by machine.
     pub spaces: Vec<Space>,
+    /// The machines this core has added and how each stands; empty when there
+    /// are none or the core can't list them.
+    pub machines: Vec<MachineStatus>,
+}
+
+/// How one added machine stands, from core's `machine.list`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct MachineStatus {
+    pub name: String,
+    /// connecting, connected, needs_login or unreachable, as core says it;
+    /// the app treats a word it doesn't know as unremarkable.
+    pub state: String,
+    /// Whether its programs keep running after the last logout there
+    /// (systemd lingering); None when core can't tell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keeps_running: Option<bool>,
+    /// Since when it isn't connected (the Mac's clock, in milliseconds).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_ms: Option<u64>,
+}
+
+/// The machines in a `machine.list` result; ones without a name or a state are left out.
+pub fn parse_machines(result: &Value) -> Vec<MachineStatus> {
+    result["machines"]
+        .as_array()
+        .map(|machines| {
+            machines
+                .iter()
+                .filter_map(|machine| {
+                    Some(MachineStatus {
+                        name: machine["name"].as_str().filter(|name| !name.is_empty())?.to_owned(),
+                        state: machine["state"].as_str().filter(|state| !state.is_empty())?.to_owned(),
+                        keeps_running: machine["keeps_running_after_logout"].as_bool(),
+                        since_ms: machine["since_ms"].as_u64(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Asks core for its machines every few seconds, while the connection lives
+/// (the event stream says nothing of a machine that needs a login).
+struct MachinePoller(tokio::task::JoinHandle<()>);
+
+impl Drop for MachinePoller {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+const MACHINES_EVERY: Duration = Duration::from_secs(10);
+
+fn poll_machines(hc: String, updates: mpsc::UnboundedSender<Vec<MachineStatus>>) -> MachinePoller {
+    MachinePoller(tokio::spawn(async move {
+        loop {
+            let listed = tokio::time::timeout(Duration::from_secs(5), crate::core::request(&hc, "machine.list", json!({}))).await;
+            if let Ok(Ok(reply)) = listed
+                && reply.get("error").is_none()
+                && updates.send(parse_machines(&reply["result"])).is_err()
+            {
+                return;
+            }
+            tokio::time::sleep(MACHINES_EVERY).await;
+        }
+    }))
 }
 
 impl CoreView {
@@ -68,6 +134,9 @@ async fn follow(hc: &str, tx: &watch::Sender<CoreView>) -> Result<()> {
     let mut terminals = Terminals::default();
     let mut layouts = Layouts::default();
     let (read_tx, mut reads) = mpsc::unbounded_channel();
+    let (machine_tx, mut machine_updates) = mpsc::unbounded_channel();
+    let mut machine_states: Vec<MachineStatus> = Vec::new();
+    let mut _poller = None;
     loop {
         tokio::select! {
             line = lines.next_line() => {
@@ -85,6 +154,10 @@ async fn follow(hc: &str, tx: &watch::Sender<CoreView>) -> Result<()> {
                         }
                         core = Some(hello["core"]["name"].as_str().unwrap_or("herdr-core").to_owned());
                         layouts.supported = hello["methods"].as_array().is_some_and(|m| m.iter().any(|m| m == "doc.get"));
+                        // A core without `machine.list` has no machines to report.
+                        if hello["methods"].as_array().is_some_and(|m| m.iter().any(|m| m == "machine.list")) {
+                            _poller = Some(poll_machines(hc.to_owned(), machine_tx.clone()));
+                        }
                         continue;
                     }
                     (Some(2), _) => {
@@ -103,6 +176,7 @@ async fn follow(hc: &str, tx: &watch::Sender<CoreView>) -> Result<()> {
                 }
             }
             Some((machine, document)) = reads.recv() => layouts.update(machine, document),
+            Some(listed) = machine_updates.recv() => machine_states = listed,
         }
         let machines = layouts.due(&terminals);
         if !machines.is_empty() {
@@ -115,7 +189,7 @@ async fn follow(hc: &str, tx: &watch::Sender<CoreView>) -> Result<()> {
         }
         let sessions = terminals.sessions();
         let spaces = layout::arrange(layouts.spaces(), &sessions);
-        let view = CoreView { core: core.clone(), sessions, spaces };
+        let view = CoreView { core: core.clone(), sessions, spaces, machines: machine_states.clone() };
         tx.send_if_modified(|current| {
             let changed = *current != view;
             *current = view;
@@ -314,6 +388,34 @@ fn merge(record: &mut Map<String, Value>, data: &Value) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn machines_are_read_from_the_list() {
+        let result = json!({"machines": [
+            {"name": "vps-us", "state": "needs_login", "since_ms": 1762156800000u64, "keeps_running_after_logout": false, "target": "x"},
+            {"name": "home", "state": "connected", "keeps_running_after_logout": null},
+            {"name": "", "state": "connected"},
+            {"state": "connected"},
+            {"name": "odd"}
+        ]});
+        assert_eq!(
+            parse_machines(&result),
+            vec![
+                MachineStatus { name: "vps-us".into(), state: "needs_login".into(), keeps_running: Some(false), since_ms: Some(1762156800000) },
+                MachineStatus { name: "home".into(), state: "connected".into(), keeps_running: None, since_ms: None },
+            ]
+        );
+        assert!(parse_machines(&json!({})).is_empty());
+        assert!(parse_machines(&Value::Null).is_empty());
+    }
+
+    #[test]
+    fn a_machine_serializes_without_what_core_did_not_say() {
+        let status = MachineStatus { name: "home".into(), state: "connected".into(), keeps_running: None, since_ms: None };
+        assert_eq!(serde_json::to_value(&status).unwrap(), json!({"name": "home", "state": "connected"}));
+        let status = MachineStatus { name: "vps".into(), state: "needs_login".into(), keeps_running: Some(false), since_ms: Some(5) };
+        assert_eq!(serde_json::to_value(&status).unwrap(), json!({"name": "vps", "state": "needs_login", "keeps_running": false, "since_ms": 5}));
+    }
+
     use super::*;
 
     fn live(address: &str) -> Value {

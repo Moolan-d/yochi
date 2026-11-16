@@ -83,6 +83,8 @@ struct MachineSection: Identifiable, Equatable {
     let spaces: [SpaceEntry]
     /// Agents and terminals in no Herdr space.
     let others: [HomeRow]
+    /// What core says of this remote machine, when that is worth a line.
+    var status: MachineState?
 
     var id: String { machine ?? "" }
 
@@ -92,7 +94,7 @@ struct MachineSection: Identifiable, Equatable {
 /// The Spaces tab: per machine (the Gateway's own Mac first), its spaces in
 /// Herdr's order with their tabs, then what is in no space. A space or tab
 /// with no live terminal is left out.
-func makeSpacesBoard(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:]) -> [MachineSection] {
+func makeSpacesBoard(sessions: [Session], spaces: [Space], seen: [String: UInt64] = [:], machines states: [MachineState] = []) -> [MachineSection] {
     let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     var placed = Set<String>()
     var entries: [SpaceEntry] = []
@@ -113,13 +115,16 @@ func makeSpacesBoard(sessions: [Session], spaces: [Space], seen: [String: UInt64
     }
 
     let others = Dictionary(grouping: sessions.filter { !placed.contains($0.id) }, by: \.machine)
-    let machines = Set(entries.map(\.machine)).union(others.keys)
+    // A machine that needs a login may have no terminal left; it still shows.
+    let notable = Dictionary(states.filter(\.needsAttention).map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    let machines = Set(entries.map(\.machine)).union(others.keys).union(states.filter(\.needsLogin).map { Optional($0.name) })
     return machines.sorted { ($0 == nil ? "" : "\u{1}" + ($0 ?? "")) < ($1 == nil ? "" : "\u{1}" + ($1 ?? "")) }
         .map { machine in
             MachineSection(
                 machine: machine,
                 spaces: entries.filter { $0.machine == machine },
-                others: childrenAfterParents(others[machine] ?? []).map { homeRow($0, space: nil, tab: nil, seen: seen) })
+                others: childrenAfterParents(others[machine] ?? []).map { homeRow($0, space: nil, tab: nil, seen: seen) },
+                status: machine.flatMap { notable[$0] })
         }
 }
 

@@ -20,12 +20,16 @@ struct SpacesList<Banner: View>: View {
             if flat {
                 Section {
                     ForEach(board) { section in
-                        OthersRow(section: section, title: section.title, symbol: machineSymbol(section.machine))
+                        if let status = section.status { MachineNotice(machine: section.title, status: status).homeRow() }
+                        if !section.others.isEmpty || section.status == nil {
+                            OthersRow(section: section, title: section.title, symbol: machineSymbol(section.machine))
+                        }
                     }
                 }
             } else {
                 ForEach(board) { section in
                     Section {
+                        if let status = section.status { MachineNotice(machine: section.title, status: status).homeRow() }
                         ForEach(section.spaces) { space in
                             NavigationLink(value: Route.space(space.id)) {
                                 SpaceRow(space: space)
@@ -332,5 +336,32 @@ struct OtherTerminalsView: View {
         .homeListStyle()
         .navigationTitle(flat ? title : String(localized: "Other Terminals"))
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// What core says of a remote machine that needs a look: it wants a login,
+/// or its programs stop when the last login there ends.
+struct MachineNotice: View {
+    let machine: String
+    let status: MachineState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if status.needsLogin {
+                Label("Needs login", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .foregroundStyle(Color.warnText)
+            }
+            if status.stopsAtLogout {
+                Label("Programs stop when you log out", systemImage: "power")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.subheadline)
+        .frame(minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([machine, status.needsLogin ? String(localized: "Needs login") : nil,
+                             status.stopsAtLogout ? String(localized: "Programs stop when you log out") : nil]
+            .compactMap { $0 }.joined(separator: String(localized: "detail.separator", defaultValue: ", ")))
+        .accessibilityIdentifier("machineNotice-\(machine)")
     }
 }

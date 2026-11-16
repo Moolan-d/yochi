@@ -4752,6 +4752,26 @@
           }
         }
       }
+    },
+    "Needs login" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要登录"
+          }
+        }
+      }
+    },
+    "Programs stop when you log out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登出后程序会停止"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

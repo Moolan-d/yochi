@@ -71,6 +71,8 @@ final class GatewayClient {
     private(set) var coreConnected = false
     private(set) var sessions: [Session] = []
     private(set) var spaces: [Space] = []
+    /// How each machine core has added stands; empty from an older Gateway.
+    private(set) var machines: [MachineState] = []
     /// Latest Delivery per host + session; memory only, so leaving and returning
     /// to a terminal keeps its status without restoring stale drafts.
     private(set) var deliveries: [String: AgentDelivery] = [:]
@@ -426,6 +428,7 @@ final class GatewayClient {
                     // Unpaired: what this device saw before is no longer its to show.
                     sessions = []
                     spaces = []
+                    machines = []
                     coreName = nil
                     phase = .unauthorized
                     return
@@ -472,7 +475,7 @@ final class GatewayClient {
                 // A phone that paired through the Relay learns the tailnet
                 // here; one whose Gateway left the tailnet stops trying it.
                 if (host ?? "") != self.host { onTailnet?(host ?? "") }
-            case .sessions(let core, let connected, let sessions, let received):
+            case .sessions(let core, let connected, let sessions, let received, let machines):
                 // Every page reads these; an unchanged list redraws nothing.
                 if coreName != core { coreName = core }
                 if coreConnected != connected { coreConnected = connected }
@@ -483,6 +486,7 @@ final class GatewayClient {
                 let spaces = received
                 #endif
                 if self.spaces != spaces { self.spaces = spaces }
+                if self.machines != machines { self.machines = machines }
                 releaseQueued()
             case .sent(let id, let turn, let status, let started):
                 complete(id: id, with: .sent(turn: turn, status: status, started: started))

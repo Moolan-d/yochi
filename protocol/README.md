@@ -67,6 +67,11 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway public key>&relay=<re
 - Only live sessions are included; finished ones are not returned.
 - `cols` / `rows`: the terminal's current grid size (omitted in the examples).
 - `spaces`: Herdr's Spaces and Tabs, in Herdr's order, this Mac first; omitted in the examples. An old Gateway doesn't send it, and the app treats it as empty.
+- `machines`: how each remote machine core has added stands, omitted when there are none or core can't list them (an old Gateway, or core without `machine.list`, doesn't send it; the app treats it as empty). Each entry has `name` (as in `machine` above) and `state` as core says it (`connecting`, `connected`, `needs_login` or `unreachable`; the app treats a word it doesn't know as unremarkable), and, when core says so, `keeps_running` (`false`: programs there stop when the last login there ends, systemd lingering is off; omitted when core can't tell) and `since_ms` (since when it isn't connected, the Mac's clock, in milliseconds). The Gateway reads it with `machine.list`, which only reads, every ten seconds.
+
+```jsonc
+"machines": [{"name": "vps-us", "state": "needs_login", "keeps_running": false, "since_ms": 1762156800000}]
+```
 
 ```jsonc
 "spaces": [

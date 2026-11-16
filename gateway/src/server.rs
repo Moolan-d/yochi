@@ -131,7 +131,15 @@ enum ServerMessage<'a> {
     /// tailnet is off. Sent after `hello` and on each change, so a phone that
     /// paired through the Relay learns the tailnet too.
     Tailnet { host: Option<SocketAddr> },
-    Sessions { core: Option<&'a str>, connected: bool, sessions: Vec<Session>, spaces: &'a [Space] },
+    Sessions {
+        core: Option<&'a str>,
+        connected: bool,
+        sessions: Vec<Session>,
+        spaces: &'a [Space],
+        /// How each machine core has added stands; omitted when there are none.
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        machines: &'a [crate::herdr::MachineStatus],
+    },
     /// Observing began; render a grid of this size. A resumable stream also
     /// gives the token to come back with and how long it waits for that.
     Attached {
@@ -1052,6 +1060,7 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller, lang: Lang
                     connected: current.connected(),
                     sessions: about.borrow_and_update().fill(&current.sessions),
                     spaces: &current.spaces,
+                    machines: &current.machines,
                 })
             };
             let Ok(message) = message else { return };
@@ -1395,7 +1404,7 @@ while True:
         let log = dir.join("hc.log");
 
         let session = Session::from_record(&serde_json::json!({"address": "t1", "state": "live", "cwd": "/", "cols": 120, "rows": 40})).unwrap();
-        let (_view_sender, view) = watch::channel(CoreView { core: Some("mac".into()), sessions: vec![session], spaces: vec![] });
+        let (_view_sender, view) = watch::channel(CoreView { core: Some("mac".into()), sessions: vec![session], spaces: vec![], machines: vec![] });
         let (_about_sender, about) = watch::channel(About::default());
         let (_tailnet_sender, tailnet) = watch::channel(tailnet::State::At("127.0.0.1:7420".parse().unwrap()));
         let devices = Arc::new(watch::Sender::new(store.devices().unwrap()));

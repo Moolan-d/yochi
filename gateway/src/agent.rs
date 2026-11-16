@@ -335,6 +335,7 @@ mod tests {
                 pid: None,
             }],
             spaces: Vec::new(),
+            machines: Vec::new(),
         }
     }
 

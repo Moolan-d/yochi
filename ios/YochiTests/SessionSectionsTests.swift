@@ -30,7 +30,7 @@ final class SessionSectionsTests: XCTestCase {
 
     func testSessionsMessageWithoutSpacesDecodes() throws {
         let data = Data(#"{"type":"sessions","core":"mac","connected":true,"sessions":[]}"#.utf8)
-        guard case .sessions(_, _, _, let spaces) = try JSONDecoder().decode(ServerMessage.self, from: data) else {
+        guard case .sessions(_, _, _, let spaces, _) = try JSONDecoder().decode(ServerMessage.self, from: data) else {
             return XCTFail("not a sessions message")
         }
         XCTAssertEqual(spaces, [])
@@ -384,6 +384,37 @@ final class SessionSectionsTests: XCTestCase {
         XCTAssertNil(spaceHolding("", in: spaces))
         XCTAssertNil(spaceHolding("app", in: spaces))
     }
+
+    func testMachineStatusDecodesAndOldGatewaysSendNone() throws {
+        let with = Data(#"""
+        {"type":"sessions","core":"mac","connected":true,"sessions":[],"machines":[
+          {"name":"vps","state":"needs_login","keeps_running":false,"since_ms":5},
+          {"name":"home","state":"connected"},{"nonsense":true}]}
+        """#.utf8)
+        guard case .sessions(_, _, _, _, let machines) = try JSONDecoder().decode(ServerMessage.self, from: with) else {
+            return XCTFail("not a session list")
+        }
+        XCTAssertEqual(machines, [MachineState(name: "vps", state: "needs_login", keepsRunning: false), MachineState(name: "home", state: "connected")])
+        XCTAssertTrue(machines[0].needsLogin && machines[0].stopsAtLogout && machines[0].needsAttention)
+        XCTAssertFalse(machines[1].needsAttention)
+        let without = Data(#"{"type":"sessions","core":"mac","connected":true,"sessions":[]}"#.utf8)
+        guard case .sessions(_, _, _, _, let none) = try JSONDecoder().decode(ServerMessage.self, from: without) else {
+            return XCTFail("not a session list")
+        }
+        XCTAssertTrue(none.isEmpty)
+    }
+
+    func testTheSpacesPageNotesAMachineThatNeedsAttention() throws {
+        let sessions = [try agent("t1"), try agent("v1").with(machine: "vps")]
+        let states = [MachineState(name: "vps", state: "connected", keepsRunning: false), MachineState(name: "gone", state: "needs_login"),
+                      MachineState(name: "fine", state: "connected")]
+        let board = makeSpacesBoard(sessions: sessions, spaces: [], machines: states)
+        XCTAssertEqual(board.map(\.machine), [nil, "gone", "vps"], "a machine needing login shows without terminals; a fine one doesn't")
+        XCTAssertNil(board[0].status)
+        XCTAssertTrue(board[1].status?.needsLogin == true)
+        XCTAssertTrue(board[2].status?.stopsAtLogout == true)
+        XCTAssertTrue(makeSpacesBoard(sessions: sessions, spaces: []).allSatisfy { $0.status == nil })
+    }
 }
 
 private extension Session {
@@ -396,4 +427,5 @@ private extension Session {
         if let repo { json["repo"] = ["name": repo.name, "worktree": repo.worktree as Any? ?? NSNull()] }
         return try JSONDecoder().decode(Session.self, from: JSONSerialization.data(withJSONObject: json))
     }
+
 }

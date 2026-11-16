@@ -8,6 +8,12 @@ import SwiftUI
 struct SampleHomeView: View {
     static var requested: Bool { ProcessInfo.processInfo.environment["YOCHI_SAMPLE_HOME"] != nil }
 
+    /// SIMCTL_CHILD_YOCHI_SAMPLE_MACHINES=1: the remote machine needs a login.
+    static var machines: [MachineState] {
+        ProcessInfo.processInfo.environment["YOCHI_SAMPLE_MACHINES"] == nil ? []
+            : [MachineState(name: "vps", state: "needs_login", keepsRunning: false)]
+    }
+
     @State private var data = Self.data(now: .now)
     @State private var tab: HomeTab = ProcessInfo.processInfo.environment["YOCHI_SAMPLE_TAB"] == "spaces" ? .spaces : .inbox
     @State private var inboxPath: [Route] = []
@@ -25,7 +31,7 @@ struct SampleHomeView: View {
             .badge(makeInbox(sessions: data.sessions, spaces: data.spaces, seen: seen).badge)
             Tab("Spaces", systemImage: "square.grid.2x2.fill", value: HomeTab.spaces) {
                 stack($spacesPath, title: "Spaces") {
-                    SpacesList(board: makeSpacesBoard(sessions: data.sessions, spaces: data.spaces, seen: seen),
+                    SpacesList(board: makeSpacesBoard(sessions: data.sessions, spaces: data.spaces, seen: seen, machines: Self.machines),
                                newSession: {}) {}
                 }
             }

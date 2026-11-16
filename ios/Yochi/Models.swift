@@ -166,9 +166,41 @@ struct PaneNode: Decodable, Hashable {
     }
 }
 
+/// A remote machine as core reports it, from the session list's `machines`.
+struct MachineState: Decodable, Equatable {
+    let name: String
+    /// connecting, connected, needs_login or unreachable; a word the app
+    /// doesn't know is unremarkable.
+    let state: String
+    /// False: its programs stop when the last login there ends.
+    let keepsRunning: Bool?
+
+    private enum CodingKeys: String, CodingKey { case name, state, keepsRunning = "keeps_running" }
+
+    init(name: String, state: String, keepsRunning: Bool? = nil) {
+        self.name = name
+        self.state = state
+        self.keepsRunning = keepsRunning
+    }
+
+    var needsLogin: Bool { state == "needs_login" }
+    var stopsAtLogout: Bool { keepsRunning == false }
+    /// Worth a line on the Spaces page.
+    var needsAttention: Bool { needsLogin || stopsAtLogout }
+}
+
+/// One element that may fail to decode without failing its array.
+struct Lossy<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
+    }
+}
+
 enum ServerMessage: Decodable {
     case hello(api: Int)
-    case sessions(core: String?, connected: Bool, sessions: [Session], spaces: [Space])
+    case sessions(core: String?, connected: Bool, sessions: [Session], spaces: [Space], machines: [MachineState])
     case sent(id: String, turn: UInt64, status: String?, started: Bool?)
     case sendFailed(id: String, kind: String, message: String)
     case keysSent(id: String)
@@ -193,7 +225,7 @@ enum ServerMessage: Decodable {
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, api, core, connected, sessions, spaces, id, turn, status, started, kind, message, session, outcome, path, commands, patch, truncated
+        case type, api, core, connected, sessions, spaces, machines, id, turn, status, started, kind, message, session, outcome, path, commands, patch, truncated
         case available, url, route, gatewayKey = "gateway_key", psk, error, host
     }
 
@@ -208,7 +240,10 @@ enum ServerMessage: Decodable {
                 connected: try c.decode(Bool.self, forKey: .connected),
                 sessions: try c.decode([Session].self, forKey: .sessions),
                 // A Gateway older than space grouping sends none.
-                spaces: try c.decodeIfPresent([Space].self, forKey: .spaces) ?? [])
+                spaces: try c.decodeIfPresent([Space].self, forKey: .spaces) ?? [],
+                // A Gateway older than machine status sends none; an entry
+                // the app can't read is skipped rather than failing the list.
+                machines: (try? c.decodeIfPresent([Lossy<MachineState>].self, forKey: .machines))?.compactMap(\.value) ?? [])
         case "sent":
             self = .sent(
                 id: try c.decode(String.self, forKey: .id),

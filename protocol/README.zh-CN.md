@@ -69,6 +69,11 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 - 只包含 live 会话，finished 的不返回。
 - `cols` / `rows`：终端当前网格尺寸（上例省略）。
 - `spaces`：Herdr 的 Space 与 Tab，按 Herdr 中的顺序，本机在前；上例省略。旧版 Gateway 不发送此字段，App 按缺省为空处理。
+- `machines`：core 已添加的各台远端机器的状态；没有机器或 core 列不出时省略（旧版 Gateway、或没有 `machine.list` 的 core 不发送，App 按缺省为空处理）。每项有 `name`（同上面的 `machine`）和 core 给出的 `state`（`connecting`、`connected`、`needs_login` 或 `unreachable`；App 对不认识的取值按无异常处理），core 说得出时还有 `keeps_running`（`false`：那台机器上最后一次登录结束后程序会停，即 systemd lingering 未开；core 不清楚时省略）和 `since_ms`（从何时起没有连上，Mac 的时钟，毫秒）。Gateway 每十秒用只读的 `machine.list` 读取一次。
+
+```jsonc
+"machines": [{"name": "vps-us", "state": "needs_login", "keeps_running": false, "since_ms": 1762156800000}]
+```
 
 ```jsonc
 "spaces": [
