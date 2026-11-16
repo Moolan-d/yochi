@@ -194,6 +194,7 @@ Put a file next to the terminal and reply with its path on the machine that term
 - The Gateway calls core's `terminal.put` over its own plain-mode `hc connect`; it doesn't attach, so it isn't a Takeover.
 - `name` may contain only ASCII letters, digits and `.-_`, must not start with `.`, and is at most 100 characters, otherwise `kind: "invalid"`. No such session is `not_found`, too big is `too_large`; the rest is as for Agent Message, plus `unknown` and `timeout`.
 - The app first shrinks the image's long side to 2048 pixels and encodes it as JPEG; at most 4 images per message.
+- The app also sends other files chosen with the system file picker, as they are, under the same rules: the Gateway accepts any file type, only the size (8 MB) and the name matter. The app makes the name acceptable (characters outside `.-_` and ASCII letters and digits become `_`, a leading `.` is dropped, the length is cut to 100 keeping the extension), never sends a path, and doesn't upload a file over 8 MB. An image pasted into the message field goes the same way as a photo.
 
 ### Slash commands
 

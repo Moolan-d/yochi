@@ -1030,6 +1030,12 @@ final class YochiUITests: XCTestCase {
         // The injected context is not shown.
         XCTAssertFalse(text(app, containing: "environment_context").exists)
         snapshot("1 codex conversation")
+
+        // The composer's menu offers photos, files and the pasteboard's image.
+        app.buttons["composerMenu"].tap()
+        XCTAssert(app.buttons["选取文件"].waitForExistence(timeout: 5), "no Choose File in the composer menu")
+        XCTAssert(app.buttons["粘贴图片"].exists, "no Paste Image in the composer menu")
+        snapshot("2 composer menu")
     }
 
     /// The same for pi.

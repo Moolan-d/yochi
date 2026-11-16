@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// A photo for the Agent: shrunk on the phone, put beside the terminal, and
-/// named in the draft by its path, which Claude Code opens as an image.
+/// A photo or a file for the Agent: a photo shrunk on the phone, a file as it
+/// is; put beside the terminal and named in the draft by its path, which
+/// Claude Code opens as an image or reads as a file.
 struct ImageAttachment: Identifiable, Equatable {
     enum State: Equatable {
         case uploading
@@ -11,12 +12,44 @@ struct ImageAttachment: Identifiable, Equatable {
     }
 
     let id = UUID()
-    let thumbnail: UIImage
-    let jpeg: Data
+    /// A photo's preview; nil for a file, which shows its type's icon.
+    let thumbnail: UIImage?
+    let data: Data
     let name: String
     var state: State = .uploading
 
     static let limit = 4
+    /// What the Gateway takes in one piece (8 MB, decoded).
+    static let maxBytes = 8 << 20
+
+    var isFile: Bool { thumbnail == nil }
+}
+
+enum AttachmentName {
+    /// A name the Gateway accepts: ASCII letters, digits and `.-_`, not
+    /// starting with a dot, at most 100 characters. The phone never names a
+    /// path; the Gateway decides where the file goes.
+    static func sanitized(_ name: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_")
+        var cleaned = String(name.map { allowed.contains($0) ? $0 : "_" })
+        while cleaned.hasPrefix(".") { cleaned.removeFirst() }
+        // A name that is nothing but replacements says nothing.
+        if cleaned.allSatisfy({ $0 == "_" }) { cleaned = "" }
+        guard cleaned.count > 100 else { return cleaned.isEmpty ? "file" : cleaned }
+        // Keep the extension when cutting.
+        let ext = cleaned.lastIndex(of: ".").map { String(cleaned[$0...]) } ?? ""
+        let keep = ext.count <= 20 ? ext : ""
+        return String(cleaned.prefix(100 - keep.count)) + keep
+    }
+}
+
+/// An image on the pasteboard, taken from a paste into the message field.
+struct PastedImage: Transferable {
+    let data: Data
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(importedContentType: .image) { PastedImage(data: $0) }
+    }
 }
 
 enum ImageShrinker {
@@ -130,10 +163,29 @@ struct AttachmentStrip: View {
         .accessibilityIdentifier("attachments")
     }
 
+    @ViewBuilder
+    private func preview(_ attachment: ImageAttachment) -> some View {
+        if let thumbnail = attachment.thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+        } else {
+            VStack(spacing: 2) {
+                Image(systemName: "doc")
+                    .font(.title3)
+                Text(attachment.name)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(4)
+            .foregroundStyle(.secondary)
+            .background(Color(.tertiarySystemFill))
+        }
+    }
+
     private func thumbnail(_ attachment: ImageAttachment, number: Int) -> some View {
-        Image(uiImage: attachment.thumbnail)
-            .resizable()
-            .scaledToFill()
+        preview(attachment)
             .frame(width: 60, height: 60)
             .clipShape(.rect(cornerRadius: 10, style: .continuous))
             .overlay { overlay(attachment) }
@@ -150,7 +202,7 @@ struct AttachmentStrip: View {
                 .accessibilityHidden(true)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Image \(number)")
+            .accessibilityLabel(attachment.isFile ? String(localized: "File \(attachment.name)") : String(localized: "Image \(number)"))
             .accessibilityValue(stateText(attachment.state))
             .accessibilityAction(named: "Remove") { remove(attachment.id) }
             .accessibilityActions {
@@ -187,6 +239,25 @@ struct AttachmentStrip: View {
         case .uploading: String(localized: "Uploading")
         case .uploaded: String(localized: "Uploaded")
         case .failed(let message): String(localized: "Upload failed: \(message). You can retry")
+        }
+    }
+}
+
+/// Pasting an image into the message field adds it as a photo, where the
+/// system lets a field take one (iOS 27); on older systems the composer's
+/// menu has Paste Image.
+struct PasteImages: ViewModifier {
+    let enabled: Bool
+    let attach: (Data) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27.0, *) {
+            content.pasteDestination(for: PastedImage.self, action: { images in
+                guard enabled else { return }
+                for image in images { attach(image.data) }
+            }, validator: { $0 })
+        } else {
+            content
         }
     }
 }

@@ -4782,6 +4782,56 @@
           }
         }
       }
+    },
+    "File %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件 %@"
+          }
+        }
+      }
+    },
+    "Choose File" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选取文件"
+          }
+        }
+      }
+    },
+    "Paste Image" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴图片"
+          }
+        }
+      }
+    },
+    "Couldn't read the file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取这个文件"
+          }
+        }
+      }
+    },
+    "The file is larger than 8 MB" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件超过 8 MB"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

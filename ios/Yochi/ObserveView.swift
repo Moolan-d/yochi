@@ -37,6 +37,7 @@ struct ObserveView: View {
     @State private var modeFailure: String?
     @State private var attachments: [ImageAttachment] = []
     @State private var pickedPhotos: [PhotosPickerItem] = []
+    @State private var importingFile = false
     @State private var pickingPhotos = false
     @State private var takingPhoto = false
     /// This session's custom commands and skills, listed again each time the
@@ -217,6 +218,9 @@ struct ObserveView: View {
         .onChange(of: currentSession.turn, initial: true) { _, _ in updateResponse() }
         .onChange(of: currentSession.status?.state) { _, state in
             if state != "working" { stopNotice = nil }
+        }
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { for url in urls { attachFile(url) } }
         }
         .photosPicker(isPresented: $pickingPhotos, selection: $pickedPhotos,
                       maxSelectionCount: max(1, ImageAttachment.limit - attachments.count), matching: .images)
@@ -427,6 +431,9 @@ struct ObserveView: View {
                         .padding(.vertical, 10)
                         .disabled(isSending)
                         .focused($composerFocused)
+                        .modifier(PasteImages(enabled: isConversation) { data in
+                            if let image = UIImage(data: data) { attach(image) }
+                        })
                         .textInputAutocapitalization(isConversation ? .sentences : .never)
                         .autocorrectionDisabled(!isConversation)
                         .accessibilityIdentifier(isConversation ? "agentMessageField" : "terminalCommandField")
@@ -583,6 +590,9 @@ struct ObserveView: View {
                 Button("Photo Library", systemImage: "photo.on.rectangle") { pickingPhotos = true }
                 Button("Take Photo", systemImage: "camera") { takingPhoto = true }
                     .disabled(!CameraPicker.isAvailable)
+                Button("Choose File", systemImage: "doc") { importingFile = true }
+                Button("Paste Image", systemImage: "doc.on.clipboard") { pasteImage() }
+                    .disabled(!UIPasteboard.general.hasImages)
             }
             .disabled(attachments.count >= ImageAttachment.limit)
             Section("Insert into Message") {
@@ -605,6 +615,40 @@ struct ObserveView: View {
         .accessibilityIdentifier("composerMenu")
     }
 
+    /// An image from the pasteboard, as a photo.
+    private func pasteImage() {
+        if let image = UIPasteboard.general.image { attach(image) }
+    }
+
+    /// A file as it is, up to what the Gateway takes; a larger one shows as
+    /// failed at once rather than uploading.
+    private func attachFile(_ url: URL) {
+        guard attachments.count < ImageAttachment.limit else { return }
+        let name = AttachmentName.sanitized(url.lastPathComponent)
+        Task {
+            let data = await Task.detached(priority: .userInitiated) { () -> Data? in
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                return try? Data(contentsOf: url)
+            }.value
+            guard attachments.count < ImageAttachment.limit else { return }
+            guard let data else {
+                var failed = ImageAttachment(thumbnail: nil, data: Data(), name: name)
+                failed.state = .failed(String(localized: "Couldn't read the file"))
+                attachments.append(failed)
+                return
+            }
+            var attachment = ImageAttachment(thumbnail: nil, data: data, name: name)
+            guard data.count <= ImageAttachment.maxBytes else {
+                attachment.state = .failed(String(localized: "The file is larger than 8 MB"))
+                attachments.append(attachment)
+                return
+            }
+            attachments.append(attachment)
+            upload(attachment.id)
+        }
+    }
+
     private func attach(_ image: UIImage) {
         guard attachments.count < ImageAttachment.limit else { return }
         let name = ImageShrinker.name(at: .now, index: attachments.count + 1)
@@ -613,7 +657,7 @@ struct ObserveView: View {
                 (ImageShrinker.jpeg(from: image), ImageShrinker.thumbnail(from: image))
             }.value
             guard let jpeg, attachments.count < ImageAttachment.limit else { return }
-            let attachment = ImageAttachment(thumbnail: thumbnail, jpeg: jpeg, name: name)
+            let attachment = ImageAttachment(thumbnail: thumbnail, data: jpeg, name: name)
             attachments.append(attachment)
             upload(attachment.id)
         }
@@ -625,7 +669,7 @@ struct ObserveView: View {
         let attachment = attachments[index]
         Task {
             let state: ImageAttachment.State = switch await client.put(
-                session: session.id, name: attachment.name, data: attachment.jpeg) {
+                session: session.id, name: attachment.name, data: attachment.data) {
             case .done(let path): .uploaded(path: path)
             case .failed(_, let message): .failed(message)
             case .unknown: .failed(String(localized: "Result unknown"))

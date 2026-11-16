@@ -196,6 +196,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.interru
 - Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.put`，不 attach，不是 Takeover。
 - `name` 只能含 ASCII 字母数字和 `.-_`，不以 `.` 开头，最长 100 字符，否则 `kind: "invalid"`。会话不存在为 `not_found`，过大为 `too_large`；其余同 Agent Message，另有 `unknown`、`timeout`。
 - App 先把图片长边缩到 2048 像素、编成 JPEG，一条消息最多 4 张。
+- App 也会把用系统文件选择器选的其他文件原样发送，规则相同：Gateway 不限文件类型，只看大小（8 MB）和名字。App 会把名字改成可接受的（`.-_` 和 ASCII 字母数字之外的字符变成 `_`，去掉开头的 `.`，超过 100 字符时截断并保留扩展名），不发送路径，超过 8 MB 的文件不上传。粘贴到输入框里的图片和照片走同一条路。
 
 ### 斜杠命令
 
