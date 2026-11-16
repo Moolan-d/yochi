@@ -239,6 +239,11 @@ enum AppMessage {
         /// A space from the list; absent for a new one.
         #[serde(default)]
         space: Option<String>,
+        /// The phone's terminal grid, for the program to start at; both or neither.
+        #[serde(default)]
+        cols: Option<u32>,
+        #[serde(default)]
+        rows: Option<u32>,
     },
     /// Forget this device (the app's own "unpair").
     Unpair,
@@ -1160,11 +1165,11 @@ async fn push(mut socket: WebSocket, state: AppState, caller: Caller, lang: Lang
                             }
                         });
                     }
-                    Ok(AppMessage::Run { id, machine, cwd, argv, space }) => {
+                    Ok(AppMessage::Run { id, machine, cwd, argv, space, cols, rows }) => {
                         let state = state.clone();
                         let outgoing = outgoing.clone();
                         tokio::spawn(async move {
-                            let request = run::RunRequest { id, machine, cwd, argv, space };
+                            let request = run::RunRequest { id, machine, cwd, argv, space, size: run::size(cols, rows) };
                             let response = run::run(&state.hc, request, lang).await;
                             if let Ok(response) = serde_json::to_string(&response) {
                                 let _ = outgoing.send(response);

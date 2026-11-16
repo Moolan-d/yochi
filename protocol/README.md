@@ -271,6 +271,7 @@ The Gateway calls core's `terminal.run` over its own plain-mode `hc connect`, wi
 - The new terminal carries the `herdr.space` label (the Space id on that machine) and no `herdr.tab`: Herdr's desktop app opens a new Tab in that Space and takes it in without splitting an existing pane; without `space` the Gateway makes up a new Space id, and the desktop app creates the Space and names it after the directory. The Gateway doesn't write the layout document.
 - When the desktop app isn't running or can't reach that machine, the new terminal is in no Space for now and the app lists it per machine; the desktop app takes it in when it opens.
 - The app only offers remote machines that have appeared in the session list; the Gateway passes `machine` to core as it is.
+- `cols` and `rows` (optional, integers from 1 to 1000, sent together) are the grid the phone last took a terminal over at; the Gateway hands them to `terminal.run` as `size`, so the program starts at that size and needn't redraw when the phone takes it over. The app sends them once it has taken a terminal over, and omits them before. Without them, or when only one is present or either is out of range, core's default size applies. A core older than 0.1.18 refuses the unknown `size`; the Gateway then asks again without it. An older Gateway ignores both fields.
 
 ### Conversation history
 

@@ -339,16 +339,31 @@ final class GatewayClient {
         }
     }
 
-    func runSession(machine: String?, cwd: String, argv: [String], space: String?) async -> RunResult {
-        struct Request: Encodable {
-            let type = "run"
-            let id: String
-            let machine: String?
-            let cwd: String
-            let argv: [String]
-            let space: String?
+    /// What the app sends to start a terminal. `cols` and `rows` are the phone's
+    /// grid for the program to start at; an older Gateway ignores them.
+    struct RunMessage: Encodable, Equatable {
+        let type = "run"
+        let id: String
+        let machine: String?
+        let cwd: String
+        let argv: [String]
+        let space: String?
+        let cols: Int?
+        let rows: Int?
+
+        init(id: String, machine: String?, cwd: String, argv: [String], space: String?, size: TerminalGrid?) {
+            self.id = id
+            self.machine = machine
+            self.cwd = cwd
+            self.argv = argv
+            self.space = space
+            cols = size?.cols
+            rows = size?.rows
         }
-        let reply = await request { Request(id: $0, machine: machine, cwd: cwd, argv: argv, space: space) }
+    }
+
+    func runSession(machine: String?, cwd: String, argv: [String], space: String?, size: TerminalGrid? = nil) async -> RunResult {
+        let reply = await request { RunMessage(id: $0, machine: machine, cwd: cwd, argv: argv, space: space, size: size) }
         switch reply {
         case .runCreated(let session): return .created(session: session)
         case .failed(let kind, let message): return .failed(kind: kind, message: message)

@@ -22,7 +22,10 @@ pub const MAX_ARG_BYTES: usize = 512;
 pub const MAX_CWD_BYTES: usize = 4096;
 pub const MAX_MACHINE_BYTES: usize = 64;
 pub const MAX_SPACE_BYTES: usize = 128;
+/// The most columns or rows the phone may ask a new terminal to start with.
+pub const MAX_SIZE: u32 = 1000;
 
+#[derive(Clone)]
 pub struct RunRequest {
     pub id: String,
     /// Core's name for a connected machine; None for this Mac.
@@ -34,6 +37,18 @@ pub struct RunRequest {
     pub argv: Vec<String>,
     /// A space from the session list, on the same machine; None for a new one.
     pub space: Option<String>,
+    /// The size the program starts at: the phone's terminal grid, so it need
+    /// not redraw when the phone takes it over. Both or neither; None leaves
+    /// core's default.
+    pub size: Option<(u16, u16)>,
+}
+
+/// The size an app asked for as columns and rows: both present and each from
+/// 1 to `MAX_SIZE`, else none (an app that sends nonsense gets the default).
+pub fn size(cols: Option<u32>, rows: Option<u32>) -> Option<(u16, u16)> {
+    let (cols, rows) = (cols?, rows?);
+    let valid = 1..=MAX_SIZE;
+    (valid.contains(&cols) && valid.contains(&rows)).then_some((cols as u16, rows as u16))
 }
 
 #[derive(Debug, Serialize)]
@@ -62,7 +77,20 @@ pub async fn run(hc: &str, request: RunRequest, lang: Lang) -> Response {
             Err(error) => return Response::failed(id, "unavailable", format!("{error:#}")),
         },
     };
-    match tokio::time::timeout(RUN_TIMEOUT, request_core(hc, "terminal.run", params(&request, &space))).await {
+    let started = tokio::time::timeout(RUN_TIMEOUT, async {
+        let reply = request_core(hc, "terminal.run", params(&request, &space)).await;
+        // A core older than 0.1.18 refuses `size` as an unknown parameter,
+        // before it starts anything: ask again without it.
+        match reply {
+            Ok(reply) if request.size.is_some() && reply.get("error").is_some_and(|error| error_kind(error) == "invalid_params") => {
+                let without = RunRequest { size: None, ..request.clone() };
+                request_core(hc, "terminal.run", params(&without, &space)).await
+            }
+            other => other,
+        }
+    })
+    .await;
+    match started {
         Ok(Ok(reply)) => {
             let response = map_reply(id, machine.as_deref(), reply, lang);
             if let Response::RunCreated { session, .. } = &response
@@ -170,6 +198,9 @@ fn params(request: &RunRequest, space: &str) -> Value {
     if let Some(machine) = machine(request) {
         params["on"] = json!(machine);
     }
+    if let Some((cols, rows)) = request.size {
+        params["size"] = json!({"cols": cols, "rows": rows});
+    }
     params
 }
 
@@ -197,7 +228,7 @@ mod tests {
     use super::*;
 
     fn request() -> RunRequest {
-        RunRequest { id: "r1".into(), machine: None, cwd: "/Users/ryan/app".into(), argv: vec!["claude".into()], space: None }
+        RunRequest { id: "r1".into(), machine: None, cwd: "/Users/ryan/app".into(), argv: vec!["claude".into()], space: None, size: None }
     }
 
     #[test]
@@ -223,6 +254,20 @@ mod tests {
         assert_eq!(params["cwd"], json!("/root/app"));
         assert_eq!(params["on"], json!("vps-us"));
         assert_eq!(params["argv"], json!([]));
+    }
+
+    #[test]
+    fn the_phone_s_size_starts_the_terminal_when_it_makes_sense() {
+        let mut request = request();
+        assert!(params(&request, "sp1").get("size").is_none(), "an old app sends none");
+        request.size = Some((49, 45));
+        assert_eq!(params(&request, "sp1")["size"], json!({"cols": 49, "rows": 45}));
+        assert_eq!(size(Some(49), Some(45)), Some((49, 45)));
+        assert_eq!(size(Some(49), None), None, "both or neither");
+        assert_eq!(size(None, Some(45)), None);
+        assert_eq!(size(Some(0), Some(45)), None);
+        assert_eq!(size(Some(49), Some(MAX_SIZE + 1)), None);
+        assert_eq!(size(Some(MAX_SIZE), Some(1)), Some((1000, 1)));
     }
 
     #[test]

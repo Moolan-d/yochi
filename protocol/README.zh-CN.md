@@ -273,6 +273,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 - 新终端带 `herdr.space` 标签（该机器上的 Space id），不带 `herdr.tab`：Herdr 桌面端在这个 Space 里新开一个 Tab 收进它，不会拆分已有的分屏；省略 `space` 时 Gateway 生成一个新 Space id，桌面端新建 Space 并按目录自动命名。Gateway 不写布局文档。
 - 桌面端没开或连不上那台机器时，新终端暂不在任何 Space 中，App 按机器列出；桌面端之后打开时会收进去。
 - App 只提供会话列表中出现过的远端机器；Gateway 本身把 `machine` 原样交给 core。
+- `cols` 和 `rows`（可选，1 到 1000 的整数，成对发送）是手机上一次接管终端时用的网格；Gateway 把它们作为 `size` 交给 `terminal.run`，程序按这个尺寸启动，手机接管时不必重绘。App 接管过终端之后才会发送，之前省略。不带、只带一个或超出范围时，沿用 core 的默认尺寸。早于 0.1.18 的 core 不认识 `size` 会拒绝，Gateway 随即不带它再请求一次。旧版 Gateway 忽略这两个字段。
 
 ### 对话（Conversation History）
 

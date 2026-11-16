@@ -181,7 +181,7 @@ struct NewSessionView: View {
             defer { creating = false }
             let space = space.wrappedValue
             switch await client.runSession(machine: machine, cwd: directory, argv: program.argv,
-                                           space: space.isEmpty ? nil : space) {
+                                           space: space.isEmpty ? nil : space, size: TerminalGrid.remembered) {
             case .created(let session):
                 // Claude Code is typed into the new shell; its conversation
                 // shows from the start rather than once it is up.

@@ -17,6 +17,21 @@ struct TerminalGrid: Equatable {
         guard cols > 0, rows > 0 else { return nil }
         return TerminalGrid(cols: min(cols, 1000), rows: min(rows, 1000))
     }
+
+    private static let rememberedKey = "terminal.phoneGrid"
+
+    /// The grid the phone last took a terminal over at, for a new session to
+    /// start at; nil before any. Columns and rows, each 1…1000.
+    static var remembered: TerminalGrid? {
+        guard let stored = UserDefaults.standard.array(forKey: rememberedKey) as? [Int], stored.count == 2,
+              (1...1000).contains(stored[0]), (1...1000).contains(stored[1]) else { return nil }
+        return TerminalGrid(cols: stored[0], rows: stored[1])
+    }
+
+    static func remember(_ grid: TerminalGrid) {
+        guard (1...1000).contains(grid.cols), (1...1000).contains(grid.rows) else { return }
+        UserDefaults.standard.set([grid.cols, grid.rows], forKey: rememberedKey)
+    }
 }
 
 /// One cell's size in points per font size, as Ghostty measured it. The

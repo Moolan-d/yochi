@@ -356,6 +356,7 @@ final class TerminalModel {
         surface = nil
         shown = nil
         takeover = yielded ? nil : phoneGrid(fontSize: fontSize)
+        if let takeover { TerminalGrid.remember(takeover) }
         attempt += 1
         observer.onBytes = { feed.receive($0) }
         // The Gateway lost the stream while the connection was down: attach
