@@ -96,15 +96,6 @@ struct NewSessionView: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("newSessionProgram")
                 }
-                if program == .agent {
-                    Section {
-                        TextField("First message", text: $firstMessage, axis: .vertical)
-                            .lineLimit(1...6)
-                            .accessibilityIdentifier("newSessionFirstMessage")
-                    } footer: {
-                        Text("Optional. Sent as the Agent's first message when it is ready, queued until then.")
-                    }
-                }
                 Section {
                     TextField("Directory", text: $directory, prompt: Text("/Users/you/project"))
                         .textInputAutocapitalization(.never)
@@ -148,6 +139,15 @@ struct NewSessionView: View {
                     Text(space.wrappedValue.isEmpty
                          ? "Herdr desktop creates a Space for it, named after the directory."
                          : "Herdr desktop opens a new tab for it in this Space.")
+                }
+                if program == .agent {
+                    Section {
+                        TextField("First message", text: $firstMessage, axis: .vertical)
+                            .lineLimit(1...6)
+                            .accessibilityIdentifier("newSessionFirstMessage")
+                    } footer: {
+                        Text("Optional. Sent as the Agent's first message when it is ready, queued until then.")
+                    }
                 }
                 if let failure {
                     Section {

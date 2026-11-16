@@ -1179,7 +1179,15 @@ final class YochiUITests: XCTestCase {
         directory.tap()
         directory.typeText("/tmp/companion-ui-work")
         XCTAssert(app.descendants(matching: .any)["newSessionSpace"].exists, "no space choice")
+        // Claude Code takes a first message; a terminal doesn't.
         snapshot("1 new session")
+        let first = app.textFields["newSessionFirstMessage"]
+        for _ in 0..<3 where !first.exists { app.swipeUp() }
+        XCTAssert(first.exists, "no first message field for Claude Code")
+        snapshot("2 first message")
+        app.swipeDown()
+        app.buttons["终端"].tap()
+        XCTAssertFalse(first.exists, "a terminal has no first message")
         app.buttons["取消"].tap()
         XCTAssert(app.buttons["新建"].waitForExistence(timeout: 5), "sheet did not close")
         unpair(app)
