@@ -10,11 +10,25 @@ struct SampleConversationView: View {
     static var long: Bool { ProcessInfo.processInfo.environment["YOCHI_SAMPLE_CONVERSATION"] == "long" }
     static var markdown: Bool { ProcessInfo.processInfo.environment["YOCHI_SAMPLE_CONVERSATION"] == "markdown" }
 
+    /// `=turns`: a finished turn with every kind of step, folded, then one still
+    /// at work; paths it names link to Changes (here, a line at the top says which).
+    static var turns: Bool { ProcessInfo.processInfo.environment["YOCHI_SAMPLE_CONVERSATION"] == "turns" }
+
     @State private var feed = ConversationFeed()
+    @State private var opened: String?
 
     var body: some View {
         NavigationStack {
-            ConversationPane(feed: feed, status: nil, keyboardShown: false, retry: {})
+            ConversationPane(feed: feed, status: Self.turns ? Self.working : nil, keyboardShown: false, retry: {})
+                .environment(\.changedPaths, Self.turns ? ["ios/Yochi/Foo.swift", "docs/a.md"] : [])
+                .environment(\.openChange) { opened = $0 }
+                .environment(\.quoteReply) { opened = QuoteReply.draft(quoting: $0, into: "") }
+                .overlay(alignment: .top) {
+                    if let opened {
+                        Text(verbatim: "Opened Changes: \(opened)")
+                            .font(.caption).padding(6).background(.yellow).accessibilityIdentifier("openedChange")
+                    }
+                }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if let progress = feed.todoProgress {
                         TodoProgressLine(progress: progress)
@@ -29,6 +43,10 @@ struct SampleConversationView: View {
         .task {
             if Self.long {
                 await playLong()
+                return
+            }
+            if Self.turns {
+                apply(Self.turnsConversation)
                 return
             }
             if Self.markdown {
@@ -57,6 +75,28 @@ struct SampleConversationView: View {
             try? await Task.sleep(for: .seconds(4))
             apply(["type": "items", "items": [["kind": "agent", "id": "a\(turn)", "text": Self.reply(turn, paragraphs: 8)]]])
         }
+    }
+
+    private static var working: Status? {
+        try? JSONDecoder().decode(Status.self, from: Data(#"{"state":"working"}"#.utf8))
+    }
+
+    private static var turnsConversation: [String: Any] {
+        let reply = SampleText.pick(
+            "Fixed it: I changed `ios/Yochi/Foo.swift` and wrote `/Users/me/app/docs/a.md`. See https://example.com/notes for why.",
+            "改好了：改了 `ios/Yochi/Foo.swift`，并写了 `/Users/me/app/docs/a.md`。原因见 https://example.com/notes 。")
+        return ["type": "conversation", "supported": true, "items": [
+            ["kind": "user", "id": "u1", "text": SampleText.pick("Fix the empty state", "把空状态改一下")],
+            ["kind": "tool", "id": "t1", "name": "Read", "summary": "ios/Yochi/Foo.swift", "state": "done", "output": "…"],
+            ["kind": "todos", "id": "td1", "items": [["text": "Edit", "status": "completed"], ["text": "Test", "status": "in_progress"]]],
+            ["kind": "tool", "id": "t2", "name": "Edit", "state": "done",
+             "edit": ["path": "/Users/me/app/ios/Yochi/Foo.swift", "added": 3, "deleted": 1, "patch": "@@ -1,2 +1,4 @@\n-old\n+new\n+more\n+lines\n"]],
+            ["kind": "tool", "id": "t3", "name": "Agent", "summary": "Explore", "state": "done",
+             "agent": ["name": "Find usages", "type": "Explore", "duration_ms": 150_000]],
+            ["kind": "agent", "id": "a1", "text": reply],
+            ["kind": "user", "id": "u2", "text": SampleText.pick("Now run the tests", "再跑一遍测试")],
+            ["kind": "tool", "id": "t4", "name": "Bash", "summary": "xcodebuild test", "state": "running"],
+        ]]
     }
 
     private func apply(_ object: [String: Any]) {
