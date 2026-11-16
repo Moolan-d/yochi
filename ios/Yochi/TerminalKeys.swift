@@ -118,8 +118,6 @@ final class KeyPresser {
 
 /// Text the composer can fill in; the user still taps send.
 enum QuickCommand {
-    static let phrases = [String(localized: "Continue"), String(localized: "OK, go with your suggestion"), String(localized: "Stop first, and explain what you plan to do next")]
-
     static func insert(_ command: String, into draft: String) -> String {
         if draft.isEmpty { return command }
         return draft.hasSuffix(" ") || draft.hasSuffix("\n") ? draft + command : draft + " " + command

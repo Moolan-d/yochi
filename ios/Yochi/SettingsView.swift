@@ -55,6 +55,11 @@ struct SettingsView: View {
                                     symbol: "desktopcomputer", tint: .gray)
                     }
                 }
+                Section {
+                    NavigationLink("Snippets") { SnippetsView() }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("settings.snippets")
+                }
                 Section("Appearance") {
                     Picker("Appearance", selection: $appearance) {
                         ForEach(Appearance.allCases) { Text($0.title).tag($0) }

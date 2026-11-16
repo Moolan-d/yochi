@@ -4832,6 +4832,86 @@
           }
         }
       }
+    },
+    "Run the tests" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行测试"
+          }
+        }
+      }
+    },
+    "Commit this" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提交这些改动"
+          }
+        }
+      }
+    },
+    "Snippets" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "常用语"
+          }
+        }
+      }
+    },
+    "Add Snippet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加常用语"
+          }
+        }
+      }
+    },
+    "Edit Snippet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑常用语"
+          }
+        }
+      }
+    },
+    "Restore Default Snippets" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复默认常用语"
+          }
+        }
+      }
+    },
+    "Snippets are kept on this iPhone. The + menu in a conversation inserts them into the message." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "常用语只保存在这台 iPhone 上。对话里的 + 菜单可以把它们插入消息。"
+          }
+        }
+      }
+    },
+    "Text to insert" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要插入的文字"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

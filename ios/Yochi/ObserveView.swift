@@ -595,9 +595,9 @@ struct ObserveView: View {
                     .disabled(!UIPasteboard.general.hasImages)
             }
             .disabled(attachments.count >= ImageAttachment.limit)
-            Section("Insert into Message") {
-                ForEach(QuickCommand.phrases, id: \.self) { phrase in
-                    Button(phrase) { draft = QuickCommand.insert(phrase, into: draft) }
+            Section("Snippets") {
+                ForEach(SnippetStore.shared.snippets) { snippet in
+                    Button(snippet.text) { draft = QuickCommand.insert(snippet.text, into: draft) }
                 }
             }
             if let shownMode { Section { modePicker(shownMode) } }
