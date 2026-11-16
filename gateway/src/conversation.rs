@@ -3,6 +3,9 @@
 //! usage, request records and attachments never leave the Gateway. Unknown
 //! record types are skipped, so a newer Claude Code degrades to fewer items.
 
+mod codex;
+mod pi;
+
 use crate::lang::Lang;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -165,10 +168,33 @@ pub struct Pending {
     pub tool: Option<String>,
 }
 
+/// Which Agent wrote the transcript: its lines have their own shape.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Dialect {
+    #[default]
+    Claude,
+    Codex,
+    Pi,
+}
+
+impl Dialect {
+    /// The Agent a terminal runs, from its program and the command it started
+    /// with; None for anything whose transcript the Gateway can't read.
+    pub fn of(program: Option<&str>, command: Option<&str>) -> Option<Self> {
+        [program, command].into_iter().flatten().find_map(|name| match name.to_ascii_lowercase().as_str() {
+            "claude" => Some(Self::Claude),
+            "codex" => Some(Self::Codex),
+            "pi" => Some(Self::Pi),
+            _ => None,
+        })
+    }
+}
+
 #[derive(Default)]
 pub struct Conversation {
     /// The phone's language, for the few words the Gateway adds.
     lang: Lang,
+    dialect: Dialect,
     items: Vec<Item>,
     index: HashMap<String, usize>,
     /// Claude Code's permission mode as of its latest message.
@@ -187,6 +213,20 @@ pub struct Conversation {
 impl Conversation {
     pub fn new(lang: Lang) -> Self {
         Self { lang, ..Self::default() }
+    }
+
+    pub fn with_dialect(lang: Lang, dialect: Dialect) -> Self {
+        Self { lang, dialect, ..Self::default() }
+    }
+
+    #[cfg(test)]
+    fn codex(lang: Lang) -> Self {
+        Self::with_dialect(lang, Dialect::Codex)
+    }
+
+    #[cfg(test)]
+    fn pi(lang: Lang) -> Self {
+        Self::with_dialect(lang, Dialect::Pi)
     }
 
     #[cfg(test)]
@@ -272,6 +312,11 @@ impl Conversation {
     }
 
     fn record(&mut self, record: &Value) -> Vec<String> {
+        match self.dialect {
+            Dialect::Codex => return self.codex_record(record),
+            Dialect::Pi => return self.pi_record(record),
+            Dialect::Claude => {}
+        }
         if matches!(record["type"].as_str(), Some("permission-mode" | "user"))
             && record["isSidechain"] != true
             && let Some(mode) = record["permissionMode"].as_str().filter(|mode| !mode.is_empty())

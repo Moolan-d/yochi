@@ -27,9 +27,12 @@ struct Session: Decodable, Identifiable, Hashable {
     let repo: Repo?
     /// What a working Claude Code is on, from its to-do list.
     let todo: TodoNow?
+    /// The Gateway reads this Agent's transcript, so the page can be the
+    /// conversation; nil from a Gateway that doesn't say.
+    let conversation: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case id, machine, title, program, command, cwd, status, turn, statusMs = "status_ms", parent, pinned, seen, repo, todo
+        case id, machine, title, program, command, cwd, status, turn, statusMs = "status_ms", parent, pinned, seen, repo, todo, conversation
     }
 
     init(from decoder: Decoder) throws {
@@ -49,6 +52,7 @@ struct Session: Decodable, Identifiable, Hashable {
         seen = try c.decodeIfPresent(UInt64.self, forKey: .seen)
         repo = try? c.decodeIfPresent(Repo.self, forKey: .repo)
         todo = try? c.decodeIfPresent(TodoNow.self, forKey: .todo)
+        conversation = try? c.decodeIfPresent(Bool.self, forKey: .conversation)
     }
 
     /// The folder's own name, `~` and `/` as they are.
@@ -73,10 +77,13 @@ struct Session: Decodable, Identifiable, Hashable {
     }
 
     /// Its page is the conversation (GUI) unless the user picks the terminal:
-    /// Claude Code runs in it, the one Agent the app has a conversation page
-    /// for, whether the terminal started as it or it was typed into a shell.
-    /// Every other Agent shows the terminal (TUI).
-    var showsConversation: Bool { program?.lowercased() == "claude" || command?.lowercased() == "claude" }
+    /// the Gateway says it can read the Agent's transcript (Claude Code,
+    /// Codex, pi), whether the terminal started as it or it was typed into a
+    /// shell. A Gateway that doesn't say knows only Claude Code. Every other
+    /// Agent shows the terminal (TUI).
+    var showsConversation: Bool {
+        conversation ?? (program?.lowercased() == "claude" || command?.lowercased() == "claude")
+    }
 
     /// 「工作中 · 12s」 while the Agent works and the Gateway says since when.
     func working(at now: Date) -> String? {

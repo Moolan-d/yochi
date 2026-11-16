@@ -63,6 +63,7 @@ yochi://pair?v=2&host=<host:port>&code=<code>&key=<Gateway 公钥>&relay=<中继
 - `title`：终端标题，Claude Code 在这里写它的会话标题；开头的转圈字符已去掉。
 - `pinned`：在 Herdr 里置顶（`herdr.pinned` 标签）；没有时省略。`seen`：Herdr 桌面端看过的轮次（`herdr.seen`）；没有时省略。
 - `repo`：目录所在的 git 仓库，`name` 是主检出的文件夹名，`worktree` 是链接 worktree 的文件夹名（不在 worktree 里时省略）；不是仓库或还没查到时省略。
+- `conversation`：Gateway 能读这个 Agent 的记录、因而 App 可以为它打开对话页时为 `true`（Claude Code、Codex、pi）；否则省略。旧版 Gateway 不发送，App 此时只对 `program` 或 `command` 为 `claude` 的会话打开对话页；旧版 App 忽略它。Codex 和 pi 的对话是只读历史，条目与 Claude Code 的相同：`user`、`agent`、`tool`（`Bash` 调用、`Read`、带 `edit` 差异的 `Write` / `Edit`，其余按原名）和 `notice`；没有 `todos`、`task`、`peer`，也没有权限模式，等待回答的问题仍留在终端页。
 - `todo`：Agent 工作时最新待办清单里进行中的那项（`text`，用 `activeForm`）和完成数 `done` / 总数 `total`；只有 Claude Code 在 `working` 时才有。
 - `turn`：core 记录的最后已完成 Agent 轮次；没有该字段时 Gateway 返回 `0`。它会在状态离开 `working` 时增加。
 - `connected: false` 表示 Gateway 暂时连不上本机 herdr-core，此时 `sessions` 为空。
@@ -282,7 +283,7 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 
 ### 对话（Conversation History）
 
-`ws://<host>:7420/v0/conversation?session=<id>`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。
+`ws://<host>:7420/v0/conversation?session=<id>`，认证和 `404` 同 Observer。Gateway 读取终端前台 Agent 的 Agent Transcript，转成条目推给 App。首个支持的 Agent 是 Claude Code：前台进程 pid → `~/.claude/sessions/<pid>.json`（当前 sessionId 和启动目录，`/clear` 后更新）→ `~/.claude/projects/<目录键>/<sessionId>.jsonl`，都经 core 的 `file.read` 读取，远端机器同样适用，不需要安装。Codex 和 pi 的做法相同：它们没有按 pid 的登记文件，所以 Gateway 经 core 的 `machine.exec`、在会话所在的机器上运行一段固定的只读脚本，找出 Agent 进程（或其子进程）在 `~/.codex/sessions` 或 `~/.pi/agent/sessions` 下打开的 `.jsonl` 文件（pi 找不到时用该目录下最新的文件），再像 Claude Code 的记录一样用 `file.read` 读取。只有消息、回复、shell 命令、Codex 的 `apply_patch` 编辑和 pi 的 `bash` / `read` / `write` / `edit` 调用会变成条目；推理、用量和注入的上下文不会离开 Gateway，不认识的记录类型直接跳过。
 
 ```jsonc
 // 开始时、以及换了对话（/clear、Agent 重启）时：整份替换

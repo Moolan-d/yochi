@@ -3,12 +3,13 @@
 //! session id after `/clear`, a new process after a restart), and turns new
 //! lines and core status into updates for the app.
 
-use crate::conversation::{Conversation, Item, Pending};
+use crate::conversation::{Conversation, Dialect, Item, Pending};
 use crate::core::Client;
 use crate::lang::Lang;
 use crate::session::Session;
 use crate::transcript::{self, Located, Tail};
 use anyhow::Result;
+use std::time::{Duration, Instant};
 
 pub enum Update {
     /// Start over with these items; `supported: false` means terminal view only.
@@ -32,17 +33,43 @@ pub struct Follower {
     pending: Option<Pending>,
     mode: Option<String>,
     model: Option<String>,
+    /// The process the Codex or pi transcript was last looked for, and when.
+    located_for: Option<(u64, Instant)>,
 }
+
+/// How long a Codex or pi transcript is trusted before the process is asked again.
+const RELOCATE_AFTER: Duration = Duration::from_secs(10);
 
 impl Follower {
     pub fn new(lang: Lang) -> Self {
         Self { lang, ..Self::default() }
     }
 
+    /// Where the transcript is. Claude Code's registry is one cheap read; for
+    /// Codex and pi it takes a command on the machine, so it is asked again
+    /// only when the process changed or after a while.
+    async fn locate(&mut self, client: &mut Client, session: &Session, pid: u64) -> Result<Option<Located>> {
+        // A program of another name may still be Claude Code (a wrapper, an
+        // alias): its registry says so, as it always has.
+        let dialect = transcript::dialect_of(session).unwrap_or(Dialect::Claude);
+        if dialect == Dialect::Claude {
+            return transcript::locate(client, session.machine.as_deref(), pid).await;
+        }
+        if let Some((located, _)) = &self.following
+            && located.dialect == dialect
+            && self.located_for.is_some_and(|(at, when)| at == pid && when.elapsed() < RELOCATE_AFTER)
+        {
+            return Ok(Some(located.clone()));
+        }
+        let located = transcript::locate_for(client, session, pid).await?;
+        self.located_for = Some((pid, Instant::now()));
+        Ok(located)
+    }
+
     pub async fn tick(&mut self, client: &mut Client, session: &Session) -> Result<Vec<Update>> {
         let machine = session.machine.as_deref();
         let located = match session.pid {
-            Some(pid) => transcript::locate(client, machine, pid).await?,
+            Some(pid) => self.locate(client, session, pid).await?,
             None => None,
         };
         let mut updates = Vec::new();
@@ -63,8 +90,8 @@ impl Follower {
         let lines = if fresh {
             let mut tail = Tail::new(machine, &located);
             let lines = tail.start(client).await?;
+            self.conversation = Conversation::with_dialect(self.lang, located.dialect);
             self.following = Some((located, tail));
-            self.conversation = Conversation::new(self.lang);
             lines
         } else {
             let (_, tail) = self.following.as_mut().expect("following");

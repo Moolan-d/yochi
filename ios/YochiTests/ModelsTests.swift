@@ -10,6 +10,19 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(session.turn, 0)
     }
 
+    func testTheGatewayDecidesWhichAgentsOpenTheConversation() throws {
+        func session(_ json: String) throws -> Session {
+            try JSONDecoder().decode(Session.self, from: Data(json.utf8))
+        }
+        // A new Gateway says so for Codex and pi; an old one knows only Claude Code.
+        XCTAssertTrue(try session(#"{"id":"t1","title":"x","program":"codex","cwd":"/","conversation":true}"#).showsConversation)
+        XCTAssertFalse(try session(#"{"id":"t1","title":"x","program":"codex","cwd":"/"}"#).showsConversation)
+        XCTAssertTrue(try session(#"{"id":"t1","title":"x","program":"claude","cwd":"/"}"#).showsConversation)
+        XCTAssertTrue(try session(#"{"id":"t1","title":"x","program":"zsh","command":"claude","cwd":"/"}"#).showsConversation)
+        XCTAssertFalse(try session(#"{"id":"t1","title":"x","program":"claude","cwd":"/","conversation":false}"#).showsConversation)
+        XCTAssertFalse(try session(#"{"id":"t1","title":"x","program":"gemini","cwd":"/","conversation":"nonsense"}"#).showsConversation)
+    }
+
     func testSessionTurnRoundTrips() throws {
         let data = Data(#"""
         {"id":"t1","machine":"vps","title":"agent","program":"claude","cwd":"/app",

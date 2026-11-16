@@ -333,6 +333,7 @@ mod tests {
                 todo: None,
                 place: None,
                 pid: None,
+                conversation: true,
             }],
             spaces: Vec::new(),
             machines: Vec::new(),

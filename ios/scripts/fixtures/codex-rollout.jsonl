@@ -1,0 +1,9 @@
+{"timestamp":"2026-11-17T10:00:00.000Z","type":"session_meta","payload":{"id":"fake-session","cwd":"/work/uitest-codex","cli_version":"0.0.0"}}
+{"timestamp":"2026-11-17T10:00:01.000Z","type":"turn_context","payload":{"model":"fake-model","cwd":"/work/uitest-codex"}}
+{"timestamp":"2026-11-17T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","id":"u0","content":[{"type":"input_text","text":"<environment_context>\n<cwd>/x</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-11-17T10:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"Please add a greeting file"}]}}
+{"timestamp":"2026-11-17T10:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"call1","arguments":"{\"command\":[\"bash\",\"-lc\",\"ls\"]}"}}
+{"timestamp":"2026-11-17T10:00:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call1","output":"{\"output\":\"notes.md\\n\",\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"2026-11-17T10:00:06.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"call2","input":"*** Begin Patch\n*** Add File: hello.txt\n+Hello from the fixture\n*** End Patch"}}
+{"timestamp":"2026-11-17T10:00:07.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call2","output":"Success"}}
+{"timestamp":"2026-11-17T10:00:08.000Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"Created **hello.txt** for you."}]}}

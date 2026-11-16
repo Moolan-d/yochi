@@ -1,6 +1,7 @@
 //! The narrow session model the app sees. Core records stay inside the Gateway.
 
 use crate::about::{Repo, TodoNow};
+use crate::conversation::Dialect;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -48,6 +49,11 @@ pub struct Session {
     /// The foreground process, which names an Agent's own session records.
     #[serde(skip)]
     pub pid: Option<u64>,
+    /// The app may open the conversation page: the Gateway reads this Agent's
+    /// transcript (Claude Code, Codex, pi). Omitted otherwise; an old Gateway
+    /// never sends it, and the app then decides by the command alone.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub conversation: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -108,12 +114,14 @@ impl Session {
             kind: status.get("kind").and_then(text),
         });
         let size = |key: &str, default| record[key].as_u64().and_then(|n| u16::try_from(n).ok()).unwrap_or(default);
+        let command = command_name(&record["argv"]);
+        let conversation = Dialect::of(program.as_deref(), command.as_deref()).is_some();
         Some(Session {
             id,
             machine,
             title,
             program,
-            command: command_name(&record["argv"]),
+            command,
             cwd,
             status,
             status_ms: record["status_ms"].as_u64(),
@@ -127,6 +135,7 @@ impl Session {
             todo: None,
             place: text(&record["labels"]["where"]),
             pid: foreground["pid"].as_u64(),
+            conversation,
         })
     }
 }
@@ -146,6 +155,19 @@ fn text(value: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_app_may_open_a_conversation_for_the_agents_the_gateway_reads() {
+        let session = |argv: serde_json::Value| Session::from_record(&serde_json::json!({"address": "t1", "state": "live", "argv": argv})).unwrap();
+        assert!(session(serde_json::json!(["claude"])).conversation);
+        assert!(session(serde_json::json!(["/usr/local/bin/codex", "--resume"])).conversation);
+        assert!(session(serde_json::json!(["node", "/opt/bin/pi.js"])).conversation);
+        assert!(!session(serde_json::json!(["gemini"])).conversation);
+        assert!(!session(serde_json::json!(["zsh"])).conversation);
+        let json = serde_json::to_value(session(serde_json::json!(["zsh"]))).unwrap();
+        assert!(json.get("conversation").is_none(), "omitted unless true");
+        assert_eq!(serde_json::to_value(session(serde_json::json!(["codex"]))).unwrap()["conversation"], true);
+    }
+
     use super::*;
     use serde_json::json;
 

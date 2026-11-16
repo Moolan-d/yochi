@@ -1,0 +1,6 @@
+{"type":"session","id":"fake-pi","timestamp":"2026-11-17T10:00:00.000Z","cwd":"/work/uitest-pi","version":3}
+{"type":"model_change","id":"m0","parentId":null,"timestamp":"2026-11-17T10:00:01.000Z","provider":"fake","modelId":"fake-pi-model"}
+{"type":"message","id":"u1","parentId":"m0","timestamp":"2026-11-17T10:00:02.000Z","message":{"role":"user","content":[{"type":"text","text":"Show me the notes"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-17T10:00:03.000Z","message":{"role":"assistant","model":"fake-pi-model","content":[{"type":"thinking","thinking":"private"},{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"cat notes.md"}}]}}
+{"type":"message","id":"r1","parentId":"a1","timestamp":"2026-11-17T10:00:04.000Z","message":{"role":"toolResult","toolCallId":"t1","toolName":"bash","isError":false,"content":[{"type":"text","text":"remember the milk"}]}}
+{"type":"message","id":"a2","parentId":"r1","timestamp":"2026-11-17T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The notes say: **remember the milk**."}]}}

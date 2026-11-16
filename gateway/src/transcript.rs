@@ -5,18 +5,87 @@
 //! current session id (renewed by `/clear`) and the launch folder that keys
 //! the transcript's directory.
 
+use crate::conversation::Dialect;
 use crate::core::{Client, error_kind};
+use crate::session::Session;
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 /// How far back the first read goes; older lines are not shown.
 const WINDOW_LINES: usize = 2000;
 
-/// Where a terminal's transcript is, as far as Claude Code's registry says.
+/// Where a terminal's transcript is, as far as Claude Code's registry says,
+/// or the file Codex or pi has open.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Located {
+    pub dialect: Dialect,
     pub session_id: String,
     pub path: String,
+}
+
+/// The Agents whose transcripts the Gateway reads, by the command or program
+/// in the terminal.
+pub fn dialect_of(session: &Session) -> Option<Dialect> {
+    Dialect::of(session.program.as_deref(), session.command.as_deref())
+}
+
+/// Codex and pi have no registry by pid: the file they write is open in
+/// their process (or a child of it). A fixed read-only script, run through
+/// core's `machine.exec` on the session's machine, finds it; failing that, pi's
+/// newest file for the folder (its sessions live in a folder named after it).
+/// Prints the path, relative to the home folder for another machine.
+const FIND_SCRIPT: &str = r#"
+pid="$1"; mode="$2"; dir="$3"
+pids="$pid $(pgrep -P "$pid" 2>/dev/null)"
+for q in $pids; do pids="$pids $(pgrep -P "$q" 2>/dev/null)"; done
+found=
+for q in $pids; do
+  f=$(lsof -nP -p "$q" -Fn 2>/dev/null | sed -n 's/^n//p' | grep -m1 -E '/(\.codex|\.pi/agent)/sessions/.*\.jsonl$')
+  [ -n "$f" ] || f=$(ls -l /proc/"$q"/fd 2>/dev/null | grep -o -E '/[^ ]*/(\.codex|\.pi/agent)/sessions/[^ ]*\.jsonl' | head -1)
+  if [ -n "$f" ]; then found=$f; break; fi
+done
+if [ -z "$found" ] && [ -n "$dir" ]; then found=$(ls -t "$HOME"/.pi/agent/sessions/"$dir"/*.jsonl 2>/dev/null | head -1); fi
+[ -n "$found" ] || exit 3
+if [ "$mode" = rel ]; then found=${found#"$HOME"/}; fi
+printf '%s' "$found"
+"#;
+
+/// pi's folder name for a working directory: `/Users/me/app` is `--Users-me-app--`.
+pub fn pi_folder(cwd: &str) -> Option<String> {
+    let inner: String = cwd.trim_matches('/').chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' { c } else { '-' }).collect();
+    (!inner.is_empty() && inner.len() <= 200).then(|| format!("--{inner}--"))
+}
+
+async fn locate_open_file(client: &mut Client, session: &Session, pid: u64, dialect: Dialect) -> Result<Option<Located>> {
+    let machine = session.machine.as_deref();
+    let dir = if dialect == Dialect::Pi { pi_folder(&session.cwd).unwrap_or_default() } else { String::new() };
+    let mut params = json!({
+        "argv": ["sh", "-c", FIND_SCRIPT, "sh", pid.to_string(), if machine.is_some() { "rel" } else { "abs" }, dir],
+        "cwd": "/",
+        "timeout": 5,
+    });
+    if let Some(machine) = machine {
+        params["on"] = json!(machine);
+    }
+    let Ok(result) = client.call("machine.exec", params).await? else { return Ok(None) };
+    if result["code"].as_i64() != Some(0) {
+        return Ok(None);
+    }
+    let path = result["stdout"]
+        .as_str()
+        .and_then(|data| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|path| path.trim().to_owned())
+        .filter(|path| path.ends_with(".jsonl") && !path.contains('\n'));
+    Ok(path.map(|path| Located { dialect, session_id: path.clone(), path }))
+}
+
+/// The transcript of the Agent in this terminal, whichever Agent it is.
+pub async fn locate_for(client: &mut Client, session: &Session, pid: u64) -> Result<Option<Located>> {
+    match dialect_of(session) {
+        Some(Dialect::Claude) | None => locate(client, session.machine.as_deref(), pid).await,
+        Some(dialect) => locate_open_file(client, session, pid, dialect).await,
+    }
 }
 
 /// Paths on this Mac are absolute from the Gateway's home (the same user as
@@ -49,7 +118,7 @@ pub async fn locate(client: &mut Client, machine: Option<&str>, pid: u64) -> Res
     };
     let Some(key) = project_key(cwd) else { return Ok(None) };
     let path = claude_path(machine, &format!("projects/{key}/{session_id}.jsonl"));
-    Ok(Some(Located { session_id: session_id.to_owned(), path }))
+    Ok(Some(Located { dialect: Dialect::Claude, session_id: session_id.to_owned(), path }))
 }
 
 /// Follows one transcript file by line number.
@@ -149,6 +218,32 @@ mod tests {
         assert_eq!(project_key("/Users/ryan/my.app_2").unwrap(), "-Users-ryan-my-app-2");
         assert_eq!(project_key("/a/界").unwrap(), "-a--");
         assert_eq!(project_key(&format!("/{}", "x".repeat(250))), None);
+    }
+
+    #[test]
+    fn pi_names_a_folder_after_the_working_directory() {
+        assert_eq!(pi_folder("/Users/ryan/personal/companion").as_deref(), Some("--Users-ryan-personal-companion--"));
+        assert_eq!(pi_folder("/Volumes/Assets").as_deref(), Some("--Volumes-Assets--"));
+        assert_eq!(pi_folder("/a b/c;d").as_deref(), Some("--a-b-c-d--"), "nothing a shell would read");
+        assert_eq!(pi_folder("/"), None);
+    }
+
+    #[test]
+    fn the_agent_is_told_by_its_command_or_program() {
+        let session = |program: Option<&str>, command: Option<&str>| {
+            let mut value = json!({"address": "t1", "state": "live", "argv": [], "foreground": null});
+            if let Some(command) = command {
+                value["argv"] = json!([command]);
+            }
+            let mut session = Session::from_record(&value).unwrap();
+            session.program = program.map(str::to_owned);
+            session.command = command.map(str::to_owned);
+            session
+        };
+        assert_eq!(dialect_of(&session(Some("claude"), None)), Some(Dialect::Claude));
+        assert_eq!(dialect_of(&session(Some("zsh"), Some("Codex"))), Some(Dialect::Codex));
+        assert_eq!(dialect_of(&session(Some("pi"), None)), Some(Dialect::Pi));
+        assert_eq!(dialect_of(&session(Some("htop"), Some("htop"))), None);
     }
 
     #[test]

@@ -1008,6 +1008,52 @@ final class YochiUITests: XCTestCase {
 
     /// The Changes page of a session whose directory has a modified and a new
     /// file, one file's diff, and 「让 Agent 提交」 filling the draft.
+    /// Codex's transcript opens the conversation page, from a made-up rollout
+    /// file held open by a stand-in process (scripts/fixtures).
+    @MainActor
+    func testCodexConversation() throws {
+        guard let name = ProcessInfo.processInfo.environment["YOCHI_CODEX_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("YOCHI_CODEX_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("YOCHI_HOST"), code: env("YOCHI_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no Codex session")
+        session.tap()
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "Codex did not open the conversation page")
+        XCTAssert(text(app, containing: "Please add a greeting file").waitForExistence(timeout: 20), "no user message")
+        XCTAssert(text(app, containing: "for you.").waitForExistence(timeout: 10), "no Agent reply")
+        // The injected context is not shown.
+        XCTAssertFalse(text(app, containing: "environment_context").exists)
+        snapshot("1 codex conversation")
+    }
+
+    /// The same for pi.
+    @MainActor
+    func testPiConversation() throws {
+        guard let name = ProcessInfo.processInfo.environment["YOCHI_PI_SESSION_NAME"], !name.isEmpty else {
+            throw XCTSkip("YOCHI_PI_SESSION_NAME is not set")
+        }
+        let app = launchUnpaired()
+        pair(app, host: env("YOCHI_HOST"), code: env("YOCHI_CODE"))
+        waitUntilPaired(app)
+
+        let session = sessionCell(app, name: name)
+        _ = session.waitForExistence(timeout: 15)
+        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
+        XCTAssert(session.isHittable, "no pi session")
+        session.tap()
+        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "pi did not open the conversation page")
+        XCTAssert(text(app, containing: "Show me the notes").waitForExistence(timeout: 20), "no user message")
+        XCTAssert(text(app, containing: "remember the milk").waitForExistence(timeout: 10), "no Agent reply")
+        XCTAssertFalse(text(app, containing: "private").exists, "the model's thinking is shown")
+        snapshot("1 pi conversation")
+    }
+
     @MainActor
     func testChangesPage() throws {
         guard let name = ProcessInfo.processInfo.environment["YOCHI_PICKER_SESSION_NAME"], !name.isEmpty else {
