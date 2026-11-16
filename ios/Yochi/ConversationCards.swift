@@ -27,8 +27,13 @@ struct EditRow: View {
     let item: ConversationItem
     let edit: EditInfo
     @State private var expanded = false
+    @Environment(\.changedPaths) private var changedPaths
+    @Environment(\.openChange) private var openChange
 
     private var diff: ParsedDiff { ParsedDiff(edit.patch) }
+
+    /// The file's entry on the Changes page, when it has one.
+    private var changed: String? { ConversationLinks.changedPath(matching: edit.path, in: changedPaths) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -66,6 +71,13 @@ struct EditRow: View {
             .accessibilityHint("Double-tap to show or hide the changes")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("editRow")
+
+            if expanded, let changed, let openChange {
+                Button("View in Changes", systemImage: "plusminus") { openChange(changed) }
+                    .font(.subheadline)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("viewInChanges")
+            }
 
             if expanded {
                 VStack(alignment: .leading, spacing: 0) {

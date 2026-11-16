@@ -4742,6 +4742,16 @@
           }
         }
       }
+    },
+    "View in Changes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「更改」中查看"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

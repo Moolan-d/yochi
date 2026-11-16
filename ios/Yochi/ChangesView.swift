@@ -7,6 +7,8 @@ struct ChangesView: View {
     let client: GatewayClient
     /// Claude Code sessions can ask the Agent to commit; nil hides the button.
     let askToCommit: (() -> Void)?
+    /// A changed file to open straight away, from a path in the conversation.
+    var focus: String?
 
     private enum Load: Equatable {
         case loading
@@ -15,6 +17,8 @@ struct ChangesView: View {
     }
 
     @State private var load = Load.loading
+    @State private var focused: FileChange?
+    @State private var focusHandled = false
 
     private var turn: UInt64? { client.sessions.first { $0.id == session }?.turn }
 
@@ -50,6 +54,9 @@ List {
         }
         .homeListStyle()
         .overlay { placeholder }
+        .navigationDestination(item: $focused) { file in
+            ChangeDiffView(session: session, file: file, client: client)
+        }
         .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await refresh() }
@@ -105,7 +112,12 @@ List {
 
     private func refresh() async {
         switch await client.changes(session: session) {
-        case .success(let list): load = .loaded(list)
+        case .success(let list):
+            load = .loaded(list)
+            if !focusHandled, let focus {
+                focusHandled = true
+                focused = list.files.first { $0.path == focus }
+            }
         case .failure(let error): load = .failed(error)
         }
     }

@@ -44,6 +44,10 @@ struct ObserveView: View {
     @State private var customCommands: [SlashCommand] = []
     @State private var confirmingExit = false
     @State private var showingChanges = false
+    /// The file the Changes page opens on, when a path in the conversation was tapped.
+    @State private var changesFocus: String?
+    /// The paths the session has changed, for the conversation to link.
+    @State private var changedPaths: [String] = []
     @AppStorage(TerminalTextSize.key) private var terminalFontSize = TerminalTextSize.standard
     @FocusState private var composerFocused: Bool
     /// A terminal shows its command field while the user writes there.
@@ -159,6 +163,12 @@ struct ObserveView: View {
                                  keyboardShown: composerFocused) {
                     conversation.start(config, session: session.id)
                 }
+                .environment(\.changedPaths, changedPaths)
+                .environment(\.openChange) { path in
+                    changesFocus = path
+                    showingChanges = true
+                }
+                .task(id: currentSession.turn) { await loadChangedPaths() }
                 .environment(\.quoteReply) { text in
                     draft = QuoteReply.draft(quoting: text, into: draft)
                     composerFocused = true
@@ -688,7 +698,10 @@ struct ObserveView: View {
                 }
             }
             Section {
-                Button("Changes", systemImage: "plusminus") { showingChanges = true }
+                Button("Changes", systemImage: "plusminus") {
+                    changesFocus = nil
+                    showingChanges = true
+                }
             }
             if !isConversation {
                 Section { textSizeControls }
@@ -731,7 +744,15 @@ struct ObserveView: View {
 
     private var changesPage: some View {
         let ask: (() -> Void)? = isConversation ? { askToCommit() } : nil
-        return ChangesView(session: session.id, client: client, askToCommit: ask)
+        return ChangesView(session: session.id, client: client, askToCommit: ask, focus: changesFocus)
+    }
+
+    /// What the Agent has changed, once the page opens and after each turn.
+    private func loadChangedPaths() async {
+        if case .success(let list) = await client.changes(session: session.id) {
+            let paths = list.files.map(\.path)
+            if paths != changedPaths { changedPaths = paths }
+        }
     }
 
     /// Fills the request into the draft and comes back; the user sends it.

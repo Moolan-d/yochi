@@ -307,6 +307,7 @@ struct MarkdownText: View {
     var shown: Double?
     var fade: Double = 0
 
+    @Environment(\.openChange) private var openChange
     @ScaledMetric(relativeTo: .callout) private var blockGap: CGFloat = 10
     @ScaledMetric(relativeTo: .callout) private var itemGap: CGFloat = 4
     @ScaledMetric(relativeTo: .callout) private var belowHeading: CGFloat = 6
@@ -324,6 +325,16 @@ struct MarkdownText: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
+        // Web addresses open in the browser, a changed file on the Changes
+        // page; any other scheme in a reply is not followed.
+        .environment(\.openURL, OpenURLAction { url in
+            if let path = ConversationLinks.changedPath(from: url) {
+                guard let openChange else { return .discarded }
+                openChange(path)
+                return .handled
+            }
+            return ConversationLinks.isWeb(url) ? .systemAction : .discarded
+        })
     }
 
     private func gap(before index: Int, in blocks: [MarkdownBlock]) -> CGFloat {
@@ -343,6 +354,7 @@ struct MarkdownText: View {
 private struct MarkdownBlockView: View {
     let block: MarkdownBlock
 
+    @Environment(\.changedPaths) private var changedPaths
     @ScaledMetric(relativeTo: .callout) private var indent: CGFloat = 20
     @ScaledMetric(relativeTo: .callout) private var lineSpacing: CGFloat = 5
     @ScaledMetric(relativeTo: .callout) private var codeSize: CGFloat = 14
@@ -418,7 +430,7 @@ private struct MarkdownBlockView: View {
     }
 
     private func styled(_ font: Font, code: Font, lineSpacing: CGFloat? = nil, done: Bool = false) -> some View {
-        MarkdownStyle.text(block.content, in: font, code: code)
+        MarkdownStyle.text(ConversationLinks.linkify(block.content, changed: changedPaths), in: font, code: code)
             .strikethrough(done, color: Color(.tertiaryLabel))
             .font(font)
             .lineSpacing(lineSpacing ?? self.lineSpacing)
