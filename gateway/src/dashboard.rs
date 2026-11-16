@@ -7,6 +7,7 @@
 //! another page in the browser, or a name rebound to 127.0.0.1, can neither
 //! read the status nor pair a phone.
 
+use crate::core;
 use crate::devices::{self, Store};
 use crate::{lang, notify, relay, service, tailnet};
 use anyhow::{Context as _, Result};
@@ -36,12 +37,15 @@ pub struct Options {
     pub open: bool,
     pub label: String,
     pub listen: Option<SocketAddr>,
+    /// The hc binary that reaches herdr-core, for its version.
+    pub hc: String,
 }
 
 struct Dashboard {
     store: Store,
     label: String,
     listen: Option<SocketAddr>,
+    hc: String,
     token: String,
     /// `127.0.0.1:<port>` and `localhost:<port>`: what `Host` may say.
     hosts: [String; 2],
@@ -67,6 +71,7 @@ pub async fn run(store: Store, options: Options) -> Result<()> {
         store,
         label: options.label,
         listen: options.listen,
+        hc: options.hc,
         token: token.clone(),
         hosts: [format!("127.0.0.1:{port}"), format!("localhost:{port}")],
         pairing: Mutex::new(None),
@@ -206,6 +211,7 @@ async fn snapshot(dashboard: &Dashboard) -> Result<Value> {
     let push = notify::Config::load(dir)?.map(|config| json!({ "server": config.server, "encrypted": config.key.is_some() }));
     Ok(json!({
         "version": env!("CARGO_PKG_VERSION"),
+        "core": core_info(core::version(&dashboard.hc).await),
         "now": devices::now(),
         "service": {
             "label": dashboard.label,
@@ -228,6 +234,16 @@ async fn snapshot(dashboard: &Dashboard) -> Result<Value> {
         "pairing": pairing(dashboard, &devices)?,
         "paired": dashboard.paired.lock().unwrap().clone(),
     }))
+}
+
+/// What the page says about herdr-core: its version, and whether it is older
+/// than the one the Observer's behaviour was made for. Null when the core
+/// couldn't say, so the page shows nothing.
+fn core_info(version: Option<String>) -> Value {
+    let Some(version) = version else { return Value::Null };
+    let outdated = core::is_older(&version, core::RECOMMENDED_CORE) == Some(true);
+    let [major, minor, patch] = core::RECOMMENDED_CORE;
+    json!({ "version": version, "outdated": outdated, "recommended": format!("{major}.{minor}.{patch}") })
 }
 
 /// The pairing in progress, ended here once a phone took it or it ran out.
@@ -355,6 +371,7 @@ mod tests {
             store: Store::open(dir.clone()).unwrap(),
             label: "dev.yochi.dashboard-test".into(),
             listen: Some("100.64.0.1:7420".parse().unwrap()),
+            hc: "hc".into(),
             token: "secret".into(),
             hosts: ["127.0.0.1:4000".into(), "localhost:4000".into()],
             pairing: Mutex::new(None),
@@ -366,6 +383,14 @@ mod tests {
 
     fn headers(pairs: &[(header::HeaderName, &str)]) -> HeaderMap {
         pairs.iter().map(|(name, value)| (name.clone(), HeaderValue::from_str(value).unwrap())).collect()
+    }
+
+    #[test]
+    fn the_page_hears_of_an_old_core_only_when_it_is_one() {
+        assert_eq!(core_info(None), Value::Null, "no version, nothing to show");
+        assert_eq!(core_info(Some("0.1.21".into())), json!({ "version": "0.1.21", "outdated": false, "recommended": "0.1.21" }));
+        assert_eq!(core_info(Some("0.1.19".into()))["outdated"], true);
+        assert_eq!(core_info(Some("dev".into()))["outdated"], false, "a version it can't read isn't called old");
     }
 
     #[test]

@@ -120,6 +120,9 @@ enum Command {
         /// The Gateway's LaunchAgent, if not the usual one.
         #[arg(long, default_value = service::LABEL, hide = true)]
         label: String,
+        /// The hc binary used to reach the local herdr-core.
+        #[arg(long, env = "YOCHI_HC", default_value = "hc")]
+        hc: String,
     },
     /// Run the Gateway at login, as a LaunchAgent.
     Service {
@@ -252,8 +255,8 @@ async fn main() -> Result<()> {
         Command::Tailnet { action } => tailnet_command(&store, action).await,
         Command::Relay { action } => relay_command(&store, action),
         Command::Push { action } => push_command(&store, action).await,
-        Command::Dashboard { listen, port, no_open, label } => {
-            dashboard::run(store, dashboard::Options { port, open: !no_open, label, listen: listen.listen }).await
+        Command::Dashboard { listen, port, no_open, label, hc } => {
+            dashboard::run(store, dashboard::Options { port, open: !no_open, label, listen: listen.listen, hc }).await
         }
         Command::Service { action, label } => match action {
             ServiceAction::Install(serve) => install(&label, serve.listen.listen, args.state_dir, &serve.hc).await,

@@ -124,3 +124,55 @@ pub async fn request(hc: &str, method: &str, params: Value) -> std::result::Resu
     }
     Err(RequestError::after(anyhow!("core closed before {method} replied")))
 }
+
+/// The first herdr-core the Observer's behaviour was made for: it keeps the
+/// terminal's size instead of resizing it.
+pub const RECOMMENDED_CORE: [u64; 3] = [0, 1, 21];
+
+/// `0.1.21` (or `v0.1.21`, `0.1.21-rc1`) as numbers; None when it isn't one.
+pub fn parse_version(text: &str) -> Option<[u64; 3]> {
+    let text = text.trim().trim_start_matches('v');
+    let numbers = text.split(['-', '+', ' ']).next()?;
+    let mut parts = numbers.split('.');
+    let version = [parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?];
+    parts.next().is_none().then_some(version)
+}
+
+/// Whether `version` is older than `minimum`; None when it can't be read.
+pub fn is_older(version: &str, minimum: [u64; 3]) -> Option<bool> {
+    parse_version(version).map(|version| version < minimum)
+}
+
+/// The version of the herdr-core `hc` talks to, from `server.status`; None
+/// when it can't be reached or says none.
+pub async fn version(hc: &str) -> Option<String> {
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(3), request(hc, "server.status", json!({}))).await.ok()?.ok()?;
+    reply["result"]["version"].as_str().filter(|version| !version.is_empty()).map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_read_as_three_numbers() {
+        assert_eq!(parse_version("0.1.21"), Some([0, 1, 21]));
+        assert_eq!(parse_version("v0.1.21"), Some([0, 1, 21]));
+        assert_eq!(parse_version("0.1.21-rc1"), Some([0, 1, 21]));
+        assert_eq!(parse_version("0.1"), None);
+        assert_eq!(parse_version("0.1.21.4"), None);
+        assert_eq!(parse_version("latest"), None);
+        assert_eq!(parse_version(""), None);
+    }
+
+    #[test]
+    fn older_means_below_the_recommended_core() {
+        assert_eq!(is_older("0.1.20", RECOMMENDED_CORE), Some(true));
+        assert_eq!(is_older("0.0.99", RECOMMENDED_CORE), Some(true));
+        assert_eq!(is_older("0.1.21", RECOMMENDED_CORE), Some(false));
+        assert_eq!(is_older("0.1.100", RECOMMENDED_CORE), Some(false), "numbers, not text");
+        assert_eq!(is_older("0.2.0", RECOMMENDED_CORE), Some(false));
+        assert_eq!(is_older("1.0.0", RECOMMENDED_CORE), Some(false));
+        assert_eq!(is_older("unknown", RECOMMENDED_CORE), None);
+    }
+}

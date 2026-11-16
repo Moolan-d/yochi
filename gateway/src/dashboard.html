@@ -63,6 +63,10 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
         <div class="grow"><div id="service-title"></div><div class="dim small" id="service-detail"></div></div>
         <div class="buttons" id="service-buttons"></div>
       </div>
+      <div class="row" id="core-row" hidden>
+        <span class="dot" id="core-dot"></span>
+        <div class="grow"><div id="core-title"></div><div class="dim small" id="core-detail"></div></div>
+      </div>
     </div>
 
     <h2 data-t="reach"></h2>
@@ -142,6 +146,8 @@ const TEXT = {
   pid: ["pid {0}", "进程 {0}"],
   lastExit: ["last exit: {0}", "上次退出：{0}"],
   log: ["log: {0}", "日志：{0}"],
+  coreVersion: ["herdr-core {0}", "herdr-core {0}"],
+  coreOld: ["Older than {0}: the Observer not resizing the terminal and other behavior need {0}. Update herdr-core.", "低于 {0}：Observer 不改终端尺寸等行为需要 {0}。请更新 herdr-core。"],
   off: ["Off", "未开启"],
   listening: ["Listening on {0}", "正在监听 {0}"],
   notListening: ["Nothing is listening on {0}", "{0} 上没有服务在监听"],
@@ -259,6 +265,14 @@ function render(s) {
          button(t("stop"), "danger", el => confirm(t("confirmStop")) && act(el, "POST", "/service/stop"))]
       : [button(t("start"), "primary", el => act(el, "POST", "/service/start"))];
     $("service-buttons").replaceChildren(...actions);
+  }
+
+  const core = s.core;
+  $("core-row").hidden = !core;
+  if (core) {
+    dot("core-dot", core.outdated ? "warn" : "good");
+    $("core-title").textContent = t("coreVersion", core.version);
+    $("core-detail").textContent = core.outdated ? t("coreOld", core.recommended) : "";
   }
 
   const tailnet = s.tailnet;
