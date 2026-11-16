@@ -32,11 +32,26 @@ struct ConversationPane: View {
     /// of the screen the list stops there, so a long reply reads from its
     /// beginning instead of its end (#3).
     @State private var arriving: String?
+    /// Folded turns the reader opened, by their fold's id.
+    @State private var openFolds: Set<String> = []
 
     /// When the page opened, for the time to its first items.
     @State private var opened = ContinuousClock.now
 
     private var working: Bool { status?.state == "working" }
+
+    /// Finished turns fold; the Agent still at work, or waiting on an
+    /// answer, keeps its turn open.
+    private var entries: [ConversationEntry] {
+        ConversationTurns.entries(feed.items, inProgress: working || feed.pending != nil)
+    }
+
+    private func row(_ item: ConversationItem, latestTodos: String?) -> some View {
+        ConversationRow(item: item, latestTodos: item.id == latestTodos, arrival: feed.arrivals[item.id])
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { top in
+                if item.id == arriving { arrived(top: top) }
+            }
+    }
 
     var body: some View {
         Group {
@@ -87,12 +102,20 @@ struct ConversationPane: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 let latestTodos = feed.items.last { $0.kind == .todos }?.id
-                ForEach(feed.items) { item in
-                    ConversationRow(item: item, latestTodos: item.id == latestTodos,
-                                    arrival: feed.arrivals[item.id])
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { top in
-                            if item.id == arriving { arrived(top: top) }
+                ForEach(entries) { entry in
+                    switch entry {
+                    case .item(let item):
+                        row(item, latestTodos: latestTodos)
+                    case .folded(let id, let steps):
+                        FoldedSteps(steps: steps, expanded: openFolds.contains(id)) {
+                            withAnimation(.snappy) {
+                                if !openFolds.insert(id).inserted { openFolds.remove(id) }
+                            }
                         }
+                        if openFolds.contains(id) {
+                            ForEach(steps) { row($0, latestTodos: latestTodos) }
+                        }
+                    }
                 }
                 if working {
                     Label {

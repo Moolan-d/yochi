@@ -4664,6 +4664,54 @@
           }
         }
       }
+    },
+    "Worked · %lld steps" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Worked · %lld step"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Worked · %lld steps"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已处理 · %lld 步"
+          }
+        }
+      }
+    },
+    "Double-tap to hide the steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点两下隐藏这些步骤"
+          }
+        }
+      }
+    },
+    "Double-tap to show the steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点两下显示这些步骤"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
