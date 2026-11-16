@@ -1037,6 +1037,17 @@ final class YochiUITests: XCTestCase {
         XCTAssert(app.buttons["粘贴图片"].exists, "no Paste Image in the composer menu")
         XCTAssert(app.buttons["运行测试"].exists, "no snippet in the composer menu")
         snapshot("2 composer menu")
+        // A tap away closes the menu.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        // Typed text and a snippet from the + menu share the field. (XCUITest's
+        // keys are not hardware key presses, so the Return shortcuts aren't
+        // exercised here.)
+        let field = app.descendants(matching: .any)["agentMessageField"]
+        field.tap()
+        app.typeText("one")
+        app.buttons["composerMenu"].tap()
+        app.buttons["继续"].tap()
+        XCTAssertEqual(field.value as? String, "one 继续", "the snippet did not go into the message field")
     }
 
     /// The same for pi.

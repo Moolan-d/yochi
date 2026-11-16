@@ -203,6 +203,7 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("New", systemImage: "plus") { newSession = NewSessionRequest() }
+                            .keyboardShortcut("n", modifiers: .command)
                             .disabled(client.phase != .connected)
                         Button("Settings", systemImage: "gearshape") { showingSettings = true }
                             .accessibilityIdentifier("home.settings")

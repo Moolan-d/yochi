@@ -21,6 +21,8 @@ struct InboxList<Banner: View>: View {
     /// What the list is filtered by: the field's text once typing pauses
     /// for `searchDelay`, so each key press only edits the field.
     @State private var query = ""
+    /// Whether the search field is up; Cmd+F brings it up.
+    @State private var searchPresented = false
 
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -63,8 +65,14 @@ struct InboxList<Banner: View>: View {
             }
         }
         .homeListStyle()
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
+        .searchable(text: $searchText, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always),
                     prompt: "Jump to an Agent or terminal")
+        .background {
+            Button("Search") { searchPresented = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
         .task(id: searchText) {
             let text = searchText
             // Clearing the field shows the whole list again at once.
