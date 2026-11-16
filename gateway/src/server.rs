@@ -177,6 +177,9 @@ enum ServerMessage<'a> {
     Mode { mode: &'a str },
     /// The model that wrote the Agent's latest reply.
     Model { model: &'a str },
+    /// The version of Claude Code that wrote its latest message, for the app
+    /// to say when it is newer than the one its screen reading was checked on.
+    AgentVersion { version: &'a str },
 }
 
 #[derive(Deserialize)]
@@ -963,6 +966,7 @@ async fn follow(mut socket: WebSocket, state: AppState, caller: Caller, id: Stri
                 Update::Pending(pending) => ServerMessage::Pending { pending: pending.as_ref() },
                 Update::Mode(mode) => ServerMessage::Mode { mode },
                 Update::Model(model) => ServerMessage::Model { model },
+                Update::Version(version) => ServerMessage::AgentVersion { version },
             };
             if send(&mut socket, &message).await.is_err() {
                 return;

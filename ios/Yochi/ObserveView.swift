@@ -312,7 +312,8 @@ struct ObserveView: View {
                                 await client.answer(session: session.id, choice: choice, expect: pending.message)
                             })
             } else if let excerpt = screenResult.excerpt {
-                GenericDialogCard(excerpt: excerpt, press: { await press($0, on: excerpt) })
+                GenericDialogCard(excerpt: excerpt, press: { await press($0, on: excerpt) },
+                                  unverifiedVersion: isConversation && ClaudeCodeVersion.isUnverified(conversation.agentVersion))
                     .id(excerpt.fingerprint.value)
             }
             if !isConversation, let failure = keys.failure {

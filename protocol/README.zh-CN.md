@@ -296,6 +296,8 @@ Gateway 经独立的 plain 模式 `hc connect` 调用 core 的 `terminal.run`，
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
 // 权限模式，取 transcript 最近一条消息记下的；变化时、以及每次 conversation 之后发
 {"type": "mode", "mode": "acceptEdits"}
+// 写下最新一条消息的 Claude Code 版本（取自记录里的 `version` 字段）；变化时和每次 conversation 之后发送。App 据此提示它比自己核对读屏时用的版本新。其他 Agent 不发送；旧版 App 忽略这个类型
+{"type": "agent_version", "version": "2.1.325"}
 // Agent 最新一条回复的模型；变化时、以及每次 conversation 之后发
 {"type": "model", "model": "claude-opus-4-5-20251101"}
 // 会话结束或读取失败

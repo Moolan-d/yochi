@@ -21,6 +21,8 @@ pub enum Update {
     Mode(String),
     /// The model that wrote the Agent's latest reply.
     Model(String),
+    /// The Claude Code version that wrote its latest message.
+    Version(String),
 }
 
 #[derive(Default)]
@@ -33,6 +35,7 @@ pub struct Follower {
     pending: Option<Pending>,
     mode: Option<String>,
     model: Option<String>,
+    version: Option<String>,
     /// The process the Codex or pi transcript was last looked for, and when.
     located_for: Option<(u64, Instant)>,
 }
@@ -78,6 +81,7 @@ impl Follower {
             self.conversation = Conversation::new(self.lang);
             self.mode = None;
             self.model = None;
+            self.version = None;
             if self.supported != Some(false) {
                 self.supported = Some(false);
                 updates.push(Update::Conversation { supported: false, items: Vec::new() });
@@ -124,6 +128,12 @@ impl Follower {
             updates.push(Update::Model(model.clone().expect("some")));
         }
         self.model = model;
+        // And the version.
+        let version = self.conversation.version().map(str::to_owned);
+        if version.is_some() && (fresh || version != self.version) {
+            updates.push(Update::Version(version.clone().expect("some")));
+        }
+        self.version = version;
         self.pending_update(session, &mut updates);
         Ok(updates)
     }

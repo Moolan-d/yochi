@@ -357,6 +357,8 @@ struct GenericDialogCard: View {
     let excerpt: GenericDialogExcerpt
     /// Presses the key if the screen still shows this; the failure, if any.
     let press: (String) async -> String?
+    /// Claude Code is newer than the version the screen reading was checked on.
+    var unverifiedVersion = false
 
     /// The key being pressed.
     @State private var pressing: String?
@@ -398,6 +400,12 @@ struct GenericDialogCard: View {
                     .accessibilityIdentifier(Self.isEscape(key) ? "genericDialogCancel" : "genericDialogKey-\(key.key.lowercased())")
                 }
                 .disabled(pressing != nil)
+            }
+            if unverifiedVersion {
+                Label("This version of Claude Code hasn't been checked yet", systemImage: "questionmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("unverifiedVersion")
             }
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")

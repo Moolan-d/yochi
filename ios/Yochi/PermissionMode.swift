@@ -109,3 +109,25 @@ struct PermissionModeSwitcher {
         return nil
     }
 }
+
+/// The Claude Code release the app's screen reading was checked against: the
+/// dialogs it parses, the mode line, the slash commands. A newer one may have
+/// drawn something differently.
+enum ClaudeCodeVersion {
+    static let verified = "2.1.317"
+
+    /// Whether `version` is newer than the verified one; false when it isn't
+    /// known or can't be read.
+    static func isUnverified(_ version: String?) -> Bool {
+        guard let version, let found = numbers(version), let checked = numbers(verified) else { return false }
+        return checked.lexicographicallyPrecedes(found)
+    }
+
+    /// `2.1.325` (or `v2.1.325-beta`) as numbers; nil when it isn't one.
+    static func numbers(_ version: String) -> [Int]? {
+        let core = version.trimmingCharacters(in: .whitespaces).drop { $0 == "v" }.prefix { $0 != "-" && $0 != "+" }
+        let parts = core.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard parts.count >= 2, !parts.contains(nil) else { return nil }
+        return parts.compactMap { $0 }
+    }
+}

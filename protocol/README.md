@@ -294,6 +294,8 @@ The Gateway calls core's `terminal.run` over its own plain-mode `hc connect`, wi
 {"type": "pending", "pending": {"kind": "permission", "message": "approve Bash: date > stamp.txt", "tool": "toolu_01…"}}
 // The permission mode, from the newest transcript message that recorded one; sent when it changes and after every conversation
 {"type": "mode", "mode": "acceptEdits"}
+// The Claude Code version that wrote the latest message (from the `version` field of its transcript); sent when it changes and after every conversation. The app notes a newer one than it checked its dialog reading against. Omitted for other Agents; an old app ignores the type
+{"type": "agent_version", "version": "2.1.325"}
 // The model of the Agent's newest reply; sent when it changes and after every conversation
 {"type": "model", "model": "claude-opus-4-5-20251101"}
 // The session ended or couldn't be read

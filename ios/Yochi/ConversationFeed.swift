@@ -282,6 +282,9 @@ final class ConversationFeed {
     /// The model id of the Agent's latest reply (`claude-opus-4-5-20251101`);
     /// nil before the first reply, or from an older Gateway.
     private(set) var model: String?
+    /// The Claude Code version that wrote the Agent's latest message; nil
+    /// before it, for another Agent, or from an older Gateway.
+    private(set) var agentVersion: String?
 
     /// Agent replies that arrived while following, by item id. Claude Code
     /// writes a reply to its transcript only once it is whole, so the page
@@ -370,6 +373,7 @@ final class ConversationFeed {
             // The Gateway says the mode again after a fresh conversation.
             if mode != nil { mode = nil }
             if model != nil { model = nil }
+            if agentVersion != nil { agentVersion = nil }
             let phase: Phase = supported ? .following : .unsupported
             if self.phase != phase { self.phase = phase }
         case .items(let changed):
@@ -402,6 +406,8 @@ final class ConversationFeed {
             if self.mode != mode { self.mode = mode }
         case .model(let model):
             if self.model != model { self.model = model }
+        case .agentVersion(let version):
+            if agentVersion != version { agentVersion = version }
         case .closed(let reason):
             pending = nil
             phase = .closed(reason: reason == "finished" ? String(localized: "The session has ended") : reason)
@@ -424,11 +430,12 @@ enum ConversationMessage: Decodable {
     case pending(PendingQuestion?)
     case mode(String)
     case model(String)
+    case agentVersion(String)
     case closed(reason: String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, supported, items, pending, mode, model, reason
+        case type, supported, items, pending, mode, model, version, reason
     }
 
     init(from decoder: Decoder) throws {
@@ -445,6 +452,8 @@ enum ConversationMessage: Decodable {
             self = .mode(try c.decode(String.self, forKey: .mode))
         case "model":
             self = .model(try c.decode(String.self, forKey: .model))
+        case "agent_version":
+            self = .agentVersion(try c.decode(String.self, forKey: .version))
         case "closed":
             self = .closed(reason: (try? c.decode(String.self, forKey: .reason)) ?? String(localized: "The session has ended"))
         default:

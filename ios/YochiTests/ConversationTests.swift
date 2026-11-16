@@ -309,3 +309,32 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(MarkdownBlock.revealed(blocks, at: 12, fade: 0), MarkdownBlock.revealed(blocks, upTo: 12))
     }
 }
+
+@MainActor
+final class AgentVersionTests: XCTestCase {
+    func testOnlyANewerClaudeCodeIsUnverified() {
+        XCTAssertFalse(ClaudeCodeVersion.isUnverified(nil))
+        XCTAssertFalse(ClaudeCodeVersion.isUnverified("2.1.317"))
+        XCTAssertFalse(ClaudeCodeVersion.isUnverified("2.1.316"))
+        XCTAssertFalse(ClaudeCodeVersion.isUnverified("1.9.999"))
+        XCTAssertTrue(ClaudeCodeVersion.isUnverified("2.1.318"))
+        XCTAssertTrue(ClaudeCodeVersion.isUnverified("2.1.1000"), "numbers, not text")
+        XCTAssertTrue(ClaudeCodeVersion.isUnverified("v2.2.0-beta"))
+        XCTAssertTrue(ClaudeCodeVersion.isUnverified("3.0.0"))
+        XCTAssertFalse(ClaudeCodeVersion.isUnverified("latest"), "a version it can't read says nothing")
+        XCTAssertFalse(ClaudeCodeVersion.isUnverified(""))
+    }
+
+    func testTheVersionFollowsTheConversationAndResetsWithIt() throws {
+        let feed = ConversationFeed()
+        func apply(_ json: String) throws {
+            feed.apply(try JSONDecoder().decode(ConversationMessage.self, from: Data(json.utf8)))
+        }
+        try apply(#"{"type":"agent_version","version":"2.1.325"}"#)
+        XCTAssertEqual(feed.agentVersion, "2.1.325")
+        try apply(#"{"type":"conversation","supported":true,"items":[]}"#)
+        XCTAssertNil(feed.agentVersion, "said again after a fresh conversation")
+        try apply(#"{"type":"agent_version","version":"2.1.317"}"#)
+        XCTAssertEqual(feed.agentVersion, "2.1.317")
+    }
+}

@@ -201,6 +201,8 @@ pub struct Conversation {
     mode: Option<String>,
     /// The model that wrote the Agent's latest reply.
     model: Option<String>,
+    /// Claude Code's version, which it writes into each message.
+    version: Option<String>,
     todos: Vec<Todo>,
     /// TaskCreate and TaskUpdate calls awaiting their results, by tool call.
     todo_calls: HashMap<String, (String, Value)>,
@@ -285,6 +287,11 @@ impl Conversation {
         self.model.as_deref()
     }
 
+    /// The version of Claude Code that wrote the transcript's latest message.
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
     /// The tool call the Agent is blocked on: the last one still running.
     pub fn pending(&self, status: Option<&crate::session::Status>) -> Option<Pending> {
         let status = status.filter(|status| status.state == "blocked")?;
@@ -316,6 +323,12 @@ impl Conversation {
             Dialect::Codex => return self.codex_record(record),
             Dialect::Pi => return self.pi_record(record),
             Dialect::Claude => {}
+        }
+        if matches!(record["type"].as_str(), Some("user" | "assistant"))
+            && record["isSidechain"] != true
+            && let Some(version) = record["version"].as_str().filter(|version| !version.is_empty())
+        {
+            self.version = Some(version.to_owned());
         }
         if matches!(record["type"].as_str(), Some("permission-mode" | "user"))
             && record["isSidechain"] != true
@@ -1179,5 +1192,18 @@ mod tests {
         assert_eq!(epoch_ms("2000-03-01T00:00:01.5Z"), Some(951_868_801_500));
         assert_eq!(epoch_ms("2026-11-03T08:26:52.583Z"), Some(1_793_694_412_583));
         assert_eq!(epoch_ms("yesterday"), None);
+    }
+
+    #[test]
+    fn the_claude_code_version_is_the_latest_messages() {
+        let mut conversation = Conversation::new(Lang::English);
+        conversation.apply([
+            r#"{"type":"user","uuid":"u1","version":"2.1.317","message":{"content":"hi"}}"#,
+            r#"{"type":"assistant","uuid":"a1","isSidechain":true,"version":"9.9.9","message":{"content":[{"type":"text","text":"x"}]}}"#,
+        ]);
+        assert_eq!(conversation.version(), Some("2.1.317"), "a subagent's records don't count");
+        conversation.apply([r#"{"type":"assistant","uuid":"a2","version":"2.1.325","message":{"content":[{"type":"text","text":"ok"}]}}"#]);
+        assert_eq!(conversation.version(), Some("2.1.325"));
+        assert_eq!(Conversation::new(Lang::English).version(), None);
     }
 }
