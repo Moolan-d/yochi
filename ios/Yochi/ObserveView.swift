@@ -437,20 +437,6 @@ struct ObserveView: View {
                         .textInputAutocapitalization(isConversation ? .sentences : .never)
                         .autocorrectionDisabled(!isConversation)
                         .accessibilityIdentifier(isConversation ? "agentMessageField" : "terminalCommandField")
-                        // A hardware keyboard: Return sends, Shift+Return is a new
-                        // line at the end (the field makes none by itself;
-                        // Cmd+Return, always sending, is the button's shortcut).
-                        // The software keyboard's Return is not a key press and
-                        // still makes a new line.
-                        .onKeyPress(keys: [.return], phases: .down) { press in
-                            if press.modifiers == .shift {
-                                draft += "\n"
-                                return .handled
-                            }
-                            guard press.modifiers.isEmpty else { return .ignored }
-                            if canSend { send() }
-                            return .handled
-                        }
                     Group {
                         if showsStop {
                             Button { stop() } label: {
