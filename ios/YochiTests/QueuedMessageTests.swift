@@ -48,7 +48,7 @@ struct QueuedMessageTests {
         #expect(QueuedMessage.isCommand("  /effort high\n"))
         #expect(QueuedMessage.isCommand("/plugin:skill-name args"))
         #expect(!QueuedMessage.isCommand("你只负责帮我记录即可"))
-        #expect(!QueuedMessage.isCommand("/Users/ryan/a.txt 看看这个"))
+        #expect(!QueuedMessage.isCommand("/Users/me/a.txt 看看这个"))
         #expect(!QueuedMessage.isCommand("/tmp/notes.md"))
         #expect(!QueuedMessage.isCommand("/model\n然后继续"))
         #expect(!QueuedMessage.isCommand("/"))
