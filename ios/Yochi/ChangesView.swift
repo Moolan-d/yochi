@@ -9,6 +9,9 @@ struct ChangesView: View {
     let askToCommit: (() -> Void)?
     /// A changed file to open straight away, from a path in the conversation.
     var focus: String?
+    /// Quotes lines picked in a diff into the conversation's message field;
+    /// nil where there is no conversation to ask in.
+    var askAboutLines: ((String) -> Void)?
 
     private enum Load: Equatable {
         case loading
@@ -29,7 +32,7 @@ List {
                     Section {
                         ForEach(list.files) { file in
                             NavigationLink {
-                                ChangeDiffView(session: session, file: file, client: client)
+                                ChangeDiffView(session: session, file: file, client: client, askAboutLines: askAboutLines)
                             } label: {
                                 FileChangeRow(file: file)
                             }
@@ -55,7 +58,7 @@ List {
         .homeListStyle()
         .overlay { placeholder }
         .navigationDestination(item: $focused) { file in
-            ChangeDiffView(session: session, file: file, client: client)
+            ChangeDiffView(session: session, file: file, client: client, askAboutLines: askAboutLines)
         }
         .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)
@@ -201,6 +204,7 @@ struct ChangeDiffView: View {
     let session: String
     let file: FileChange
     let client: GatewayClient
+    var askAboutLines: ((String) -> Void)?
 
     private enum Load: Equatable {
         case loading
@@ -209,6 +213,9 @@ struct ChangeDiffView: View {
     }
 
     @State private var load = Load.loading
+    /// Picking lines to ask the Agent about: the ids of the lines picked.
+    @State private var picking = false
+    @State private var picked: Set<Int> = []
 
     var body: some View {
         Group {
@@ -234,7 +241,7 @@ struct ChangeDiffView: View {
                                        description: Text(file.status == .renamed ? "Only renamed." : "The content didn't change. Maybe only its permissions did."))
             case .loaded(let diff, let truncated):
                 ScrollView {
-                    DiffView(diff: diff)
+                    DiffView(diff: diff, picked: picking ? $picked : nil)
                     if truncated {
                         Text("The change is too long; only the beginning is shown.")
                             .font(.footnote)
@@ -260,6 +267,33 @@ struct ChangeDiffView: View {
                 .accessibilityAddTraits(.isHeader)
             }
         }
+        .toolbar {
+            if askAboutLines != nil, case .loaded(let diff, _) = load, !diff.hunks.isEmpty {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(picking ? "Done" : "Select") {
+                        picking.toggle()
+                        if !picking { picked = [] }
+                    }
+                    .accessibilityIdentifier("selectDiffLines")
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if picking, !picked.isEmpty, let askAboutLines, case .loaded(let diff, _) = load {
+                Button {
+                    let lines = diff.hunks.flatMap(\.lines).filter { picked.contains($0.id) }
+                    if let text = DiffQuote.text(path: file.path, lines: lines) { askAboutLines(text) }
+                } label: {
+                    Label("Ask the Agent", systemImage: "text.bubble")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.bar)
+                .accessibilityIdentifier("askAboutLines")
+            }
+        }
         .task { await refresh() }
     }
 
@@ -275,6 +309,8 @@ struct ChangeDiffView: View {
 /// Also used for an edit's diff in the conversation.
 struct DiffView: View {
     let diff: ParsedDiff
+    /// Lines to pick by tapping them; nil when nothing is being picked.
+    var picked: Binding<Set<Int>>?
     @ScaledMetric(relativeTo: .footnote) private var digitWidth = 8
 
     private var numberWidth: CGFloat {
@@ -298,7 +334,8 @@ struct DiffView: View {
                 .accessibilityLabel("Changes from line \(hunk.line)")
                 .accessibilityAddTraits(.isHeader)
                 ForEach(hunk.lines) { line in
-                    DiffLineRow(line: line, numberWidth: numberWidth)
+                    DiffLineRow(line: line, numberWidth: numberWidth, picked: picked.map { $0.wrappedValue.contains(line.id) },
+                                toggle: picked.map { picked in { if !picked.wrappedValue.insert(line.id).inserted { picked.wrappedValue.remove(line.id) } } })
                 }
             }
         }
@@ -308,6 +345,9 @@ struct DiffView: View {
 private struct DiffLineRow: View {
     let line: ParsedDiff.Line
     let numberWidth: CGFloat
+    /// Whether the line is picked; nil when lines can't be picked.
+    var picked: Bool?
+    var toggle: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -328,10 +368,17 @@ private struct DiffLineRow: View {
         }
         .font(.system(.footnote, design: .monospaced))
         .padding(.trailing, 12)
-        .padding(.vertical, 1)
+        .padding(.vertical, picked == nil ? 1 : 6)
         .background(background)
+        .overlay(alignment: .leading) {
+            if picked == true { Rectangle().fill(Color.accentColor).frame(width: 3) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { toggle?() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(line.accessibilityLabel)
+        .accessibilityAddTraits(picked == nil ? [] : .isButton)
+        .accessibilityAddTraits(picked == true ? .isSelected : [])
     }
 
     private var sign: String {
@@ -352,9 +399,9 @@ private struct DiffLineRow: View {
 
     private var background: Color {
         switch line.kind {
-        case .context: .clear
-        case .added: .green.opacity(0.14)
-        case .deleted: .red.opacity(0.14)
+        case .context: picked == true ? Color.accentColor.opacity(0.18) : .clear
+        case .added: picked == true ? Color.accentColor.opacity(0.26) : .green.opacity(0.14)
+        case .deleted: picked == true ? Color.accentColor.opacity(0.26) : .red.opacity(0.14)
         }
     }
 }

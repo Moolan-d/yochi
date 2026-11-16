@@ -744,7 +744,8 @@ struct ObserveView: View {
 
     private var changesPage: some View {
         let ask: (() -> Void)? = isConversation ? { askToCommit() } : nil
-        return ChangesView(session: session.id, client: client, askToCommit: ask, focus: changesFocus)
+        let quote: ((String) -> Void)? = isConversation ? { askAbout($0) } : nil
+        return ChangesView(session: session.id, client: client, askToCommit: ask, focus: changesFocus, askAboutLines: quote)
     }
 
     /// What the Agent has changed, once the page opens and after each turn.
@@ -753,6 +754,13 @@ struct ObserveView: View {
             let paths = list.files.map(\.path)
             if paths != changedPaths { changedPaths = paths }
         }
+    }
+
+    /// Puts lines picked in a diff, quoted, into the draft and comes back to
+    /// the conversation; the user writes the question and sends it.
+    private func askAbout(_ quote: String) {
+        draft = quote + "\n\n" + draft
+        showingChanges = false
     }
 
     /// Fills the request into the draft and comes back; the user sends it.

@@ -107,4 +107,26 @@ struct ChangesTests {
         let diff = ParsedDiff("@@ -1,10 +1,10 @@\n a\n-b\n")
         #expect(diff.hunks[0].lines.count == 2)
     }
+
+    @Test("Picked lines are quoted with the file and their numbers")
+    func quotingPickedLines() throws {
+        let diff = ParsedDiff("@@ -10,3 +10,4 @@\n keep\n-old\n+new\n+more\n")
+        let lines = diff.hunks[0].lines
+        let quote = try #require(DiffQuote.text(path: "ios/Yochi/Foo.swift", lines: Array(lines[1...3])))
+        #expect(quote == "> `ios/Yochi/Foo.swift:11-12`\n>\n> ```diff\n> -old\n> +new\n> +more\n> ```")
+        let one = try #require(DiffQuote.text(path: "a.md", lines: [lines[0]]))
+        #expect(one.hasPrefix("> `a.md:10`\n"))
+        #expect(one.contains("> ```diff\n>  keep\n> ```"), "a context line keeps its space")
+        let removed = try #require(DiffQuote.text(path: "a.md", lines: [lines[1]]))
+        #expect(removed.hasPrefix("> `a.md:11` (deleted lines, old numbers)\n"))
+        #expect(DiffQuote.text(path: "a.md", lines: []) == nil)
+    }
+
+    @Test("A fence outgrows backticks inside the lines, and blank lines stay in the quote")
+    func fencesAndBlankLines() throws {
+        let diff = ParsedDiff("@@ -1,2 +1,2 @@\n+```swift\n+\n")
+        let quote = try #require(DiffQuote.text(path: "x.md", lines: diff.hunks[0].lines))
+        #expect(quote.contains("> ````diff\n> +```swift\n> +\n> ````"))
+        #expect(!quote.contains("\n\n"), "every line is quoted")
+    }
 }

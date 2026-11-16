@@ -220,3 +220,26 @@ struct ParsedDiff: Equatable {
         return (oldStart, oldCount, newStart, newCount, context)
     }
 }
+
+/// Diff lines picked on the phone, as the Markdown a message to the Agent
+/// quotes: the file and the lines' numbers, then the lines in a diff block.
+enum DiffQuote {
+    /// `path:12-18`, the new file's numbers (the old file's for lines that were only deleted).
+    static func text(path: String, lines: [ParsedDiff.Line]) -> String? {
+        guard !lines.isEmpty else { return nil }
+        let kept = lines.filter { $0.kind != .deleted }
+        let numbers = (kept.isEmpty ? lines : kept).map(\.number)
+        let (low, high) = (numbers.min() ?? 0, numbers.max() ?? 0)
+        let range = low == high ? "\(low)" : "\(low)-\(high)"
+        let place = "`\(path):\(range)`" + (kept.isEmpty ? " (deleted lines, old numbers)" : "")
+        let body = lines.map { line -> String in
+            let mark = switch line.kind { case .added: "+"; case .deleted: "-"; case .context: " " }
+            return mark + line.text
+        }
+        // A fence longer than any run of backticks inside, so the block can't end early.
+        let longest = body.map { $0.split(omittingEmptySubsequences: false) { $0 != "`" }.map(\.count).max() ?? 0 }.max() ?? 0
+        let fence = String(repeating: "`", count: max(3, longest + 1))
+        let block = ([place, "", fence + "diff"] + body + [fence]).map { $0.isEmpty ? ">" : "> " + $0 }
+        return block.joined(separator: "\n")
+    }
+}

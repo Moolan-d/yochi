@@ -4772,6 +4772,16 @@
           }
         }
       }
+    },
+    "Ask the Agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问问 Agent"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
