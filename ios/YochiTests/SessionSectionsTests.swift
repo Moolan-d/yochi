@@ -335,6 +335,19 @@ final class SessionSectionsTests: XCTestCase {
         XCTAssertEqual(row(pinned, space: "web").accessibilityLabel(awayFromSpace: true), "已置顶，修复登录，子 Agent，已完成，web · app")
     }
 
+    func testSearchFindsAnyTerminalByItsProgram() throws {
+        let sessions = [
+            try agent("t1", extra: ["program": "claude"]),
+            try session("t2", title: "server", extra: ["program": "node"]),
+            try session("t3", title: "shell", extra: ["program": "zsh"]),
+        ]
+        let inbox = makeInbox(sessions: sessions, spaces: [])
+        XCTAssertEqual(inbox.search("claude").agents.map(\.id), ["t1"])
+        XCTAssertEqual(inbox.search("NODE").terminals.map(\.id), ["t2"])
+        XCTAssertEqual(inbox.search("zsh").terminals.map(\.id), ["t3"], "plain terminals are searched too")
+        XCTAssertEqual(inbox.search("  ").terminals.count, 2, "a blank query matches all")
+    }
+
     func testSearchMatchesWhatTheRowShowsAndWhereItLives() throws {
         let found = row(try agent("t1", extra: ["repo": ["name": "companion", "worktree": "home"]]).with(machine: "vps"),
                         space: "运维", tab: "review")

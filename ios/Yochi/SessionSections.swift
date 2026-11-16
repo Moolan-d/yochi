@@ -212,7 +212,7 @@ extension HomeRow {
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
-        return [title, session.title, session.repo?.name, session.repo?.worktree, tab, space, folder, session.machine]
+        return [title, session.title, session.repo?.name, session.repo?.worktree, session.program, tab, space, folder, session.machine]
             .compactMap { $0 }
             .contains { $0.localizedCaseInsensitiveContains(query) }
     }
