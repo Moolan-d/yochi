@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     fn request() -> RunRequest {
-        RunRequest { id: "r1".into(), machine: None, cwd: "/Users/ryan/app".into(), argv: vec!["claude".into()], space: None, size: None }
+        RunRequest { id: "r1".into(), machine: None, cwd: "/Users/me/app".into(), argv: vec!["claude".into()], space: None, size: None }
     }
 
     #[test]

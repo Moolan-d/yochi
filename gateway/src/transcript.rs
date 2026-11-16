@@ -215,15 +215,15 @@ mod tests {
     #[test]
     fn project_key_replaces_every_non_alphanumeric() {
         assert_eq!(project_key("/private/tmp/companion-conv-exp/work").unwrap(), "-private-tmp-companion-conv-exp-work");
-        assert_eq!(project_key("/Users/ryan/my.app_2").unwrap(), "-Users-ryan-my-app-2");
+        assert_eq!(project_key("/Users/me/my.app_2").unwrap(), "-Users-me-my-app-2");
         assert_eq!(project_key("/a/界").unwrap(), "-a--");
         assert_eq!(project_key(&format!("/{}", "x".repeat(250))), None);
     }
 
     #[test]
     fn pi_names_a_folder_after_the_working_directory() {
-        assert_eq!(pi_folder("/Users/ryan/personal/companion").as_deref(), Some("--Users-ryan-personal-companion--"));
-        assert_eq!(pi_folder("/Volumes/Assets").as_deref(), Some("--Volumes-Assets--"));
+        assert_eq!(pi_folder("/Users/me/app").as_deref(), Some("--Users-me-app--"));
+        assert_eq!(pi_folder("/srv/work").as_deref(), Some("--srv-work--"));
         assert_eq!(pi_folder("/a b/c;d").as_deref(), Some("--a-b-c-d--"), "nothing a shell would read");
         assert_eq!(pi_folder("/"), None);
     }
