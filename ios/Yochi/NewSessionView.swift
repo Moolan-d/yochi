@@ -22,6 +22,8 @@ struct NewSessionView: View {
     @State private var machine: String?
     @State private var program = Program.agent
     @State private var directory = ""
+    /// Sent to the Agent as its first message once it is ready; optional.
+    @State private var firstMessage = ""
     /// The space the user picked; nil follows the directory. "" is a new space.
     @State private var pickedSpace: String?
     @State private var creating = false
@@ -93,6 +95,15 @@ struct NewSessionView: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("newSessionProgram")
+                }
+                if program == .agent {
+                    Section {
+                        TextField("First message", text: $firstMessage, axis: .vertical)
+                            .lineLimit(1...6)
+                            .accessibilityIdentifier("newSessionFirstMessage")
+                    } footer: {
+                        Text("Optional. Sent as the Agent's first message when it is ready, queued until then.")
+                    }
                 }
                 Section {
                     TextField("Directory", text: $directory, prompt: Text("/Users/you/project"))
@@ -185,7 +196,13 @@ struct NewSessionView: View {
             case .created(let session):
                 // Claude Code is typed into the new shell; its conversation
                 // shows from the start rather than once it is up.
-                if program == .agent { client.pageChoices[session] = .conversation }
+                if program == .agent {
+                    client.pageChoices[session] = .conversation
+                    // Typed into the shell it would run as a command: it
+                    // waits, queued, until the Agent reports its status.
+                    let first = firstMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !first.isEmpty { client.enqueue(first, session: session, turn: 0) }
+                }
                 onCreated(session)
                 dismiss()
             case .failed(_, let message):

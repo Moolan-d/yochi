@@ -14,6 +14,14 @@ struct QueuedMessageTests {
         #expect(queued.release(state: "done", turn: 6) == .send)
     }
 
+    @Test("A first message for a new session waits for the Agent to report in")
+    func firstMessageWaitsForTheAgent() {
+        let first = QueuedMessage(text: "start with the tests", turn: 0)
+        #expect(first.release(state: nil, turn: 0) == .wait, "still the shell: typing now would run it as a command")
+        #expect(first.release(state: "blocked", turn: 0) == .wait, "a trust prompt is not ready")
+        #expect(first.release(state: "idle", turn: 0) == .send)
+    }
+
     @Test("A turn that ends waiting on the user keeps it queued")
     func holdsWhileBlocked() {
         #expect(queued.release(state: "blocked", turn: 6) == .wait)

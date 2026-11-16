@@ -4932,6 +4932,26 @@
           }
         }
       }
+    },
+    "First message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第一条消息"
+          }
+        }
+      }
+    },
+    "Optional. Sent as the Agent's first message when it is ready, queued until then." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选。Agent 就绪后作为它的第一条消息发出，在此之前排队等待。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
