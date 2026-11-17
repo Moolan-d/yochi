@@ -1009,50 +1009,8 @@ final class YochiUITests: XCTestCase {
 
     /// The Changes page of a session whose directory has a modified and a new
     /// file, one file's diff, and 「让 Agent 提交」 filling the draft.
-    /// Codex's transcript opens the conversation page, from a made-up rollout
+    /// pi's transcript opens the conversation page, from a made-up session
     /// file held open by a stand-in process (scripts/fixtures).
-    @MainActor
-    func testCodexConversation() throws {
-        guard let name = ProcessInfo.processInfo.environment["YOCHI_CODEX_SESSION_NAME"], !name.isEmpty else {
-            throw XCTSkip("YOCHI_CODEX_SESSION_NAME is not set")
-        }
-        let app = launchUnpaired()
-        pair(app, host: env("YOCHI_HOST"), code: env("YOCHI_CODE"))
-        waitUntilPaired(app)
-
-        let session = sessionCell(app, name: name)
-        _ = session.waitForExistence(timeout: 15)
-        for _ in 0..<6 where !session.isHittable { app.swipeUp() }
-        XCTAssert(session.isHittable, "no Codex session")
-        session.tap()
-        XCTAssert(app.descendants(matching: .any)["agentMessageField"].waitForExistence(timeout: 15), "Codex did not open the conversation page")
-        XCTAssert(text(app, containing: "Please add a greeting file").waitForExistence(timeout: 20), "no user message")
-        XCTAssert(text(app, containing: "for you.").waitForExistence(timeout: 10), "no Agent reply")
-        // The injected context is not shown.
-        XCTAssertFalse(text(app, containing: "environment_context").exists)
-        snapshot("1 codex conversation")
-
-        // The composer's menu offers photos, files and the pasteboard's image.
-        app.buttons["composerMenu"].tap()
-        XCTAssert(app.buttons["选取文件"].waitForExistence(timeout: 5), "no Choose File in the composer menu")
-        XCTAssert(app.buttons["粘贴图片"].exists, "no Paste Image in the composer menu")
-        XCTAssert(app.buttons["运行测试"].exists, "no snippet in the composer menu")
-        snapshot("2 composer menu")
-        // A tap away closes the menu.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
-        // Typed text and a snippet from the + menu share the field. (XCUITest's
-        // keys are not hardware key presses, so the Return shortcuts aren't
-        // exercised here.)
-        let field = app.descendants(matching: .any)["agentMessageField"]
-        field.tap()
-        app.typeText("one")
-        app.buttons["composerMenu"].tap()
-        app.buttons["继续"].tap()
-        XCTAssertEqual(field.value as? String, "one 继续", "the snippet did not go into the message field")
-        leaveAndUnpair(app)
-    }
-
-    /// The same for pi.
     @MainActor
     func testPiConversation() throws {
         guard let name = ProcessInfo.processInfo.environment["YOCHI_PI_SESSION_NAME"], !name.isEmpty else {
@@ -1072,6 +1030,24 @@ final class YochiUITests: XCTestCase {
         XCTAssert(text(app, containing: "remember the milk").waitForExistence(timeout: 10), "no Agent reply")
         XCTAssertFalse(text(app, containing: "private").exists, "the model's thinking is shown")
         snapshot("1 pi conversation")
+
+        // The composer's menu offers photos, files and the pasteboard's image.
+        app.buttons["composerMenu"].tap()
+        XCTAssert(app.buttons["选取文件"].waitForExistence(timeout: 5), "no Choose File in the composer menu")
+        XCTAssert(app.buttons["粘贴图片"].exists, "no Paste Image in the composer menu")
+        XCTAssert(app.buttons["运行测试"].exists, "no snippet in the composer menu")
+        snapshot("2 composer menu")
+        // A tap away closes the menu.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        // Typed text and a snippet from the + menu share the field. (XCUITest's
+        // keys are not hardware key presses, so the Return shortcuts aren't
+        // exercised here.)
+        let field = app.descendants(matching: .any)["agentMessageField"]
+        field.tap()
+        app.typeText("one")
+        app.buttons["composerMenu"].tap()
+        app.buttons["继续"].tap()
+        XCTAssertEqual(field.value as? String, "one 继续", "the snippet did not go into the message field")
         leaveAndUnpair(app)
     }
 

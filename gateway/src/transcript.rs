@@ -241,7 +241,8 @@ mod tests {
             session
         };
         assert_eq!(dialect_of(&session(Some("claude"), None)), Some(Dialect::Claude));
-        assert_eq!(dialect_of(&session(Some("zsh"), Some("Codex"))), Some(Dialect::Codex));
+        assert_eq!(dialect_of(&session(Some("zsh"), Some("Codex"))), None);
+        assert_eq!(dialect_of(&session(Some("zsh"), Some("Pi"))), Some(Dialect::Pi));
         assert_eq!(dialect_of(&session(Some("pi"), None)), Some(Dialect::Pi));
         assert_eq!(dialect_of(&session(Some("htop"), Some("htop"))), None);
     }

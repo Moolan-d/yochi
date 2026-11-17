@@ -159,13 +159,13 @@ mod tests {
     fn the_app_may_open_a_conversation_for_the_agents_the_gateway_reads() {
         let session = |argv: serde_json::Value| Session::from_record(&serde_json::json!({"address": "t1", "state": "live", "argv": argv})).unwrap();
         assert!(session(serde_json::json!(["claude"])).conversation);
-        assert!(session(serde_json::json!(["/usr/local/bin/codex", "--resume"])).conversation);
+        assert!(!session(serde_json::json!(["/usr/local/bin/codex", "--resume"])).conversation, "not read yet");
         assert!(session(serde_json::json!(["node", "/opt/bin/pi.js"])).conversation);
         assert!(!session(serde_json::json!(["gemini"])).conversation);
         assert!(!session(serde_json::json!(["zsh"])).conversation);
         let json = serde_json::to_value(session(serde_json::json!(["zsh"]))).unwrap();
         assert!(json.get("conversation").is_none(), "omitted unless true");
-        assert_eq!(serde_json::to_value(session(serde_json::json!(["codex"]))).unwrap()["conversation"], true);
+        assert_eq!(serde_json::to_value(session(serde_json::json!(["pi"]))).unwrap()["conversation"], true);
     }
 
     use super::*;

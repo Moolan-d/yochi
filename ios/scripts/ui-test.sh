@@ -39,7 +39,7 @@ pairing=
 # terminal. UI-test messages only ever go to this terminal.
 test_terminal=yochi-uitest
 test_session=
-trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill yochi-uitest >/dev/null 2>&1 || true; hc kill yochi-uitest-alt >/dev/null 2>&1 || true; hc kill yochi-uitest-history >/dev/null 2>&1 || true; hc kill yochi-uitest-wheel >/dev/null 2>&1 || true; hc kill yochi-uitest-dialog >/dev/null 2>&1 || true; hc kill yochi-uitest-picker >/dev/null 2>&1 || true; hc kill yochi-uitest-perf >/dev/null 2>&1 || true; hc kill yochi-uitest-shell >/dev/null 2>&1 || true; hc kill yochi-uitest-pane-a >/dev/null 2>&1 || true; hc kill yochi-uitest-pane-b >/dev/null 2>&1 || true; hc kill yochi-uitest-codex >/dev/null 2>&1 || true; hc kill yochi-uitest-pi >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
+trap 'kill $gateway $relay $pairing 2>/dev/null; hc kill yochi-uitest >/dev/null 2>&1 || true; hc kill yochi-uitest-alt >/dev/null 2>&1 || true; hc kill yochi-uitest-history >/dev/null 2>&1 || true; hc kill yochi-uitest-wheel >/dev/null 2>&1 || true; hc kill yochi-uitest-dialog >/dev/null 2>&1 || true; hc kill yochi-uitest-picker >/dev/null 2>&1 || true; hc kill yochi-uitest-perf >/dev/null 2>&1 || true; hc kill yochi-uitest-shell >/dev/null 2>&1 || true; hc kill yochi-uitest-pane-a >/dev/null 2>&1 || true; hc kill yochi-uitest-pane-b >/dev/null 2>&1 || true; hc kill yochi-uitest-pi >/dev/null 2>&1 || true; rm -rf "$state" "${dialog_dir:-}"' EXIT
 
 run_output=$(hc run --bg --rm --no-parent --no-notify --name "$test_terminal" --json -- /bin/cat)
 test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",d.get("address",d.get("id"))); print(t.get("address") if isinstance(t,dict) else t)')
@@ -140,25 +140,14 @@ start_picker_session() {
 # repository's own Claude Code history. One project command for completion.
 # A repository left by testChangesPage would make the folder a project of
 # its own, untrusted, so it goes first.
-# A process named codex holding a rollout file that Codex would write, with a
-# made-up conversation in it, for the Codex conversation page.
-start_codex_session() {
-    dir="$(pwd)/build/uitest-codex"
-    rm -rf "$dir"
-    mkdir -p "$dir/.codex/sessions/2026/11/17"
-    cp scripts/fixtures/codex-rollout.jsonl "$dir/.codex/sessions/2026/11/17/rollout-uitest.jsonl"
-    cp scripts/fixtures/codex.py "$dir/codex.py"
-    hc run --bg --rm --no-parent --no-notify --name yochi-uitest-codex --cwd "$dir" --json \
-        -- /usr/bin/python3 "$dir/codex.py" "$dir/.codex/sessions/2026/11/17/rollout-uitest.jsonl" > /dev/null
-}
-
-# The same for pi, whose files live under ~/.pi/agent/sessions.
+# A process holding a session file that pi would write, with a made-up
+# conversation in it, for the pi conversation page.
 start_pi_session() {
     dir="$(pwd)/build/uitest-pi"
     rm -rf "$dir"
     mkdir -p "$dir/.pi/agent/sessions/--work-uitest-pi--"
     cp scripts/fixtures/pi-session.jsonl "$dir/.pi/agent/sessions/--work-uitest-pi--/2026-11-17T10-00-00-000Z_uitest.jsonl"
-    cp scripts/fixtures/codex.py "$dir/pi.py"
+    cp scripts/fixtures/hold-open.py "$dir/pi.py"
     hc run --bg --rm --no-parent --no-notify --name yochi-uitest-pi --cwd "$dir" --json \
         -- /usr/bin/python3 "$dir/pi.py" "$dir/.pi/agent/sessions/--work-uitest-pi--/2026-11-17T10-00-00-000Z_uitest.jsonl" > /dev/null
 }
@@ -191,7 +180,7 @@ start_changes_repo() {
 # testChangesPage run only when named, as do testTabMenu, testClaudeStartedInTerminal
 # (starts Claude Code without sending it anything) and the testPerf*
 # measurements (scripts/perf-test.sh).
-for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testFullScreenScrollsHistory testConversationCards testHomeSample testSwipeSwitchesPanes testCodexConversation testPiConversation}; do
+for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testInviteLinkReplacesPairing testAgentMessageIsAccepted testShellCommandsRun testAgentMessageDraftSurvivesNavigation testNewSessionSheet testFullScreenDrawsForThePhone testTerminalScrollsHistory testFullScreenScrollsHistory testConversationCards testHomeSample testSwipeSwitchesPanes testPiConversation}; do
     if [ "$test" = testPairAndObserveOverRelay ]; then
         # With the tailnet off the link has only the Relay, so the phone pairs
         # and connects through it. Once it has, the tailnet comes back on and
@@ -275,10 +264,6 @@ for test in ${TESTS:-testPairObserveAndUnpair testPairAndObserveOverRelay testIn
     if [ "$test" = testPickerFromScreen ] || [ "$test" = testNoticeFromScreen ] || [ "$test" = testPermissionModeFromScreen ] ; then
         start_picker_session
         extra="TEST_RUNNER_YOCHI_PICKER_SESSION_NAME=yochi-uitest-picker"
-    fi
-    if [ "$test" = testCodexConversation ]; then
-        start_codex_session
-        extra="TEST_RUNNER_YOCHI_CODEX_SESSION_NAME=yochi-uitest-codex"
     fi
     if [ "$test" = testPiConversation ]; then
         start_pi_session

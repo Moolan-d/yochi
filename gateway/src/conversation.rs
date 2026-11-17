@@ -181,9 +181,12 @@ impl Dialect {
     /// The Agent a terminal runs, from its program and the command it started
     /// with; None for anything whose transcript the Gateway can't read.
     pub fn of(program: Option<&str>, command: Option<&str>) -> Option<Self> {
+        // Codex's rollout reading is not ready for real sessions yet: off
+        // until it is, so Codex stays a terminal on the phone.
+        const READS_CODEX: bool = false;
         [program, command].into_iter().flatten().find_map(|name| match name.to_ascii_lowercase().as_str() {
             "claude" => Some(Self::Claude),
-            "codex" => Some(Self::Codex),
+            "codex" if READS_CODEX => Some(Self::Codex),
             "pi" => Some(Self::Pi),
             _ => None,
         })
