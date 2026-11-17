@@ -47,6 +47,9 @@ test_session=$(printf '%s' "$run_output" | python3 -c 'import json,sys; d=json.l
 rm -rf "$RESULTS" "$SHOTS"
 mkdir -p "$RESULTS" "$SHOTS"
 xcrun simctl bootstatus "$sim_id" -b > /dev/null
+# A simulator that has seen the Mac's keyboard keeps the on-screen one off
+# the screen, and the tests tap its keys. Keep it up either way.
+xcrun simctl spawn "$sim_id" defaults write com.apple.keyboard.preferences AutomaticMinimizationEnabled -bool false
 xcodebuild -project Yochi.xcodeproj -scheme Yochi -destination "$DESTINATION" \
     -derivedDataPath build -quiet build-for-testing
 
