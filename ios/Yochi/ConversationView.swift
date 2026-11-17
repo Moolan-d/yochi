@@ -98,45 +98,64 @@ struct ConversationPane: View {
         }
     }
 
+    /// Up to this many rows the list makes every one of them.
+    private static var eagerRows: Int { 60 }
+
+    @ViewBuilder
+    private var rows: some View {
+        let latestTodos = feed.items.last { $0.kind == .todos }?.id
+        ForEach(entries) { entry in
+            switch entry {
+            case .item(let item):
+                row(item, latestTodos: latestTodos)
+            case .folded(let id, let steps):
+                // One view per entry, whether its steps show or not.
+                VStack(alignment: .leading, spacing: 14) {
+                    FoldedSteps(steps: steps, expanded: openFolds.contains(id)) {
+                        withAnimation(.snappy) {
+                            if !openFolds.insert(id).inserted { openFolds.remove(id) }
+                        }
+                    }
+                    if openFolds.contains(id) {
+                        ForEach(steps) { row($0, latestTodos: latestTodos) }
+                    }
+                }
+            }
+        }
+        if working {
+            Label {
+                Text("The Agent is working…")
+            } icon: {
+                ProgressView().controlSize(.small)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("agentWorking")
+        }
+        switch feed.phase {
+        case .failed(let reason):
+            HStack {
+                BannerLabel(text: String(localized: "Disconnected: \(reason)"), systemImage: "wifi.exclamationmark")
+                Button("Retry", action: retry).buttonStyle(.bordered)
+            }
+        case .closed(let reason):
+            BannerLabel(text: reason, systemImage: "stop.circle")
+        default:
+            EmptyView()
+        }
+    }
+
     private var list: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                let latestTodos = feed.items.last { $0.kind == .todos }?.id
-                ForEach(entries) { entry in
-                    switch entry {
-                    case .item(let item):
-                        row(item, latestTodos: latestTodos)
-                    case .folded(let id, let steps):
-                        FoldedSteps(steps: steps, expanded: openFolds.contains(id)) {
-                            withAnimation(.snappy) {
-                                if !openFolds.insert(id).inserted { openFolds.remove(id) }
-                            }
-                        }
-                        if openFolds.contains(id) {
-                            ForEach(steps) { row($0, latestTodos: latestTodos) }
-                        }
-                    }
-                }
-                if working {
-                    Label {
-                        Text("The Agent is working…")
-                    } icon: {
-                        ProgressView().controlSize(.small)
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("agentWorking")
-                }
-                switch feed.phase {
-                case .failed(let reason):
-                    HStack {
-                        BannerLabel(text: String(localized: "Disconnected: \(reason)"), systemImage: "wifi.exclamationmark")
-                        Button("Retry", action: retry).buttonStyle(.bordered)
-                    }
-                case .closed(let reason):
-                    BannerLabel(text: reason, systemImage: "stop.circle")
-                default:
-                    EmptyView()
+            Group {
+                // A lazy stack guesses the heights of rows it hasn't made.
+                // With few rows of very unlike heights (a folded turn's line
+                // next to a long reply) its guess never settles, and the page
+                // opens on nothing until a scroll: few rows are all made.
+                if entries.count <= Self.eagerRows {
+                    VStack(alignment: .leading, spacing: 14) { rows }
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 14) { rows }
                 }
             }
             .padding(.horizontal, 16)
