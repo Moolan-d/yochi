@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os
 import Synchronization
 
 /// How a connection reached the Gateway.
@@ -294,9 +295,7 @@ private struct TailnetLink: GatewayLink {
     }
 
     func ping() async -> Bool {
-        await withCheckedContinuation { done in
-            task.sendPing { done.resume(returning: $0 == nil) }
-        }
+        await task.pong()
     }
 
     func cancel() {
@@ -433,9 +432,7 @@ private actor RelayLink: GatewayLink {
     }
 
     nonisolated func ping() async -> Bool {
-        await withCheckedContinuation { done in
-            task.sendPing { done.resume(returning: $0 == nil) }
-        }
+        await task.pong()
     }
 
     nonisolated func cancel() {
@@ -498,5 +495,23 @@ extension Data {
     var base64URL: String {
         base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+extension URLSessionWebSocketTask {
+    /// Whether a ping was answered. URLSession can call a ping's handler more
+    /// than once, with the pong and again when the connection drops, and a
+    /// continuation resumed twice traps: only the first call counts.
+    func pong() async -> Bool {
+        let first = OSAllocatedUnfairLock(initialState: true)
+        return await withCheckedContinuation { done in
+            sendPing { error in
+                let isFirst = first.withLock { first in
+                    defer { first = false }
+                    return first
+                }
+                if isFirst { done.resume(returning: error == nil) }
+            }
+        }
     }
 }
