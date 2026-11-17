@@ -903,7 +903,8 @@ final class YochiUITests: XCTestCase {
             search.typeText("运维")
             XCTAssert(app.cells.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "升级 Caddy 配置")).firstMatch
                 .waitForExistence(timeout: 5), "search by space found nothing")
-            XCTAssert(app.staticTexts["Agent"].exists, "no Agents section in the results")
+            // That row is in the unfiltered Inbox too: the results are up once their section is.
+            XCTAssert(app.staticTexts["Agent"].waitForExistence(timeout: 5), "no Agents section in the results")
             snapshot("inbox-search\(suffix)")
             search.typeText("没有的东西")
             XCTAssert(app.staticTexts["没有匹配「运维没有的东西」的 Agent"].waitForExistence(timeout: 5), "no empty search result")
