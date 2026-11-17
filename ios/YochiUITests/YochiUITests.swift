@@ -1049,6 +1049,7 @@ final class YochiUITests: XCTestCase {
         app.buttons["composerMenu"].tap()
         app.buttons["继续"].tap()
         XCTAssertEqual(field.value as? String, "one 继续", "the snippet did not go into the message field")
+        leaveAndUnpair(app)
     }
 
     /// The same for pi.
@@ -1071,6 +1072,7 @@ final class YochiUITests: XCTestCase {
         XCTAssert(text(app, containing: "remember the milk").waitForExistence(timeout: 10), "no Agent reply")
         XCTAssertFalse(text(app, containing: "private").exists, "the model's thinking is shown")
         snapshot("1 pi conversation")
+        leaveAndUnpair(app)
     }
 
     @MainActor
