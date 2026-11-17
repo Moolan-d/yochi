@@ -50,6 +50,23 @@ xcrun simctl bootstatus "$sim_id" -b > /dev/null
 xcodebuild -project Yochi.xcodeproj -scheme Yochi -destination "$DESTINATION" \
     -derivedDataPath build -quiet build-for-testing
 
+# A checkout with a BUNDLE_ID_SUFFIX and one without build Yochi under two
+# bundle IDs, and both claim yochi://. With both installed the system may hand
+# a pairing link to the other one, so the app under test never sees it. Remove
+# any other app on this simulator that claims the scheme.
+tested_id=$(plutil -extract CFBundleIdentifier raw build/Build/Products/Debug-iphonesimulator/Yochi.app/Info.plist)
+xcrun simctl listapps "$sim_id" | plutil -convert json -o - - | python3 -c '
+import json, sys
+for bundle, app in json.load(sys.stdin).items():
+    if app.get("ApplicationType") == "User" and app.get("Path"):
+        print(bundle + "\t" + app["Path"])' |
+while IFS="$(printf '\t')" read -r bundle path; do
+    [ "$bundle" != "$tested_id" ] || continue
+    plutil -extract CFBundleURLTypes json -o - "$path/Info.plist" 2>/dev/null | grep -q '"yochi"' || continue
+    echo "removing $bundle from $SIM: it also opens yochi:// links" >&2
+    xcrun simctl uninstall "$sim_id" "$bundle"
+done
+
 failed=0
 xcodebuild -project Yochi.xcodeproj -scheme Yochi -destination "$DESTINATION" \
     -derivedDataPath build -quiet test-without-building \
