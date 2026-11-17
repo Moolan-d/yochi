@@ -47,7 +47,19 @@ impl Conversation {
                 if let Some(error) = message["errorMessage"].as_str().filter(|error| !error.trim().is_empty())
                     && !id.is_empty()
                 {
-                    touched.push(self.upsert(Item::Notice { id: format!("{id}:error"), text: clip(error.trim(), 500), code: None }));
+                    // Stopped by the user, in the phone's language; anything
+                    // else as its first line (some are a page of HTML).
+                    let (text, code) = if message["stopReason"] == "aborted" {
+                        (self.lang.pick("已中断", "Interrupted").to_owned(), Some("interrupted"))
+                    } else {
+                        (clip(error.trim().lines().next().unwrap_or_default().trim(), 300), None)
+                    };
+                    // pi retries a failed request, and each try is a record:
+                    // the same failure in a row is said once.
+                    let repeated = matches!(self.items.last(), Some(Item::Notice { text: last, .. }) if *last == text);
+                    if !repeated {
+                        touched.push(self.upsert(Item::Notice { id: format!("{id}:error"), text, code }));
+                    }
                 }
                 touched
             }
@@ -202,5 +214,21 @@ mod tests {
         assert!(matches!(&items[0], Item::Tool { state: ToolState::Error, output: Some(_), .. }));
         assert!(matches!(&items[1], Item::Notice { text, code: None, .. } if text == "rate limited"));
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn retried_failures_are_said_once_and_a_stop_is_an_interruption() {
+        let mut conversation = Conversation::pi(Lang::English);
+        conversation.apply([
+            r#"{"type":"message","id":"a1","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"API error (401): 401 <html>\r\n<head>"}}"#,
+            r#"{"type":"message","id":"a2","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"API error (401): 401 <html>\r\n<head>"}}"#,
+            r#"{"type":"message","id":"a3","message":{"role":"assistant","content":[{"type":"thinking","thinking":"x"}],"stopReason":"aborted","errorMessage":"Operation aborted"}}"#,
+            r#"{"type":"message","id":"a4","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"API error (401): 401 <html>\r\n<head>"}}"#,
+        ]);
+        let items = conversation.items();
+        assert_eq!(items.len(), 3, "{items:?}");
+        assert!(matches!(&items[0], Item::Notice { id, text, code: None } if id == "a1:error" && text == "API error (401): 401 <html>"));
+        assert!(matches!(&items[1], Item::Notice { text, code: Some("interrupted"), .. } if text == "Interrupted"));
+        assert!(matches!(&items[2], Item::Notice { id, .. } if id == "a4:error"));
     }
 }
