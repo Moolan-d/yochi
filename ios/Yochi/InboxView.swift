@@ -31,40 +31,16 @@ struct InboxList<Banner: View>: View {
     var body: some View {
         let _ = Perf.count("InboxList")
         let found = searching ? inbox.search(query) : nil
-        List {
-            banner
-            if let found {
-                if !found.agents.isEmpty {
-                    Section {
-                        ForEach(found.agents) { row in
-                            agentLink(row)
-                        }
-                    } header: {
-                        SectionTitle("Agents")
-                    }
+        ScrollViewReader { proxy in
+            list(found)
+                .onChange(of: query) {
+                    // The list stays wherever the Inbox had been scrolled to, which
+                    // leaves the first results under the search field. Its first
+                    // row's bottom edge at the bottom is the top of the list.
+                    guard let first = found?.agents.first ?? found?.terminals.first else { return }
+                    Task { proxy.scrollTo(first.id, anchor: .bottom) }
                 }
-                if !found.terminals.isEmpty {
-                    Section {
-                        ForEach(found.terminals) { row in
-                            terminalLink(row)
-                        }
-                    } header: {
-                        SectionTitle("Terminals")
-                    }
-                }
-            } else {
-                ForEach(inbox.sections) { section in
-                    Section {
-                        ForEach(section.rows) { row in
-                            agentLink(row, underNeedsYou: section.kind == .needsYou)
-                        }
-                    } header: {
-                        SectionTitle(verbatim: section.kind.title)
-                    }
-                }
-            }
         }
-        .homeListStyle()
         .searchable(text: $searchText, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always),
                     prompt: "Jump to an Agent or terminal")
         .background {
@@ -107,6 +83,43 @@ struct InboxList<Banner: View>: View {
                 }
             }
         }
+    }
+
+    private func list(_ found: (agents: [HomeRow], terminals: [HomeRow])?) -> some View {
+        List {
+            banner
+            if let found {
+                if !found.agents.isEmpty {
+                    Section {
+                        ForEach(found.agents) { row in
+                            agentLink(row)
+                        }
+                    } header: {
+                        SectionTitle("Agents")
+                    }
+                }
+                if !found.terminals.isEmpty {
+                    Section {
+                        ForEach(found.terminals) { row in
+                            terminalLink(row)
+                        }
+                    } header: {
+                        SectionTitle("Terminals")
+                    }
+                }
+            } else {
+                ForEach(inbox.sections) { section in
+                    Section {
+                        ForEach(section.rows) { row in
+                            agentLink(row, underNeedsYou: section.kind == .needsYou)
+                        }
+                    } header: {
+                        SectionTitle(verbatim: section.kind.title)
+                    }
+                }
+            }
+        }
+        .homeListStyle()
     }
 
     private func agentLink(_ row: HomeRow, underNeedsYou: Bool = false) -> some View {
