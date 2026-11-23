@@ -78,7 +78,8 @@ const control = item => (item && !item.isBinary ? JSON.parse(item.data) : null);
 const data = item => (item?.isBinary ? decodeFrame(item.data) : null);
 
 async function startRelay() {
-    const env = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', RELAY_REGISTRATION_KEY: KEY, PING_INTERVAL_S: '0' };
+    // Low water marks so a phone that stops reading backs up the relay quickly.
+    const env = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', RELAY_REGISTRATION_KEY: KEY, PING_INTERVAL_S: '0', FLOW_HIGH_WATER_MB: '0.25', FLOW_LOW_WATER_MB: '0.0625' };
     const child = CLOUDFLARE
         ? spawn(path.join(ROOT, 'node_modules/.bin/wrangler'), ['dev', '--local', '--port', String(PORT), '--var', `RELAY_REGISTRATION_KEY:${KEY}`], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] })
         : spawn(process.execPath, ['index.mjs'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -212,6 +213,41 @@ try {
         after = err.message;
     }
     check('...after which the route is offline (502)', after === 'HTTP 502', after);
+
+    // Node only: the Worker never stops reading the Gateway.
+    if (!CLOUDFLARE) {
+        const route = newRoute();
+        const gw3 = await gateway(route);
+        let pongs = 0;
+        gw3.on('pong', () => pongs++);
+        const slow = socket(`${BASE}/c/${route}`);
+        await slow.opened;
+        const openSlow = control(await gw3.next());
+        const fast = socket(`${BASE}/c/${route}`);
+        await fast.opened;
+        const openFast = control(await gw3.next());
+        slow.pause();
+        // Until the relay stops reading the Gateway for the phone that doesn't read.
+        const chunk = randomBytes(64 * 1024);
+        for (let i = 0; i < 512 && !pongs; i++) {
+            gw3.send(encodeFrame(BIN.DATA, openSlow.id, chunk));
+            if (i % 8 === 7) await sleep(20);
+        }
+        await sleep(200);
+        check('a Gateway held back by a phone that stops reading still gets pongs', pongs > 0, 'no pong');
+
+        gw3.send(encodeFrame(BIN.DATA, openFast.id, new Uint8Array([7])));
+        slow.resume();
+        let reached = false;
+        for (let item = await fast.next(10_000); item; item = await fast.next(10_000)) {
+            if (item.isBinary && item.data.length === 1 && item.data[0] === 7) {
+                reached = true;
+                break;
+            }
+        }
+        check('...and once that phone reads again, the Gateway is read again', reached);
+        gw3.close(1000);
+    }
 } catch (err) {
     failures++;
     console.log(`  ✗ ${err.stack || err}`);

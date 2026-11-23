@@ -45,21 +45,32 @@ const MAX_GATEWAYS = limit(env.MAX_GATEWAYS, 1000);
 const MAX_STREAMS = limit(env.MAX_STREAMS, 64); // phone streams per Gateway
 const STALL_MS = limit(env.STALL_TIMEOUT_S, 60) * 1000; // a phone that drains nothing this long is cut off
 const PING_INTERVAL_MS = limit(env.PING_INTERVAL_S, 30) * 1000;
+const MB = 1024 * 1024;
+const mb = bytes => `${(bytes / MB).toFixed(1)} MB`;
 // Flow control: above HIGH_WATER buffered bytes the sender is paused until
 // the buffer drains below LOW_WATER.
-const HIGH_WATER = 4 * 1024 * 1024;
-const LOW_WATER = 512 * 1024;
+const HIGH_WATER = (limit(env.FLOW_HIGH_WATER_MB, 4) || 4) * MB;
+const LOW_WATER = Math.min((limit(env.FLOW_LOW_WATER_MB, 0.5) || 0.5) * MB, HIGH_WATER / 2);
 const FLOW_TICK_MS = 25;
+// While the Gateway socket is paused the relay can't read the Gateway's pings,
+// so it sends unsolicited pongs (RFC 6455 §5.5.3) this often: a Gateway that
+// is being pushed back on must not take the relay for gone and redial.
+const PAUSED_PONG_MS = 5_000;
+// A pause this long is logged (its cause and, when it ends, its length).
+const PAUSE_LOG_MS = 2_000;
 
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** routeHash -> Gateway */
 const gateways = new Map();
+/** Numbers Gateways in the log, so the route hash never appears there. */
+let registrations = 0;
 
 class Gateway {
     constructor(ws, route) {
         this.ws = ws;
         this.route = route;
+        this.tag = `gateway #${++registrations}`;
         /** stream id -> phone WebSocket */
         this.streams = new Map();
         this.nextId = 1;
@@ -73,7 +84,18 @@ class Gateway {
         /** phone sockets paused until the Gateway socket drains */
         this.waiting = new Set();
         this.paused = false;
+        /** {since, ponged, id, bytes, logged}: when this pause began, the last unsolicited pong, the stream that caused it, and whether it was logged */
+        this.pause = null;
         this.flowTimer = null;
+    }
+
+    /** Keep the Gateway's heartbeat satisfied while its socket isn't read. */
+    keepAlive(now) {
+        if (now - this.pause.ponged < PAUSED_PONG_MS || this.ws.readyState !== WebSocket.OPEN) return;
+        this.pause.ponged = now;
+        try {
+            this.ws.pong();
+        } catch {}
     }
 
     send(frame) {
@@ -118,6 +140,8 @@ class Gateway {
             if (!this.paused) {
                 this.paused = true;
                 this.ws.pause();
+                this.pause = { since: Date.now(), ponged: 0, id, bytes: phone.bufferedAmount, logged: false };
+                this.keepAlive(this.pause.since);
             }
             this.startFlow();
         }
@@ -146,6 +170,7 @@ class Gateway {
                 sink.last = level;
                 sink.since = now;
             } else if (STALL_MS && now - sink.since > STALL_MS) {
+                console.log(`[relay] ${this.tag}: stream ${id} drained nothing for ${STALL_MS / 1000}s with ${mb(level)} queued; cut off`);
                 this.sinks.delete(id);
                 sink.phone.terminate(); // its close handler tells the Gateway
             }
@@ -153,7 +178,15 @@ class Gateway {
         if (this.paused && !this.sinks.size) {
             this.paused = false;
             this.isAlive = true; // pongs were not read while paused
+            if (this.pause.logged) console.log(`[relay] ${this.tag}: reading it again after ${((now - this.pause.since) / 1000).toFixed(1)}s`);
+            this.pause = null;
             if (this.ws.readyState === WebSocket.OPEN) this.ws.resume();
+        } else if (this.paused) {
+            this.keepAlive(now);
+            if (!this.pause.logged && now - this.pause.since >= PAUSE_LOG_MS) {
+                this.pause.logged = true;
+                console.log(`[relay] ${this.tag}: not reading it, stream ${this.pause.id} had ${mb(this.pause.bytes)} queued for the phone (over ${mb(HIGH_WATER)})`);
+            }
         }
         if (this.waiting.size && (this.ws.bufferedAmount < LOW_WATER || this.ws.readyState !== WebSocket.OPEN)) {
             for (const phone of this.waiting) phone.resume();
@@ -267,7 +300,7 @@ function handleGateway(ws, route) {
             gateway = new Gateway(ws, route);
             gateways.set(route, gateway);
             ws.send(JSON.stringify({ t: 'registered', v: PROTOCOL }));
-            console.log(`[relay] gateway registered; gateways=${gateways.size}`);
+            console.log(`[relay] ${gateway.tag} registered; gateways=${gateways.size}`);
             return;
         }
         if (gateway && frame.t === 'close') gateway.gatewayClosed(String(frame.id), frame.code, frame.reason);
@@ -284,7 +317,7 @@ function handleGateway(ws, route) {
         if (gateways.get(gateway.route) === gateway) {
             gateways.delete(gateway.route);
             gateway.destroy('Gateway disconnected');
-            console.log(`[relay] gateway disconnected; gateways=${gateways.size}`);
+            console.log(`[relay] ${gateway.tag} disconnected; gateways=${gateways.size}`);
         }
     });
 

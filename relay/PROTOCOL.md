@@ -35,7 +35,7 @@ Gateway ──WSS /gateway?route=<hash>──▶ 中继 ◀──WSS /c/<路由 
   - 双向：`{"t":"close","id":"s1","code":1000,"reason":""}`，表示这条流结束了。Gateway 发出时，中继按这个关闭码关闭手机连接；手机断开时，中继发给 Gateway。未知 `id` 一律忽略。
 - **二进制帧（数据）**：`[kind:u8][idLen:u8][id:utf8][payload]`，`kind` 为 1（DATA），`payload` 是手机那条 WebSocket 上的一条二进制消息，原样转发。
 
-中继每 30 秒 ping 一次 Gateway。Gateway 也应自己发 ping，超时就重连。
+中继每 30 秒 ping 一次 Gateway。Gateway 也应自己发 ping，超时就重连，但要把中继发来的任何帧都算作中继还在，不能只认自己 ping 的回应：中继因流控暂停读 Gateway 时看不到 Gateway 的 ping，会每 5 秒主动发一个 pong（RFC 6455 §5.5.3）。
 
 ## 手机一侧
 
@@ -56,4 +56,4 @@ Gateway ──WSS /gateway?route=<hash>──▶ 中继 ◀──WSS /c/<路由 
 | 单条手机消息 | 128 KiB |
 | 每个 Gateway 同时打开的流（`MAX_STREAMS`） | 64 |
 | 同时在线的 Gateway（`MAX_GATEWAYS`，仅 Node 版） | 1000 |
-| 流控（仅 Node 版） | 缓冲超过 4 MiB 时暂停读对端，降到 512 KiB 以下再继续；手机 60 秒（`STALL_TIMEOUT_S`）一点都不读就断开 |
+| 流控（仅 Node 版） | 缓冲超过 4 MiB（`FLOW_HIGH_WATER_MB`）时暂停读对端，降到 512 KiB（`FLOW_LOW_WATER_MB`）以下再继续；手机 60 秒（`STALL_TIMEOUT_S`）一点都不读就断开。暂停超过 2 秒、恢复和断开都会记日志 |
