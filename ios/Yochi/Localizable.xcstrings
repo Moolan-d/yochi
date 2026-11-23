@@ -2472,12 +2472,12 @@
         }
       }
     },
-    "Once paired, this iPhone can see and control every session terminal on the main Mac: it can run commands as your account on that Mac and the machines it connects to." : {
+    "Once paired, this device can see and control every session terminal on the main Mac: it can run commands as your account on that Mac and the machines it connects to." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "配对后，此 iPhone 可以查看并操作主 Mac 上的全部会话终端，相当于用你的账户在该 Mac 及其连接的机器上执行命令。"
+            "value" : "配对后，这台设备可以查看并操作主 Mac 上的全部会话终端，相当于用你的账户在该 Mac 及其连接的机器上执行命令。"
           }
         }
       }
@@ -3681,12 +3681,12 @@
         }
       }
     },
-    "The Gateway no longer accepts this iPhone. Its pairing may have been removed on the main Mac." : {
+    "The Gateway no longer accepts this device. Its pairing may have been removed on the main Mac." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Gateway 不再接受此 iPhone，可能已在主 Mac 上移除了它的配对。"
+            "value" : "Gateway 不再接受这台设备，可能已在主 Mac 上移除了它的配对。"
           }
         }
       }
@@ -3961,22 +3961,22 @@
         }
       }
     },
-    "This iPhone will remove its pairing with that Gateway. If connected, the Gateway removes this device too; otherwise run yochi revoke on the main Mac." : {
+    "This device will remove its pairing with that Gateway. If connected, the Gateway removes it too; otherwise run yochi revoke on the main Mac." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此 iPhone 将删除与该 Gateway 的配对。已连接时 Gateway 会同时移除这台设备，否则请在主 Mac 上运行 yochi revoke。"
+            "value" : "这台设备将删除与该 Gateway 的配对。已连接时 Gateway 会同时移除它，否则请在主 Mac 上运行 yochi revoke。"
           }
         }
       }
     },
-    "This iPhone's pairing with %@ will be removed." : {
+    "This device's pairing with %@ will be removed." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此 iPhone 与 %@ 的配对将被删除。"
+            "value" : "这台设备与 %@ 的配对将被删除。"
           }
         }
       }
@@ -4913,12 +4913,12 @@
         }
       }
     },
-    "Snippets are kept on this iPhone. The + menu in a conversation inserts them into the message." : {
+    "Snippets are kept on this device. The + menu in a conversation inserts them into the message." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "常用语只保存在这台 iPhone 上。对话里的 + 菜单可以把它们插入消息。"
+            "value" : "常用语只保存在这台设备上。对话里的 + 菜单可以把它们插入消息。"
           }
         }
       }

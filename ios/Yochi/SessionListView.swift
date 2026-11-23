@@ -96,7 +96,7 @@ private struct ConnectionState: View {
             ContentUnavailableView {
                 Label("Pairing no longer valid", systemImage: "key.slash")
             } description: {
-                Text("The Gateway no longer accepts this iPhone. Its pairing may have been removed on the main Mac.")
+                Text("The Gateway no longer accepts this device. Its pairing may have been removed on the main Mac.")
             } actions: {
                 Button("Pair Again", action: reenter)
                     .buttonStyle(.borderedProminent)

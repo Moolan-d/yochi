@@ -104,7 +104,7 @@ struct ContentView: View {
             // iOS drops `.cancel` buttons from this popover, so keeping is a plain button.
             Button("Keep Current Pairing") {}
         } message: { _ in
-            Text("This iPhone's pairing with \(config?.host ?? String(localized: "the current Gateway")) will be removed.")
+            Text("This device's pairing with \(config?.host ?? String(localized: "the current Gateway")) will be removed.")
         }
         .onChange(of: config, initial: true) { _, config in
             if let config { client.connect(config) }
@@ -336,7 +336,7 @@ struct PairingView: View {
                 }
                 .disabled(!canPair)
             } footer: {
-                Text("Once paired, this iPhone can see and control every session terminal on the main Mac: it can run commands as your account on that Mac and the machines it connects to.")
+                Text("Once paired, this device can see and control every session terminal on the main Mac: it can run commands as your account on that Mac and the machines it connects to.")
             }
         }
         .onSubmit { if canPair { Task { await pair() } } }

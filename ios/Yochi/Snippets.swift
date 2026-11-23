@@ -93,7 +93,7 @@ struct SnippetsView: View {
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("addSnippet")
             } footer: {
-                Text("Snippets are kept on this iPhone. The + menu in a conversation inserts them into the message.")
+                Text("Snippets are kept on this device. The + menu in a conversation inserts them into the message.")
             }
             Section {
                 Button("Restore Default Snippets", role: .destructive) { store.resetToDefaults() }

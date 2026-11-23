@@ -191,7 +191,7 @@ struct GatewayDetailView: View {
             Section {
                 Button("Unpair", role: .destructive) { confirmingForget = true }
             } footer: {
-                Text("This iPhone will remove its pairing with that Gateway. If connected, the Gateway removes this device too; otherwise run yochi revoke on the main Mac.")
+                Text("This device will remove its pairing with that Gateway. If connected, the Gateway removes it too; otherwise run yochi revoke on the main Mac.")
             }
         }
         .navigationTitle("Gateway")
