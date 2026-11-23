@@ -39,16 +39,20 @@ struct SampleHomeView: View {
     }
 
     private func stack<Root: View>(_ path: Binding<[Route]>, title: LocalizedStringKey, @ViewBuilder root: () -> Root) -> some View {
-        NavigationStack(path: path) {
+        HomeNavigation(path: path, title: title) {
             root()
-                .navigationTitle(title)
-                .navigationDestination(for: Route.self) { route in
-                    HomeRouteView(route: route, sessions: data.sessions, spaces: data.spaces, seen: [:],
-                                  queued: { $0 == "t4" }) { session in
-                        Text(session.title).navigationTitle(session.title)
-                            .toolbar(.hidden, for: .tabBar)
-                    }
-                }
+        } routePage: { route in
+            HomeRouteView(route: route, sessions: data.sessions, spaces: data.spaces, seen: [:],
+                          queued: { $0 == "t4" }) { session in
+                Text(session.title).navigationTitle(session.title)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+        } sessionPage: { session in
+            Text(session.title).navigationTitle(session.title)
+        } buttons: {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New", systemImage: "plus") {}
+            }
         }
     }
 

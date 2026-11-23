@@ -942,6 +942,16 @@
         }
       }
     },
+    "Choose an Agent or terminal on the left." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在左边选一个 Agent 或终端。"
+          }
+        }
+      }
+    },
     "Claude Code Is Waiting for a Choice" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2278,6 +2288,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有改动"
+          }
+        }
+      }
+    },
+    "No Conversation Open" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有打开的对话"
           }
         }
       }

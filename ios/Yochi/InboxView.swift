@@ -123,11 +123,10 @@ struct InboxList<Banner: View>: View {
     }
 
     private func agentLink(_ row: HomeRow, underNeedsYou: Bool = false) -> some View {
-        NavigationLink(value: Route.session(row.session)) {
+        SessionRowLink(session: row.session) {
             InboxRow(row: row, queued: queued(row.id), underNeedsYou: underNeedsYou)
         }
         .accessibilityIdentifier("session-\(row.id)")
-        .homeRow()
         .contextMenu {
             if row.unseen, let markRead {
                 Button("Mark as Read", systemImage: "checkmark.circle") { markRead(row) }
@@ -139,11 +138,10 @@ struct InboxList<Banner: View>: View {
     }
 
     private func terminalLink(_ row: HomeRow) -> some View {
-        NavigationLink(value: Route.session(row.session)) {
+        SessionRowLink(session: row.session) {
             TerminalSearchRow(row: row)
         }
         .accessibilityIdentifier("session-\(row.id)")
-        .homeRow()
     }
 }
 

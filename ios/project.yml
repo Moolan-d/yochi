@@ -55,7 +55,11 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        TARGETED_DEVICE_FAMILY: "1"
+        # iPhone and iPad; the iPad turns every way and shares its screen.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
+          UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown
+          UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
   YochiTests:
     type: bundle.unit-test
     platform: iOS

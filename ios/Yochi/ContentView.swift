@@ -179,37 +179,40 @@ struct ContentView: View {
     private func stack<Root: View>(
         _ path: Binding<[Route]>, title: LocalizedStringKey, config: GatewayConfig, @ViewBuilder root: () -> Root
     ) -> some View {
-        NavigationStack(path: path) {
+        HomeNavigation(path: path, title: title) {
             root()
-                .navigationTitle(title)
-                .navigationDestination(for: Route.self) { route in
-                    HomeRouteView(route: route, sessions: client.sessions, spaces: client.spaces, seen: seen.turns,
-                                  queued: { client.queuedMessage(session: $0) != nil },
-                                  newSession: client.phase == .connected ? { space in
-                                      newSession = NewSessionRequest(space: space)
-                                  } : nil) { session in
-                        ObserveView(session: session, config: config, client: client,
-                                    open: { switchPane(from: session, to: $0) },
-                                    showPanes: showPanes)
-                        // A pane switch swaps the path's last session in place, and the
-                        // stack keeps the destination at that spot, @State included; the
-                        // page would go on showing the old session's streams under the
-                        // new title. A new session is a new page.
-                        .id(session.id)
-                        // A conversation or terminal has the whole screen.
-                        .toolbar(.hidden, for: .tabBar)
-                    }
-                }
-                .toolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button("New", systemImage: "plus") { newSession = NewSessionRequest() }
-                            .keyboardShortcut("n", modifiers: .command)
-                            .disabled(client.phase != .connected)
-                        Button("Settings", systemImage: "gearshape") { showingSettings = true }
-                            .accessibilityIdentifier("home.settings")
-                    }
-                }
+        } routePage: { route in
+            HomeRouteView(route: route, sessions: client.sessions, spaces: client.spaces, seen: seen.turns,
+                          queued: { client.queuedMessage(session: $0) != nil },
+                          newSession: client.phase == .connected ? { space in
+                              newSession = NewSessionRequest(space: space)
+                          } : nil) { session in
+                sessionPage(session, config: config)
+                    // A pane switch swaps the path's last session in place, and the
+                    // stack keeps the destination at that spot, @State included; the
+                    // page would go on showing the old session's streams under the
+                    // new title. A new session is a new page.
+                    .id(session.id)
+                    // A conversation or terminal has the whole screen.
+                    .toolbar(.hidden, for: .tabBar)
+            }
+        } sessionPage: { session in
+            sessionPage(session, config: config)
+        } buttons: {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("New", systemImage: "plus") { newSession = NewSessionRequest() }
+                    .keyboardShortcut("n", modifiers: .command)
+                    .disabled(client.phase != .connected)
+                Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                    .accessibilityIdentifier("home.settings")
+            }
         }
+    }
+
+    private func sessionPage(_ session: Session, config: GatewayConfig) -> some View {
+        ObserveView(session: session, config: config, client: client,
+                    open: { switchPane(from: session, to: $0) },
+                    showPanes: showPanes)
     }
 
     private var currentPath: Binding<[Route]> { tab == .inbox ? $inboxPath : $spacesPath }

@@ -197,11 +197,10 @@ struct SpaceDetailView: View {
                 ForEach(entry.tabs) { tab in
                     Section {
                         ForEach(tab.rows) { row in
-                            NavigationLink(value: Route.session(row.session)) {
+                            SessionRowLink(session: row.session) {
                                 SpaceTerminalRow(row: row, queued: queued(row.id))
                             }
                             .accessibilityIdentifier("session-\(row.id)")
-                            .homeRow()
                         }
                     } header: {
                         HStack {
@@ -321,7 +320,7 @@ struct OtherTerminalsView: View {
         List {
             Section {
                 ForEach(rows) { row in
-                    NavigationLink(value: Route.session(row.session)) {
+                    SessionRowLink(session: row.session) {
                         if row.session.isAgent {
                             InboxRow(row: row, queued: queued(row.id))
                         } else {
@@ -329,7 +328,6 @@ struct OtherTerminalsView: View {
                         }
                     }
                     .accessibilityIdentifier("session-\(row.id)")
-                    .homeRow()
                 }
             }
         }
