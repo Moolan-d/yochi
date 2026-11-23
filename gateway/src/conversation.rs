@@ -9,7 +9,7 @@ mod pi;
 use crate::lang::Lang;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const MAX_TEXT: usize = 32 * 1024;
 const MAX_OUTPUT: usize = 2000;
@@ -253,10 +253,11 @@ impl Conversation {
     /// Applies transcript lines; returns the items added or changed, in order.
     pub fn apply<'a>(&mut self, lines: impl IntoIterator<Item = &'a str>) -> Vec<Item> {
         let mut touched: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         for line in lines {
             let Ok(record) = serde_json::from_str::<Value>(line) else { continue };
             for id in self.record(&record) {
-                if !touched.contains(&id) {
+                if seen.insert(id.clone()) {
                     touched.push(id);
                 }
             }
