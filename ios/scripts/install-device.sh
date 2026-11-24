@@ -33,6 +33,13 @@ fi
 scripts/fetch-libghostty.sh > /dev/null
 xcodegen generate -q
 
+# Renewing needs the Apple ID Xcode signs with. Without one, stop before
+# dropping a profile the build could still have used.
+if ! defaults read com.apple.dt.Xcode DVTDeveloperAccountManagerAppleIDLists 2>/dev/null | grep -q identifier; then
+    echo "Xcode isn't signed in to an Apple ID; sign in under Xcode > Settings > Apple Accounts" >&2
+    exit 1
+fi
+
 # Xcode keeps signing with a cached profile until it lapses, so building again
 # does not renew it. Drop Yochi's cached profiles that expire within three days
 # and -allowProvisioningUpdates fetches a fresh one.

@@ -99,7 +99,7 @@ Yochi 只连你自己的 Mac：不用注册账号，中间也没有我们的服�
 
    - `install-device.sh` 构建当前检出的代码，包括未提交的修改。Xcode 会一直沿用缓存里还没过期的描述文件，所以脚本先删掉 Yochi 那些三天内到期的缓存描述文件，让 Xcode 重新申请一份七天的。它把已装构建的到期时间记在 `~/Library/Caches/dev.yochi/installed-until`。
    - `renew-device.sh` 在离到期还有三天以上时什么都不做。否则它在 `~/Library/Caches/dev.yochi/worktree` 检出 `main` 的最新提交，复制 `ios/Local.xcconfig` 过去，在那里运行 `install-device.sh`，所以改到一半的代码不会装到手机上。
-   - `--enable` 会写入 LaunchAgent `~/Library/LaunchAgents/dev.yochi.renew.plist` 和它的启动文件 `~/Library/Application Support/dev.yochi/Yochi Renew`，系统设置 > 通用 > 登录项里显示的就是这个名字。它每天中午检查一次；中午 Mac 在睡眠的话，唤醒后补跑。某天没装上，第二天会再试。移动了代码目录后要重新运行一次 `--enable`。
+   - `--enable` 会写入 LaunchAgent `~/Library/LaunchAgents/dev.yochi.renew.plist` 和它的启动文件 `~/Library/Application Support/dev.yochi/Yochi Renew`，系统设置 > 通用 > 登录项里显示的就是这个名字。它每天中午检查一次；中午 Mac 在睡眠的话，唤醒后补跑。某天没装上，第二天会再试；开了推送通知（见下文）的话，手机会收到失败原因。Xcode 没登录 Apple 账号时，`install-device.sh` 会在动签名之前就停下。移动了代码目录后要重新运行一次 `--enable`。
    - 删掉 `~/Library/Caches/dev.yochi` 是安全的：下一次检查会重新安装并重建它。
 
    </details>

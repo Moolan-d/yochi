@@ -9,7 +9,9 @@
 #   scripts/renew-device.sh --disable
 #
 # The daily check logs to ~/Library/Logs/yochi-renew.log. A day it cannot
-# install (the Mac asleep, the iPhone away) is retried the next day.
+# install (the Mac asleep, the iPhone away, Xcode signed out) is retried the
+# next day, and the phone hears why through `yochi push send` (Bark) if
+# notifications are on.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -73,14 +75,36 @@ if [ -n "$until" ]; then
     fi
 fi
 
-worktree="$state/worktree"
-git -C "$repo" worktree prune
-if [ -d "$worktree" ]; then
-    git -C "$worktree" checkout --quiet --detach main
-else
-    git -C "$repo" worktree add --quiet --detach "$worktree" main
-fi
-cp "$repo/ios/Local.xcconfig" "$worktree/ios/"
+# Nobody reads the log until the app stops opening, so a failure goes to the
+# phone too: what went wrong and when the signing runs out.
+log=$(mktemp)
+finish() {
+    cat "$log"
+    if [ "$1" -ne 0 ]; then
+        reason=$(sed -n 's/.*error: //p' "$log" | sed 's/ (in target .*//' | head -1)
+        [ -n "$reason" ] || reason=$(grep -v '^\*\* ' "$log" | grep . | tail -1)
+        ends=""
+        [ -n "$until" ] && ends=$(date -r "$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$until" +%s)" '+%m-%d %H:%M')
+        case $(defaults read -g AppleLanguages 2>/dev/null | sed -n 2p) in
+        *zh*) title="Yochi 续签失败"; body="${ends:+签名到 $ends 为止。}$reason" ;;
+        *) title="Yochi renewal failed"; body="${ends:+Signed until $ends. }$reason" ;;
+        esac
+        yochi=$(command -v yochi || echo "$HOME/.cargo/bin/yochi")
+        "$yochi" push send --title "$title" "$body" || echo "$(stamp) the failure notification wasn't sent"
+    fi
+    rm -f "$log"
+}
+trap 'finish $?' EXIT
+{
+    worktree="$state/worktree"
+    git -C "$repo" worktree prune
+    if [ -d "$worktree" ]; then
+        git -C "$worktree" checkout --quiet --detach main
+    else
+        git -C "$repo" worktree add --quiet --detach "$worktree" main
+    fi
+    cp "$repo/ios/Local.xcconfig" "$worktree/ios/"
 
-echo "$(stamp) installing $(git -C "$worktree" log -1 --format='%h %s')"
-"$worktree/ios/scripts/install-device.sh"
+    echo "$(stamp) installing $(git -C "$worktree" log -1 --format='%h %s')"
+    "$worktree/ios/scripts/install-device.sh"
+} > "$log" 2>&1

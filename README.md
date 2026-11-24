@@ -100,7 +100,7 @@ There is no App Store build yet, so you build the app yourself. You need a Mac r
 
    - `install-device.sh` builds the current checkout, edits included. Xcode keeps signing with a cached profile until it lapses, so the script first deletes Yochi's cached profiles that expire within three days, and Xcode fetches a new seven-day one. It records the installed build's expiry in `~/Library/Caches/dev.yochi/installed-until`.
    - `renew-device.sh` does nothing while that expiry is more than three days off. Otherwise it checks out the latest commit on `main` in `~/Library/Caches/dev.yochi/worktree`, copies `ios/Local.xcconfig` in and runs `install-device.sh` there, so unfinished edits never reach the phone.
-   - `--enable` writes the LaunchAgent `~/Library/LaunchAgents/dev.yochi.renew.plist` and its launcher `~/Library/Application Support/dev.yochi/Yochi Renew`, the name System Settings > General > Login Items shows. It runs the check at noon each day, or on waking if the Mac slept through noon. A day it cannot install is retried the next day. Run `--enable` again after moving the checkout.
+   - `--enable` writes the LaunchAgent `~/Library/LaunchAgents/dev.yochi.renew.plist` and its launcher `~/Library/Application Support/dev.yochi/Yochi Renew`, the name System Settings > General > Login Items shows. It runs the check at noon each day, or on waking if the Mac slept through noon. A day it cannot install is retried the next day, and with notifications on (below) the phone hears why. `install-device.sh` stops before touching the signing if Xcode isn't signed in to an Apple ID. Run `--enable` again after moving the checkout.
    - Deleting `~/Library/Caches/dev.yochi` is safe: the next check reinstalls and sets it up again.
 
    </details>
