@@ -67,6 +67,7 @@ yochi [OPTIONS] [COMMAND]
 | `yochi relay off` | 停用 Relay |
 | `yochi push bark <KEY 或 URL> [--encrypt \| --key <KEY>] [--server <URL>]` | Agent 需要你或做完时经 Bark 推送到手机，并发一条测试通知。`--encrypt` 为 Bark 的推送加密生成新密钥 |
 | `yochi push test` | 发一条测试通知 |
+| `yochi push send "<内容>" [--title <标题>]` | 发一条自己的通知，供脚本使用；没发出去就报错 |
 | `yochi push status` | 通知发到哪里、是否加密 |
 | `yochi push off` | 停止发送通知 |
 | `yochi service install` | 安装或更新 LaunchAgent 并启动，沿用当前的设置 |

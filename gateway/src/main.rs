@@ -170,6 +170,14 @@ enum PushAction {
     },
     /// Send a test notification.
     Test,
+    /// Send a notification of your own, from a script: fails when it isn't sent.
+    Send {
+        /// What it says.
+        body: String,
+        /// Its title.
+        #[arg(long, default_value = "Yochi")]
+        title: String,
+    },
     /// Show where notifications go.
     Status,
     /// Stop sending notifications.
@@ -443,6 +451,10 @@ async fn push_command(store: &Store, action: PushAction) -> Result<()> {
             Some(config) => push_test(&config, lang).await,
             None => println!("Notifications are off; `yochi push bark <key>` turns them on."),
         },
+        PushAction::Send { body, title } => {
+            let config = notify::Config::load(dir)?.context("notifications are off; `yochi push bark <key>` turns them on")?;
+            notify::send(&config, notify::note(&title, &body), None).await?;
+        }
         PushAction::Status => match notify::Config::load(dir)? {
             Some(config) => {
                 println!("Bark       {}", config.server);

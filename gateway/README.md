@@ -67,6 +67,7 @@ yochi [OPTIONS] [COMMAND]
 | `yochi relay off` | Stop using the Relay |
 | `yochi push bark <KEY or URL> [--encrypt \| --key <KEY>] [--server <URL>]` | Notify the phone through Bark when an agent needs you or finishes, and send a test notification. `--encrypt` makes a new key for Bark's Push Encryption |
 | `yochi push test` | Send a test notification |
+| `yochi push send "<text>" [--title <title>]` | Send your own, from a script; fails if it isn't sent |
 | `yochi push status` | Where notifications go, and whether they're encrypted |
 | `yochi push off` | Stop sending notifications |
 | `yochi service install` | Install or update the LaunchAgent and start it, with the current settings |

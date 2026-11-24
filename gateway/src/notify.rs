@@ -418,6 +418,17 @@ pub fn test_message(lang: Lang) -> Value {
     })
 }
 
+/// A notification of the user's own, from `yochi push send`: a script on this
+/// Mac with something they must not miss, so it breaks through Focus.
+pub fn note(title: &str, body: &str) -> Value {
+    json!({
+        "title": title,
+        "body": body,
+        "group": "Yochi",
+        "level": "timeSensitive",
+    })
+}
+
 /// Watches the core's sessions and sends a notification when one needs you
 /// or finishes, if it still does after [`DELAY`] and no phone has Yochi open.
 /// `push.json` is read each time, so `yochi push` takes effect at once.
@@ -658,5 +669,15 @@ mod tests {
 
         let (_, sent) = tokio::join!(answer(&listener, 400), send(&config, test_message(Lang::English), None));
         assert_eq!(sent.unwrap_err().to_string(), "Bark answered 400: failed to get device token");
+    }
+
+    #[tokio::test]
+    async fn a_note_says_what_the_script_said_and_breaks_through_focus() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let config = Config::new("devicekey", Some(&format!("http://{}", listener.local_addr().unwrap())), None).unwrap();
+        let (request, sent) = tokio::join!(answer(&listener, 200), send(&config, note("Renewal failed", "Sign in to Xcode"), None));
+        sent.unwrap();
+        let body: Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body, json!({"title": "Renewal failed", "body": "Sign in to Xcode", "group": "Yochi", "level": "timeSensitive"}));
     }
 }
