@@ -76,26 +76,13 @@ if [ -n "$until" ]; then
 fi
 
 # Nobody reads the log until the app stops opening, so a failure goes to the
-# phone too: what went wrong and when the signing runs out.
+# phone too: what went wrong and when the signing runs out. The run goes to a
+# file first so the notification can quote it.
 log=$(mktemp)
-finish() {
-    cat "$log"
-    if [ "$1" -ne 0 ]; then
-        reason=$(sed -n 's/.*error: //p' "$log" | sed 's/ (in target .*//' | head -1)
-        [ -n "$reason" ] || reason=$(grep -v '^\*\* ' "$log" | grep . | tail -1)
-        ends=""
-        [ -n "$until" ] && ends=$(date -r "$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$until" +%s)" '+%m-%d %H:%M')
-        case $(defaults read -g AppleLanguages 2>/dev/null | sed -n 2p) in
-        *zh*) title="Yochi 续签失败"; body="${ends:+签名到 $ends 为止。}$reason" ;;
-        *) title="Yochi renewal failed"; body="${ends:+Signed until $ends. }$reason" ;;
-        esac
-        yochi=$(command -v yochi || echo "$HOME/.cargo/bin/yochi")
-        "$yochi" push send --title "$title" "$body" || echo "$(stamp) the failure notification wasn't sent"
-    fi
-    rm -f "$log"
-}
-trap 'finish $?' EXIT
-{
+trap 'rm -f "$log"' EXIT
+set +e
+(
+    set -e
     worktree="$state/worktree"
     git -C "$repo" worktree prune
     if [ -d "$worktree" ]; then
@@ -107,4 +94,23 @@ trap 'finish $?' EXIT
 
     echo "$(stamp) installing $(git -C "$worktree" log -1 --format='%h %s')"
     "$worktree/ios/scripts/install-device.sh"
-} > "$log" 2>&1
+) > "$log" 2>&1
+status=$?
+set -e
+cat "$log"
+[ "$status" -eq 0 ] && exit 0
+
+# devicectl's reason (the iPhone locked, away), else xcodebuild's first real
+# error, else the last line.
+reason=$(sed -n 's/^ *NSLocalizedFailureReason = //p' "$log" | head -1)
+[ -n "$reason" ] || reason=$(sed -n 's/.*error: //p' "$log" | grep -v 'produced no further output' | sed 's/ (in target .*//' | head -1)
+[ -n "$reason" ] || reason=$(grep -v '^\*\* ' "$log" | grep . | tail -1)
+ends=""
+[ -n "$until" ] && ends=$(date -r "$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$until" +%s)" '+%m-%d %H:%M')
+case $(defaults read -g AppleLanguages 2>/dev/null | sed -n 2p) in
+*zh*) title="Yochi 续签失败"; body="${ends:+签名到 $ends 为止。}$reason" ;;
+*) title="Yochi renewal failed"; body="${ends:+Signed until $ends. }$reason" ;;
+esac
+yochi=$(command -v yochi || echo "$HOME/.cargo/bin/yochi")
+"$yochi" push send --title "$title" "$body" || echo "$(stamp) the failure notification wasn't sent"
+exit "$status"
