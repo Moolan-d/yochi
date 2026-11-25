@@ -9,7 +9,7 @@ mod pi;
 use crate::lang::Lang;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const MAX_TEXT: usize = 32 * 1024;
 const MAX_OUTPUT: usize = 2000;
@@ -19,6 +19,12 @@ const MAX_PATCH_LINES: usize = 200;
 const MAX_PATCH_BYTES: usize = 16 * 1024;
 /// Items a phone gets when it starts following.
 pub const FIRST_ITEMS: usize = 300;
+/// Items kept in memory: past this many, the oldest go, down to
+/// `TRIM_TO_ITEMS`, so a day-long session doesn't grow the Gateway without
+/// bound. Comfortably more than `FIRST_ITEMS`, so a late tool result still
+/// finds its call.
+const MAX_ITEMS: usize = 1000;
+const TRIM_TO_ITEMS: usize = 700;
 
 // Tool items carry many optional fields, so this enum has one large variant.
 // Boxing it would only add an allocation to every clone of an item.
@@ -247,15 +253,27 @@ impl Conversation {
     /// Applies transcript lines; returns the items added or changed, in order.
     pub fn apply<'a>(&mut self, lines: impl IntoIterator<Item = &'a str>) -> Vec<Item> {
         let mut touched: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         for line in lines {
             let Ok(record) = serde_json::from_str::<Value>(line) else { continue };
             for id in self.record(&record) {
-                if !touched.contains(&id) {
+                if seen.insert(id.clone()) {
                     touched.push(id);
                 }
             }
         }
+        self.trim();
         touched.iter().filter_map(|id| self.index.get(id).map(|&i| self.items[i].clone())).collect()
+    }
+
+    /// Drops the oldest items once there are more than `MAX_ITEMS`. Runs
+    /// after a batch, so positions in `index` hold while records apply.
+    fn trim(&mut self) {
+        if self.items.len() <= MAX_ITEMS {
+            return;
+        }
+        self.items.drain(..self.items.len() - TRIM_TO_ITEMS);
+        self.index = self.items.iter().enumerate().map(|(i, item)| (item.id().to_owned(), i)).collect();
     }
 
     /// The Agent's newest reply in the latest turn: what it said last,
@@ -1035,6 +1053,26 @@ mod tests {
         let json = serde_json::to_value(&items[0]).unwrap();
         assert_eq!(json["kind"], "task");
         assert_eq!(json["state"], "done");
+    }
+
+    #[test]
+    fn a_long_session_keeps_only_its_newest_items() {
+        let mut conversation = Conversation::default();
+        let line = |n: usize| format!(r#"{{"type":"user","uuid":"u{n}","message":{{"role":"user","content":"m{n}"}}}}"#);
+        let lines: Vec<String> = (0..MAX_ITEMS).map(line).collect();
+        conversation.apply(lines.iter().map(String::as_str));
+        assert_eq!(conversation.items().len(), MAX_ITEMS, "up to the cap, nothing goes");
+
+        let changed = conversation.apply([line(MAX_ITEMS)].iter().map(String::as_str));
+        assert_eq!(changed, [Item::User { id: format!("u{MAX_ITEMS}"), text: format!("m{MAX_ITEMS}") }]);
+        let items = conversation.items();
+        assert_eq!(items.len(), TRIM_TO_ITEMS);
+        assert_eq!(items[0].id(), format!("u{}", MAX_ITEMS + 1 - TRIM_TO_ITEMS), "the oldest went");
+        // Ids still point at their items: a repeat updates in place.
+        let again = format!(r#"{{"type":"user","uuid":"u{MAX_ITEMS}","message":{{"role":"user","content":"edited"}}}}"#);
+        conversation.apply([again.as_str()]);
+        assert_eq!(conversation.items().len(), TRIM_TO_ITEMS);
+        assert_eq!(conversation.items().last(), Some(&Item::User { id: format!("u{MAX_ITEMS}"), text: "edited".into() }));
     }
 
     #[test]

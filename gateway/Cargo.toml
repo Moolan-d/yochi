@@ -28,3 +28,11 @@ cbc = "0.1"
 
 [dev-dependencies]
 curve25519-dalek = "4.1.3"
+
+# The released binary is downloaded by scripts/install.sh: this takes it
+# from about 10 MB to about 6.3 MB for half a minute more of building.
+# Without symbols a panic's backtrace has no function names.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
